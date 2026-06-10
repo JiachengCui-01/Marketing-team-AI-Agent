@@ -22,9 +22,14 @@ def _cors_origins() -> list[str]:
     return ["http://localhost:3000", "http://127.0.0.1:3000"]
 
 
+def _cors_origin_regex() -> str | None:
+    return os.environ.get("CORS_ORIGIN_REGEX", r"https://.*\.vercel\.app")
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
+    allow_origin_regex=_cors_origin_regex(),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
