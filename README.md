@@ -9,54 +9,6 @@ The orchestrator routes requests to three specialists:
 2. Campaign analytics: CSV analysis with KPI findings and recommendations
 3. Market research: current web research with cited sources
 
-## Quickstart
-
-```bash
-# Python backend and CLI
-pip install -e .
-cp .env.example .env
-# Edit .env and set ANTHROPIC_API_KEY
-
-# CLI examples
-marketing-agent run "Write 3 LinkedIn posts about AI in martech, tone=confident"
-marketing-agent run "Analyze last week's campaign performance" --csv data/sample_campaign.csv
-marketing-agent chat
-```
-
-```bash
-# API server
-uvicorn server.main:app --reload
-```
-
-```bash
-# Web app
-cd web
-npm install
-npm run dev
-```
-
-The web app defaults to `http://127.0.0.1:8000` for the API. Override it with
-`NEXT_PUBLIC_API_BASE` if your API runs elsewhere.
-
-## Checks
-
-```bash
-# Python
-python -m compileall src server tests
-python -m unittest discover -s tests
-
-# Web
-cd web
-npm run typecheck
-npm run lint
-```
-
-If a global `npm` shim is broken on Windows, call Node's bundled npm directly:
-
-```powershell
-& 'C:\Program Files\nodejs\npm.cmd' run lint
-```
-
 ## API Notes
 
 - `/api/upload` accepts CSV files only.
