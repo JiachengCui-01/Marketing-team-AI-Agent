@@ -95,6 +95,14 @@ def get_session_messages(session_id: str) -> dict:
     if db.get_session(session_id) is None:
         raise HTTPException(404, "Session not found.")
     rows = db.list_messages(session_id)
+    artifacts = [
+        {
+            "artifact_id": rec["id"],
+            "filename": rec["filename"],
+            "mime": rec["mime"],
+        }
+        for rec in db.list_artifacts(session_id)
+    ]
     # For the UI, project assistant content (list of blocks) to a plain text string.
     out = []
     for row in rows:
@@ -120,6 +128,11 @@ def get_session_messages(session_id: str) -> dict:
             pass
         if role in ("user", "assistant") and isinstance(content, str):
             out.append({"role": role, "content": content})
+    if artifacts:
+        for message in reversed(out):
+            if message["role"] == "assistant":
+                message["artifacts"] = artifacts
+                break
     return {"session_id": session_id, "messages": out}
 
 

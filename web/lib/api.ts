@@ -31,6 +31,13 @@ export type GroupRecord = {
 export type StoredMessage = {
   role: "user" | "assistant";
   content: string;
+  artifacts?: MessageArtifact[];
+};
+
+export type MessageArtifact = {
+  artifact_id: string;
+  filename: string;
+  mime: string;
 };
 
 // ---------- sessions ----------

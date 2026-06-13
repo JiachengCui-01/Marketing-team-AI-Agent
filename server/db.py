@@ -245,6 +245,17 @@ def get_artifact(artifact_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def list_artifacts(session_id: str) -> list[dict]:
+    _ensure()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, session_id, kind, filename, mime, path, created_at "
+            "FROM artifacts WHERE session_id = ? ORDER BY created_at ASC",
+            (session_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def reset_for_tests() -> None:
     global _INITIALIZED
     with _LOCK:

@@ -122,6 +122,7 @@ export default function HomePage() {
           id: newId(),
           role: m.role,
           content: m.content,
+          artifacts: m.artifacts,
         })),
       );
     } catch {

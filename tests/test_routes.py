@@ -93,6 +93,38 @@ class RouteTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 404)
 
+    def test_session_messages_include_artifacts(self) -> None:
+        created = self.client.post("/api/sessions")
+        session_id = created.json()["session_id"]
+        db_path = Path(self.upload_tmp.name) / "artifact.pdf"
+        db_path.write_bytes(b"%PDF-1.4")
+        from server import db
+
+        db.add_message(session_id, "user", "make a pdf")
+        db.add_message(session_id, "assistant", "PDF generated.")
+        rec = db.add_artifact(
+            session_id=session_id,
+            kind="pdf",
+            filename="Campaign.pdf",
+            mime="application/pdf",
+            path=str(db_path),
+        )
+
+        response = self.client.get(f"/api/sessions/{session_id}/messages")
+        self.assertEqual(response.status_code, 200)
+        messages = response.json()["messages"]
+        self.assertEqual(messages[-1]["role"], "assistant")
+        self.assertEqual(
+            messages[-1]["artifacts"],
+            [
+                {
+                    "artifact_id": rec["id"],
+                    "filename": "Campaign.pdf",
+                    "mime": "application/pdf",
+                }
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
