@@ -23,6 +23,8 @@ import {
 import { openEventStream } from "@/lib/sse";
 
 const ACTIVE_KEY = "marketing-agent-active-session";
+const LEFT_MIN_WIDTH = 256;
+const RIGHT_MIN_WIDTH = 384;
 
 function newId() {
   return Math.random().toString(36).slice(2, 10);
@@ -38,7 +40,59 @@ export default function HomePage() {
   const [attached, setAttached] = useState<UploadResponse[]>([]);
   const [preview, setPreview] = useState<PreviewItem | null>(null);
   const [collapsed, setCollapsed] = useState(false);
+  const [previewCollapsed, setPreviewCollapsed] = useState(false);
+  const [leftWidth, setLeftWidth] = useState(LEFT_MIN_WIDTH);
+  const [rightWidth, setRightWidth] = useState(RIGHT_MIN_WIDTH);
   const closeRef = useRef<(() => void) | null>(null);
+
+  const maxSidebarWidth = useCallback((min: number) => {
+    if (typeof window === "undefined") return min;
+    return Math.max(min, Math.floor(window.innerWidth / 4));
+  }, []);
+
+  const beginResize = useCallback(
+    (side: "left" | "right", startX: number) => {
+      const startWidth = side === "left" ? leftWidth : rightWidth;
+      const minWidth = side === "left" ? LEFT_MIN_WIDTH : RIGHT_MIN_WIDTH;
+
+      function onMove(e: MouseEvent) {
+        const delta = e.clientX - startX;
+        const next =
+          side === "left" ? startWidth + delta : startWidth - delta;
+        const maxWidth = maxSidebarWidth(minWidth);
+        const width = Math.min(maxWidth, Math.max(minWidth, next));
+        if (side === "left") setLeftWidth(width);
+        else setRightWidth(width);
+      }
+
+      function onUp() {
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      }
+
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [leftWidth, rightWidth, maxSidebarWidth],
+  );
+
+  useEffect(() => {
+    function clampWidths() {
+      setLeftWidth((w) =>
+        Math.min(maxSidebarWidth(LEFT_MIN_WIDTH), Math.max(LEFT_MIN_WIDTH, w)),
+      );
+      setRightWidth((w) =>
+        Math.min(maxSidebarWidth(RIGHT_MIN_WIDTH), Math.max(RIGHT_MIN_WIDTH, w)),
+      );
+    }
+    window.addEventListener("resize", clampWidths);
+    clampWidths();
+    return () => window.removeEventListener("resize", clampWidths);
+  }, [maxSidebarWidth]);
 
   // Restore active session id.
   useEffect(() => {
@@ -324,6 +378,7 @@ export default function HomePage() {
           groups={store.groups}
           activeId={activeId}
           collapsed={collapsed}
+          width={leftWidth}
           onToggle={() => setCollapsed((c) => !c)}
           onSelect={loadSession}
           onNewChat={handleNewChat}
@@ -334,6 +389,12 @@ export default function HomePage() {
           onRenameGroup={store.renameGroup}
           onDeleteGroup={handleDeleteGroup}
         />
+        {!collapsed ? (
+          <ResizeHandle
+            side="left"
+            onMouseDown={(e) => beginResize("left", e.clientX)}
+          />
+        ) : null}
         <ChatPanel
           messages={messages}
           input={input}
@@ -348,13 +409,41 @@ export default function HomePage() {
           onPreviewUpload={onPreviewUpload}
           onPreviewArtifact={onPreviewArtifact}
         />
+        {!previewCollapsed ? (
+          <ResizeHandle
+            side="right"
+            onMouseDown={(e) => beginResize("right", e.clientX)}
+          />
+        ) : null}
         <PreviewPanel
           events={trace}
           totals={totals}
           preview={preview}
+          collapsed={previewCollapsed}
+          width={rightWidth}
+          onToggle={() => setPreviewCollapsed((c) => !c)}
           defaultTab={preview ? "preview" : "trace"}
         />
       </div>
     </main>
+  );
+}
+
+function ResizeHandle({
+  side,
+  onMouseDown,
+}: {
+  side: "left" | "right";
+  onMouseDown: (e: React.MouseEvent<HTMLButtonElement>) => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={`Resize ${side} panel`}
+      onMouseDown={onMouseDown}
+      className={`hidden ${
+        side === "left" ? "md:block" : "lg:block"
+      } w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-accent/30 focus:bg-accent/30 focus:outline-none transition`}
+    />
   );
 }

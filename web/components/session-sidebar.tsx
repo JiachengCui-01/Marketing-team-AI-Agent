@@ -26,6 +26,7 @@ export function SessionSidebar({
   groups,
   activeId,
   collapsed,
+  width,
   onToggle,
   onSelect,
   onNewChat,
@@ -40,6 +41,7 @@ export function SessionSidebar({
   groups: GroupRecord[];
   activeId: string | null;
   collapsed: boolean;
+  width?: number;
   onToggle: () => void;
   onSelect: (id: string) => void;
   onNewChat: () => void;
@@ -180,7 +182,10 @@ export function SessionSidebar({
   }
 
   return (
-    <aside className="hidden md:flex flex-col w-64 shrink-0 border-r border-border bg-bg-subtle/40">
+    <aside
+      className="hidden md:flex flex-col shrink-0 border-r border-border bg-bg-subtle/40"
+      style={{ width: width ?? 256 }}
+    >
       <div className="p-2 border-b border-border flex items-center gap-1">
         <button
           onClick={onNewChat}

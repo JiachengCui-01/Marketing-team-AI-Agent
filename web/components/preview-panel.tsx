@@ -16,6 +16,8 @@ import {
   FileSpreadsheet,
   File as FileIcon,
   Eye,
+  PanelRight,
+  PanelRightClose,
   type LucideIcon,
 } from "lucide-react";
 import type { StreamEvent } from "@/lib/sse";
@@ -63,11 +65,17 @@ export function PreviewPanel({
   totals,
   preview,
   defaultTab,
+  collapsed,
+  width,
+  onToggle,
 }: {
   events: TraceEvent[];
   totals: { input: number; output: number };
   preview: PreviewItem | null;
   defaultTab?: "preview" | "trace";
+  collapsed: boolean;
+  width?: number;
+  onToggle: () => void;
 }) {
   const [tab, setTab] = useState<"preview" | "trace">(
     defaultTab ?? (preview ? "preview" : "trace"),
@@ -85,8 +93,26 @@ export function PreviewPanel({
     lastIdRef.current = id;
   }, [preview]);
 
+  if (collapsed) {
+    return (
+      <aside className="hidden lg:flex flex-col items-center w-12 shrink-0 border-l border-border bg-bg-subtle/40 py-2">
+        <button
+          onClick={onToggle}
+          className="w-9 h-9 inline-flex items-center justify-center rounded-md hover:bg-bg-elevated text-fg-muted"
+          aria-label="Expand preview panel"
+          title="Expand preview panel"
+        >
+          <PanelRight size={16} />
+        </button>
+      </aside>
+    );
+  }
+
   return (
-    <aside className="hidden lg:flex flex-col w-96 shrink-0 border-l border-border bg-bg-subtle/40">
+    <aside
+      className="hidden lg:flex flex-col shrink-0 border-l border-border bg-bg-subtle/40"
+      style={{ width: width ?? 384 }}
+    >
       <header className="px-2 py-2 border-b border-border flex items-center gap-1">
         <TabButton
           active={tab === "preview"}
@@ -103,6 +129,14 @@ export function PreviewPanel({
         <span className="ml-auto text-[10px] text-fg-subtle pr-2">
           {tab === "trace" ? "live" : preview ? preview.filename : "no preview"}
         </span>
+        <button
+          onClick={onToggle}
+          className="w-8 h-8 inline-flex items-center justify-center rounded-md hover:bg-bg-elevated text-fg-muted"
+          aria-label="Collapse preview panel"
+          title="Collapse preview panel"
+        >
+          <PanelRightClose size={14} />
+        </button>
       </header>
 
       {tab === "preview" ? (
