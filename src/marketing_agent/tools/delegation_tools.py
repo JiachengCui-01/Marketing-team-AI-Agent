@@ -18,7 +18,7 @@ DELEGATION_TOOLS = [
                 },
                 "format": {
                     "type": "string",
-                    "enum": ["social_post", "blog", "email", "ad_copy"],
+                    "enum": ["social_post", "blog", "email", "ad_copy", "pdf"],
                     "description": "Channel / format of the copy.",
                 },
                 "tone": {

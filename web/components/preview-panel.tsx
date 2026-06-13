@@ -320,6 +320,17 @@ function TraceBody({
 function TraceItem({ event }: { event: TraceEvent }) {
   const { event: type, payload } = event;
 
+  if (type === "started") {
+    return (
+      <div className="rounded-lg border border-border/60 bg-bg-elevated/60 px-3 py-2 animate-fade-in">
+        <div className="flex items-center gap-2 text-[11px] text-fg-muted">
+          <Cpu size={12} />
+          <span>{String(payload.message ?? "Connected.")}</span>
+        </div>
+      </div>
+    );
+  }
+
   if (type === "delegating") {
     const name = payload.specialist as string;
     const Icon = specialistIcon(name);

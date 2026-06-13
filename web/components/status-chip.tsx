@@ -30,6 +30,13 @@ export function deriveStatus(events: TraceEvent[]): StatusInfo {
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i];
     const t = e.event;
+    if (t === "started") {
+      return {
+        label: "Connected. Starting work...",
+        icon: Loader2,
+        tone: "working",
+      };
+    }
     if (t === "delegating") {
       const name = e.payload.specialist as string;
       const meta = SPECIALIST_LABEL[name];

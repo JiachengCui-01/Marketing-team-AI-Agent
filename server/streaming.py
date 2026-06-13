@@ -44,6 +44,7 @@ async def orchestrator_event_stream(
         enqueue({"event": event, "payload": payload})
 
     on_event = on_event_wrapper(base_emit) if on_event_wrapper else base_emit
+    on_event("started", {"message": "Connected to the marketing agent."})
 
     async def worker() -> None:
         try:
