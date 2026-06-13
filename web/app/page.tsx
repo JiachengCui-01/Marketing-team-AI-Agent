@@ -15,6 +15,7 @@ import type { ChatMessage, MessageArtifact } from "@/components/message";
 import { deriveStatus } from "@/components/status-chip";
 import { useSessionsStore } from "@/lib/sessions-store";
 import {
+  API_BASE,
   getSessionMessages,
   streamUrl,
   type UploadResponse,
@@ -232,7 +233,7 @@ export default function HomePage() {
                   status: undefined,
                   content:
                     msg.content ||
-                    "Connection error. Is the API server running on :8000?",
+                    `Connection error. Could not keep a live stream open to ${API_BASE}. Please refresh and try again.`,
                 }
               : msg,
           ),
