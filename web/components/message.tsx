@@ -2,18 +2,38 @@
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { User, Sparkles } from "lucide-react";
+import { User, Sparkles, FileText, Download } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { StatusChip, type StatusInfo } from "./status-chip";
+import { artifactDownloadUrl } from "@/lib/api";
+
+export type MessageArtifact = {
+  artifact_id: string;
+  filename: string;
+  mime: string;
+};
 
 export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
   pending?: boolean;
+  status?: StatusInfo;
+  artifacts?: MessageArtifact[];
 };
 
-export function MessageBubble({ message }: { message: ChatMessage }) {
+export function MessageBubble({
+  message,
+  onPreviewArtifact,
+}: {
+  message: ChatMessage;
+  onPreviewArtifact?: (a: MessageArtifact) => void;
+}) {
   const isUser = message.role === "user";
+  const showStatus =
+    message.pending && !!message.status && message.content.length === 0;
+  const showTypingDots =
+    message.pending && !message.status && message.content.length === 0;
 
   return (
     <div
@@ -40,18 +60,62 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
             : "bg-bg-elevated text-fg border border-border rounded-tl-sm",
         )}
       >
-        {message.pending ? (
+        {showStatus ? (
+          <StatusChip status={message.status!} />
+        ) : showTypingDots ? (
           <TypingDots />
         ) : isUser ? (
           <span className="whitespace-pre-wrap">{message.content}</span>
         ) : (
-          <div className="prose-chat">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {message.content}
-            </ReactMarkdown>
-          </div>
+          <>
+            <div className="prose-chat">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {message.content + (message.pending ? "▍" : "")}
+              </ReactMarkdown>
+            </div>
+            {message.artifacts && message.artifacts.length > 0 ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {message.artifacts.map((a) => (
+                  <ArtifactChip
+                    key={a.artifact_id}
+                    artifact={a}
+                    onPreview={onPreviewArtifact}
+                  />
+                ))}
+              </div>
+            ) : null}
+          </>
         )}
       </div>
+    </div>
+  );
+}
+
+function ArtifactChip({
+  artifact,
+  onPreview,
+}: {
+  artifact: MessageArtifact;
+  onPreview?: (a: MessageArtifact) => void;
+}) {
+  return (
+    <div className="inline-flex items-center gap-2 rounded-lg border border-border bg-bg-subtle/60 px-2.5 py-1.5 text-xs">
+      <FileText size={13} className="text-accent shrink-0" />
+      <button
+        onClick={() => onPreview?.(artifact)}
+        className="font-medium hover:underline truncate max-w-[16ch]"
+        title={artifact.filename}
+      >
+        {artifact.filename}
+      </button>
+      <a
+        href={artifactDownloadUrl(artifact.artifact_id)}
+        download={artifact.filename}
+        className="inline-flex items-center gap-1 text-fg-muted hover:text-accent transition"
+        title="Download"
+      >
+        <Download size={12} />
+      </a>
     </div>
   );
 }

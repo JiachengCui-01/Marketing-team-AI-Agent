@@ -1,7 +1,6 @@
-"""CSV upload handling.
+"""File upload handling — CSV, PDF, Word, and images.
 
-Files are saved to tmp/uploads/ keyed by a UUID file_id. The route layer owns
-HTTP status codes; this module keeps validation and filesystem behavior stable.
+Files are saved to tmp/uploads/ keyed by a UUID file_id.
 """
 from __future__ import annotations
 
@@ -12,57 +11,60 @@ from pathlib import Path
 from marketing_agent.config import PROJECT_ROOT
 
 UPLOAD_DIR = PROJECT_ROOT / "tmp" / "uploads"
-MAX_UPLOAD_BYTES = 2 * 1024 * 1024
-ALLOWED_CONTENT_TYPES = {
-    "text/csv",
-    "application/csv",
-    "application/vnd.ms-excel",
-    "text/plain",
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+
+ALLOWED_EXT = {".csv", ".pdf", ".docx", ".png", ".jpg", ".jpeg"}
+
+EXT_MIME = {
+    ".csv": "text/csv",
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
 }
 
 _SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 class UploadValidationError(ValueError):
-    """Raised when an uploaded file fails CSV safety validation."""
+    """Raised when an uploaded file fails safety validation."""
 
 
 def _ensure_dir() -> None:
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def sanitize_filename(original_name: str) -> str:
-    """Return a filesystem-safe CSV filename stripped of path components."""
+def sanitize_filename(original_name: str) -> tuple[str, str]:
+    """Return (safe_name, ext_lower). Raises if extension not allowed."""
     name = Path(original_name).name.strip()
     if not name:
         raise UploadValidationError("Missing filename.")
-    if Path(name).suffix.lower() != ".csv":
-        raise UploadValidationError("Only .csv files are supported.")
-
-    safe_name = _SAFE_NAME_RE.sub("_", name).strip("._")
-    if not safe_name or safe_name.lower() == "csv":
+    ext = Path(name).suffix.lower()
+    if ext not in ALLOWED_EXT:
+        raise UploadValidationError(
+            f"Unsupported file type '{ext}'. Allowed: {', '.join(sorted(ALLOWED_EXT))}"
+        )
+    safe_stem = _SAFE_NAME_RE.sub("_", Path(name).stem).strip("._")
+    if not safe_stem:
         raise UploadValidationError("Invalid filename.")
-    if not safe_name.lower().endswith(".csv"):
-        safe_name = f"{safe_name}.csv"
-    return safe_name[:120]
+    safe_name = f"{safe_stem}{ext}"[:160]
+    return safe_name, ext
 
 
-def validate(content: bytes, original_name: str, content_type: str | None = None) -> str:
-    """Validate upload metadata/content and return the sanitized filename."""
+def validate(content: bytes, original_name: str) -> tuple[str, str]:
     if not content:
         raise UploadValidationError("Empty file.")
     if len(content) > MAX_UPLOAD_BYTES:
         raise UploadValidationError(
-            f"CSV exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB upload limit."
+            f"File exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB upload limit."
         )
-    if content_type and content_type.lower() not in ALLOWED_CONTENT_TYPES:
-        raise UploadValidationError("Only CSV uploads are supported.")
     return sanitize_filename(original_name)
 
 
 def save(content: bytes, original_name: str, content_type: str | None = None) -> dict:
     _ensure_dir()
-    safe_name = validate(content, original_name, content_type)
+    safe_name, ext = validate(content, original_name)
     file_id = uuid.uuid4().hex
     target = UPLOAD_DIR / f"{file_id}_{safe_name}"
     target.write_bytes(content)
@@ -70,6 +72,8 @@ def save(content: bytes, original_name: str, content_type: str | None = None) ->
         "file_id": file_id,
         "original_name": safe_name,
         "size": len(content),
+        "mime": EXT_MIME.get(ext, content_type or "application/octet-stream"),
+        "ext": ext,
     }
 
 

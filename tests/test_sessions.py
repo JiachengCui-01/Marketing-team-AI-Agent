@@ -2,37 +2,48 @@ from __future__ import annotations
 
 import unittest
 
-from server import sessions
+from server import db, sessions
 
 
 class SessionStoreTests(unittest.TestCase):
     def setUp(self) -> None:
         sessions.reset_for_tests()
-        self.old_ttl = sessions.SESSION_TTL_SECONDS
-        self.old_max = sessions.MAX_SESSIONS
 
     def tearDown(self) -> None:
-        sessions.SESSION_TTL_SECONDS = self.old_ttl
-        sessions.MAX_SESSIONS = self.old_max
         sessions.reset_for_tests()
 
-    def test_ttl_prunes_expired_session(self) -> None:
+    def test_create_get_delete(self) -> None:
         session_id = sessions.create()
         self.assertTrue(sessions.exists(session_id))
+        self.assertIsNotNone(sessions.get(session_id))
 
-        sessions.SESSION_TTL_SECONDS = -1
-        self.assertIsNone(sessions.get(session_id))
+        self.assertTrue(sessions.delete(session_id))
         self.assertFalse(sessions.exists(session_id))
+        self.assertIsNone(sessions.get(session_id))
 
-    def test_capacity_prunes_oldest_session(self) -> None:
-        sessions.MAX_SESSIONS = 2
-        first = sessions.create()
-        second = sessions.create()
-        third = sessions.create()
+    def test_persistence_rehydrates_from_db(self) -> None:
+        session_id = sessions.create()
+        conv = sessions.get(session_id)
+        assert conv is not None
+        # Persist a couple of turns directly via the db layer.
+        db.add_message(session_id, "user", "hello")
+        db.add_message(session_id, "assistant", "hi there")
 
-        self.assertFalse(sessions.exists(first))
-        self.assertTrue(sessions.exists(second))
-        self.assertTrue(sessions.exists(third))
+        # Evict from the in-memory cache, then re-fetch — should rehydrate from SQLite.
+        sessions._CACHE.clear()
+        rehydrated = sessions.get(session_id)
+        assert rehydrated is not None
+        self.assertEqual(len(rehydrated.messages), 2)
+        self.assertEqual(rehydrated.messages[0]["role"], "user")
+        self.assertEqual(rehydrated.messages[0]["content"], "hello")
+
+    def test_group_delete_cascades_sessions(self) -> None:
+        group = db.create_group("Campaign A")
+        sid = sessions.create(group_id=group["id"])
+        self.assertTrue(sessions.exists(sid))
+
+        db.delete_group(group["id"])
+        self.assertIsNone(db.get_session(sid))
 
 
 if __name__ == "__main__":

@@ -59,13 +59,21 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"], "Empty file.")
 
-    def test_upload_rejects_non_csv_extension(self) -> None:
+    def test_upload_rejects_unsupported_extension(self) -> None:
         response = self.client.post(
             "/api/upload",
-            files={"file": ("campaign.txt", b"a,b\n1,2\n", "text/plain")},
+            files={"file": ("notes.txt", b"a,b\n1,2\n", "text/plain")},
         )
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["detail"], "Only .csv files are supported.")
+        self.assertIn("Unsupported file type", response.json()["detail"])
+
+    def test_upload_accepts_pdf(self) -> None:
+        response = self.client.post(
+            "/api/upload",
+            files={"file": ("brief.pdf", b"%PDF-1.4 minimal", "application/pdf")},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["mime"], "application/pdf")
 
     def test_upload_rejects_oversized_csv(self) -> None:
         oversized = b"a" * (uploads.MAX_UPLOAD_BYTES + 1)

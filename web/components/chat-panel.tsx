@@ -2,7 +2,7 @@
 
 import { Send, Loader2 } from "lucide-react";
 import { useEffect, useRef } from "react";
-import { MessageBubble, type ChatMessage } from "./message";
+import { MessageBubble, type ChatMessage, type MessageArtifact } from "./message";
 import { FileUploader } from "./file-uploader";
 import { ExamplePrompts } from "./example-prompts";
 import type { UploadResponse } from "@/lib/api";
@@ -14,17 +14,21 @@ export function ChatPanel({
   onSend,
   busy,
   attached,
-  onAttached,
-  onCleared,
+  onAttach,
+  onRemoveAttached,
+  onPreviewUpload,
+  onPreviewArtifact,
 }: {
   messages: ChatMessage[];
   input: string;
   setInput: (v: string) => void;
   onSend: () => void;
   busy: boolean;
-  attached: UploadResponse | null;
-  onAttached: (f: UploadResponse) => void;
-  onCleared: () => void;
+  attached: UploadResponse[];
+  onAttach: (f: UploadResponse) => void;
+  onRemoveAttached: (fileId: string) => void;
+  onPreviewUpload: (f: UploadResponse) => void;
+  onPreviewArtifact: (a: MessageArtifact) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -60,7 +64,11 @@ export function ChatPanel({
         ) : (
           <div className="max-w-3xl mx-auto px-4 py-6 space-y-5">
             {messages.map((m) => (
-              <MessageBubble key={m.id} message={m} />
+              <MessageBubble
+                key={m.id}
+                message={m}
+                onPreviewArtifact={onPreviewArtifact}
+              />
             ))}
           </div>
         )}
@@ -68,13 +76,12 @@ export function ChatPanel({
 
       <div className="border-t border-border bg-bg-elevated/60 backdrop-blur">
         <div className="max-w-3xl mx-auto px-4 py-3 space-y-2">
-          <div className="flex items-center gap-3">
-            <FileUploader
-              attached={attached}
-              onAttached={onAttached}
-              onCleared={onCleared}
-            />
-          </div>
+          <FileUploader
+            attached={attached}
+            onAttach={onAttach}
+            onRemove={onRemoveAttached}
+            onPreview={onPreviewUpload}
+          />
           <div className="flex items-end gap-2 rounded-xl border border-border bg-bg-elevated focus-within:border-accent transition shadow-sm">
             <textarea
               value={input}

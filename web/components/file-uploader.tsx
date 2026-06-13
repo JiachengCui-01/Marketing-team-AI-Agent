@@ -1,28 +1,49 @@
 "use client";
 
-import { Paperclip, X, FileSpreadsheet, Loader2 } from "lucide-react";
+import {
+  Paperclip,
+  X,
+  FileSpreadsheet,
+  FileText,
+  FileImage,
+  File as FileIcon,
+  Loader2,
+} from "lucide-react";
 import { useRef, useState } from "react";
-import { uploadCsv, type UploadResponse } from "@/lib/api";
+import { uploadFile, type UploadResponse } from "@/lib/api";
+
+const ACCEPT = ".csv,.pdf,.docx,image/png,image/jpeg";
+
+function iconFor(mime: string) {
+  if (mime.startsWith("image/")) return FileImage;
+  if (mime === "application/pdf") return FileText;
+  if (mime.includes("csv") || mime.includes("excel")) return FileSpreadsheet;
+  return FileIcon;
+}
 
 export function FileUploader({
   attached,
-  onAttached,
-  onCleared,
+  onAttach,
+  onRemove,
+  onPreview,
 }: {
-  attached: UploadResponse | null;
-  onAttached: (f: UploadResponse) => void;
-  onCleared: () => void;
+  attached: UploadResponse[];
+  onAttach: (f: UploadResponse) => void;
+  onRemove: (fileId: string) => void;
+  onPreview?: (f: UploadResponse) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleFile(file: File) {
+  async function handleFiles(files: FileList) {
     setError(null);
     setBusy(true);
     try {
-      const resp = await uploadCsv(file);
-      onAttached(resp);
+      for (const file of Array.from(files)) {
+        const resp = await uploadFile(file);
+        onAttach(resp);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Upload failed");
     } finally {
@@ -30,54 +51,72 @@ export function FileUploader({
     }
   }
 
-  if (attached) {
-    return (
-      <div className="flex items-center gap-2 rounded-lg border border-border bg-bg-elevated px-3 py-2 text-xs">
-        <FileSpreadsheet size={14} className="text-accent shrink-0" />
-        <span className="truncate flex-1" title={attached.original_name}>
-          {attached.original_name}
-        </span>
-        <span className="text-fg-subtle">
-          {(attached.size / 1024).toFixed(1)} KB
-        </span>
-        <button
-          onClick={onCleared}
-          className="ml-1 text-fg-subtle hover:text-danger transition"
-          aria-label="Remove file"
-        >
-          <X size={14} />
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <>
-      <button
-        type="button"
-        onClick={() => inputRef.current?.click()}
-        disabled={busy}
-        className="inline-flex items-center gap-2 text-xs text-fg-muted hover:text-fg transition disabled:opacity-50"
-      >
-        {busy ? (
-          <Loader2 size={14} className="animate-spin" />
-        ) : (
-          <Paperclip size={14} />
-        )}
-        <span>{busy ? "Uploading…" : "Attach CSV"}</span>
-      </button>
-      <input
-        ref={inputRef}
-        type="file"
-        accept=".csv,text/csv"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) handleFile(file);
-          e.target.value = "";
-        }}
-      />
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={busy}
+          className="inline-flex items-center gap-2 text-xs text-fg-muted hover:text-fg transition disabled:opacity-50"
+        >
+          {busy ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : (
+            <Paperclip size={14} />
+          )}
+          <span>{busy ? "Uploading…" : "Attach Files"}</span>
+        </button>
+        <span className="text-[10px] text-fg-subtle">
+          CSV · PDF · Word · PNG/JPG
+        </span>
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          accept={ACCEPT}
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files && e.target.files.length) handleFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+      </div>
+
+      {attached.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {attached.map((f) => {
+            const Icon = iconFor(f.mime);
+            return (
+              <div
+                key={f.file_id}
+                className="flex items-center gap-2 rounded-lg border border-border bg-bg-elevated px-2.5 py-1.5 text-xs"
+              >
+                <Icon size={13} className="text-accent shrink-0" />
+                <button
+                  onClick={() => onPreview?.(f)}
+                  className="truncate max-w-[18ch] hover:underline"
+                  title={f.original_name}
+                >
+                  {f.original_name}
+                </button>
+                <span className="text-fg-subtle">
+                  {(f.size / 1024).toFixed(0)} KB
+                </span>
+                <button
+                  onClick={() => onRemove(f.file_id)}
+                  className="ml-0.5 text-fg-subtle hover:text-danger transition"
+                  aria-label="Remove file"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+
       {error && <span className="text-xs text-danger">{error}</span>}
-    </>
+    </div>
   );
 }

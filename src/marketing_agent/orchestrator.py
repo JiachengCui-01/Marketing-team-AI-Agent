@@ -1,4 +1,8 @@
-"""Orchestrator — routes user requests to sub-agents and synthesizes results."""
+"""Orchestrator — routes user requests to sub-agents and synthesizes results.
+
+Streams text deltas via the on_event callback when the orchestrator produces its
+final synthesized response, so the UI can render token-by-token.
+"""
 from __future__ import annotations
 
 from typing import Callable
@@ -21,7 +25,8 @@ to the right specialists, and synthesize their output into a single clean delive
 
 You have three specialists, accessible only via the delegate_* tools:
 
-- delegate_to_content_agent — for any copywriting (social, blog, email, ads)
+- delegate_to_content_agent — for any copywriting (social, blog, email, ads). The
+  content agent can also produce PDF deliverables when the user asks for one.
 - delegate_to_analytics_agent — for any CSV/data/KPI/performance analysis
 - delegate_to_research_agent — for any external/market/competitor/trend research
 
@@ -29,29 +34,22 @@ Hard rules:
 
 1. NEVER write marketing copy yourself. Always delegate to the content agent.
 2. NEVER compute metrics or interpret CSVs yourself. Always delegate to analytics.
-3. NEVER claim external facts (competitor news, market data) without delegating to research.
-4. When multiple specialists are needed, prefer dispatching them in parallel (multiple
-   tool_use blocks in a single response) when the tasks are independent. Only chain them
-   sequentially when later tasks need earlier results as input.
+3. NEVER claim external facts without delegating to research.
+4. When multiple specialists are needed, prefer parallel dispatch (multiple tool_use
+   blocks in one response) when tasks are independent.
 5. After all specialists return, write a final synthesized response in well-formatted
-   markdown. Lead with a 2-3 sentence executive summary, then include each specialist's
-   output under clear headings.
-6. If the user's request is small and clearly fits one specialist (e.g. "write a tweet"),
-   just delegate to that one specialist and pass through the result with minimal framing.
-7. If a specialist returns an unavailable/error result, do not retry the same specialist.
-   Synthesize the limitation immediately and tell the user what needs to be fixed.
+   markdown.
+6. If a request clearly fits one specialist, just delegate to that one.
+7. If a specialist returns an unavailable/error result, do not retry it.
 
 Be decisive. Don't ask clarifying questions unless the request is genuinely ambiguous.
 """
 
-# Map tool name -> (callable, kwargs filter). Each callable returns a string.
-def _dispatch(client: anthropic.Anthropic, name: str, payload: dict) -> str:
-    # Use a fresh SDK client for specialist calls. Reusing the orchestrator's
-    # HTTP connection can surface intermittent TLS/keep-alive disconnects during
-    # server-side tools such as web_search.
+
+def _dispatch(client: anthropic.Anthropic, name: str, payload: dict, on_event=None) -> str:
     specialist_client = anthropic.Anthropic()
     if name == "delegate_to_content_agent":
-        return content_agent.run(specialist_client, **payload)
+        return content_agent.run(specialist_client, on_event=on_event, **payload)
     if name == "delegate_to_analytics_agent":
         return analytics_agent.run(specialist_client, **payload)
     if name == "delegate_to_research_agent":
@@ -62,11 +60,15 @@ def _dispatch(client: anthropic.Anthropic, name: str, payload: dict) -> str:
 def run_orchestrator(
     client: anthropic.Anthropic,
     conversation: Conversation,
-    user_message: str,
+    user_message,
     on_event: Callable[[str, dict], None] | None = None,
 ) -> str:
-    """Process one user turn end-to-end. Mutates ``conversation`` with new messages."""
-    conversation.add_user(user_message)
+    """Process one user turn end-to-end. Mutates ``conversation`` with new messages.
+
+    ``user_message`` may be a plain string or a list of content blocks (for image/file
+    attachments).
+    """
+    conversation.messages.append({"role": "user", "content": user_message})
     failed_specialists: set[str] = set()
 
     for _ in range(MAX_TOOL_ROUNDS):
@@ -96,7 +98,9 @@ def run_orchestrator(
 
         if response.stop_reason == "end_turn":
             final_text = _final_text(response.content)
+            # Stream deltas of the already-completed text so the UI sees typewriter output.
             if on_event:
+                _stream_text(on_event, final_text)
                 on_event("result", {"text": final_text})
             return final_text
 
@@ -112,8 +116,7 @@ def run_orchestrator(
                 if block.name in failed_specialists:
                     result = (
                         f"## Specialist Unavailable\n\n{block.name} already returned an "
-                        "unavailable/error result for this request. I will not retry it "
-                        "again in the same turn."
+                        "unavailable/error result for this request."
                     )
                     tool_results.append({
                         "type": "tool_result",
@@ -124,7 +127,7 @@ def run_orchestrator(
                 if on_event:
                     on_event("delegating", {"specialist": block.name, "input": block.input})
                 try:
-                    result = _dispatch(client, block.name, block.input)
+                    result = _dispatch(client, block.name, block.input, on_event=on_event)
                     if _is_unavailable_result(result):
                         failed_specialists.add(block.name)
                         unavailable_results.append(result)
@@ -150,14 +153,31 @@ def run_orchestrator(
             if unavailable_results and len(tool_results) == len(unavailable_results):
                 final_text = "\n\n".join(unavailable_results)
                 if on_event:
+                    _stream_text(on_event, final_text)
                     on_event("result", {"text": final_text})
                 return final_text
             continue
 
-        # max_tokens / refusal / other
-        return _final_text(response.content)
+        final = _final_text(response.content)
+        if on_event:
+            _stream_text(on_event, final)
+            on_event("result", {"text": final})
+        return final
 
     return "[Orchestrator stopped: exceeded MAX_TOOL_ROUNDS.]"
+
+
+def _stream_text(on_event: Callable[[str, dict], None], text: str, chunk: int = 24) -> None:
+    """Emit text in small chunks so the frontend renders a typewriter effect.
+
+    The model call itself is non-streaming (we need stop_reason / tool_use semantics),
+    so we replay the final text in deltas on the SSE bus. Chunk size of ~24 chars
+    keeps UI feel snappy without per-character event overhead.
+    """
+    if not text:
+        return
+    for i in range(0, len(text), chunk):
+        on_event("assistant_delta", {"delta": text[i : i + chunk]})
 
 
 def _final_text(content: list) -> str:

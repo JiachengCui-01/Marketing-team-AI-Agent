@@ -1,56 +1,94 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Sparkles, RefreshCw } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { ChatPanel } from "@/components/chat-panel";
 import {
-  TracePanel,
-  type TraceEvent,
+  PreviewPanel,
   classifyTotals,
-} from "@/components/trace-panel";
+  type TraceEvent,
+  type PreviewItem,
+} from "@/components/preview-panel";
+import { SessionSidebar } from "@/components/session-sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
-import type { ChatMessage } from "@/components/message";
+import type { ChatMessage, MessageArtifact } from "@/components/message";
+import { deriveStatus } from "@/components/status-chip";
+import { useSessionsStore } from "@/lib/sessions-store";
 import {
-  createSession,
-  deleteSession,
+  getSessionMessages,
   streamUrl,
   type UploadResponse,
 } from "@/lib/api";
 import { openEventStream } from "@/lib/sse";
 
-const SESSION_KEY = "marketing-agent-session-id";
+const ACTIVE_KEY = "marketing-agent-active-session";
 
 function newId() {
   return Math.random().toString(36).slice(2, 10);
 }
 
 export default function HomePage() {
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const store = useSessionsStore();
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [trace, setTrace] = useState<TraceEvent[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [attached, setAttached] = useState<UploadResponse | null>(null);
+  const [attached, setAttached] = useState<UploadResponse[]>([]);
+  const [preview, setPreview] = useState<PreviewItem | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
   const closeRef = useRef<(() => void) | null>(null);
 
-  // Restore session id from localStorage on first mount.
+  // Restore active session id.
   useEffect(() => {
     const stored =
       typeof window !== "undefined"
-        ? window.localStorage.getItem(SESSION_KEY)
+        ? window.localStorage.getItem(ACTIVE_KEY)
         : null;
-    if (stored) {
-      setSessionId(stored);
+    if (stored) setActiveId(stored);
+  }, []);
+
+  const loadSession = useCallback(async (id: string) => {
+    setActiveId(id);
+    window.localStorage.setItem(ACTIVE_KEY, id);
+    setTrace([]);
+    setPreview(null);
+    try {
+      const { messages: stored } = await getSessionMessages(id);
+      setMessages(
+        stored.map((m) => ({
+          id: newId(),
+          role: m.role,
+          content: m.content,
+        })),
+      );
+    } catch {
+      setMessages([]);
     }
   }, []);
 
+  const handleNewChat = useCallback(async () => {
+    if (closeRef.current) {
+      closeRef.current();
+      closeRef.current = null;
+    }
+    setBusy(false);
+    setMessages([]);
+    setTrace([]);
+    setAttached([]);
+    setPreview(null);
+    const id = await store.createSession();
+    setActiveId(id);
+    window.localStorage.setItem(ACTIVE_KEY, id);
+  }, [store]);
+
   const ensureSession = useCallback(async (): Promise<string> => {
-    if (sessionId) return sessionId;
-    const { session_id } = await createSession();
-    window.localStorage.setItem(SESSION_KEY, session_id);
-    setSessionId(session_id);
-    return session_id;
-  }, [sessionId]);
+    if (activeId) return activeId;
+    const id = await store.createSession();
+    setActiveId(id);
+    window.localStorage.setItem(ACTIVE_KEY, id);
+    return id;
+  }, [activeId, store]);
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
@@ -59,17 +97,14 @@ export default function HomePage() {
     setBusy(true);
     setTrace([]);
 
-    const userMsg: ChatMessage = {
-      id: newId(),
-      role: "user",
-      content: text,
-    };
+    const userMsg: ChatMessage = { id: newId(), role: "user", content: text };
     const pendingId = newId();
     const pendingMsg: ChatMessage = {
       id: pendingId,
       role: "assistant",
       content: "",
       pending: true,
+      status: deriveStatus([]),
     };
     setMessages((m) => [...m, userMsg, pendingMsg]);
 
@@ -88,17 +123,66 @@ export default function HomePage() {
       return;
     }
 
-    const url = streamUrl(sid, text, attached?.file_id);
+    const fileIds = attached.map((a) => a.file_id);
+    const url = streamUrl(sid, text, fileIds);
+
     const close = openEventStream(
       url,
       (e) => {
-        setTrace((t) => [...t, { ...e, ts: Date.now() }]);
-        if (e.event === "result") {
+        const traced = { ...e, ts: Date.now() } as TraceEvent;
+        setTrace((t) => {
+          const next = [...t, traced];
+          // Update the pending bubble's status chip from the latest trace.
+          setMessages((m) =>
+            m.map((msg) =>
+              msg.id === pendingId && msg.pending && msg.content.length === 0
+                ? { ...msg, status: deriveStatus(next) }
+                : msg,
+            ),
+          );
+          return next;
+        });
+
+        if (e.event === "assistant_delta") {
+          const delta = String(e.payload.delta ?? "");
+          setMessages((m) =>
+            m.map((msg) =>
+              msg.id === pendingId
+                ? { ...msg, content: msg.content + delta, status: undefined }
+                : msg,
+            ),
+          );
+        } else if (e.event === "artifact_created") {
+          const artifact: MessageArtifact = {
+            artifact_id: String(e.payload.artifact_id),
+            filename: String(e.payload.filename),
+            mime: String(e.payload.mime ?? "application/pdf"),
+          };
+          setMessages((m) =>
+            m.map((msg) =>
+              msg.id === pendingId
+                ? { ...msg, artifacts: [...(msg.artifacts ?? []), artifact] }
+                : msg,
+            ),
+          );
+          // Auto-select in preview pane.
+          setPreview({
+            source: "artifact",
+            id: artifact.artifact_id,
+            filename: artifact.filename,
+            mime: artifact.mime,
+          });
+        } else if (e.event === "result") {
           const finalText = String(e.payload.text ?? "");
           setMessages((m) =>
             m.map((msg) =>
               msg.id === pendingId
-                ? { ...msg, pending: false, content: finalText }
+                ? {
+                    ...msg,
+                    pending: false,
+                    status: undefined,
+                    content: finalText || msg.content,
+                  }
                 : msg,
             ),
           );
@@ -109,6 +193,7 @@ export default function HomePage() {
                 ? {
                     ...msg,
                     pending: false,
+                    status: undefined,
                     content: `**Error:** ${String(e.payload.message ?? "")}`,
                   }
                 : msg,
@@ -121,7 +206,10 @@ export default function HomePage() {
                 ? {
                     ...msg,
                     pending: false,
-                    content: `**Cancelled:** ${String(e.payload.message ?? "The connection was closed.")}`,
+                    status: undefined,
+                    content:
+                      msg.content ||
+                      `**Cancelled:** ${String(e.payload.message ?? "The connection was closed.")}`,
                   }
                 : msg,
             ),
@@ -131,6 +219,7 @@ export default function HomePage() {
       () => {
         setBusy(false);
         closeRef.current = null;
+        store.touch();
       },
       (err) => {
         console.error("stream error", err);
@@ -140,7 +229,10 @@ export default function HomePage() {
               ? {
                   ...msg,
                   pending: false,
-                  content: "Connection error. Is the API server running on :8000?",
+                  status: undefined,
+                  content:
+                    msg.content ||
+                    "Connection error. Is the API server running on :8000?",
                 }
               : msg,
           ),
@@ -150,27 +242,57 @@ export default function HomePage() {
       },
     );
     closeRef.current = close;
-  }, [input, busy, attached, ensureSession]);
+    // Clear attachments after sending.
+    setAttached([]);
+  }, [input, busy, attached, ensureSession, store]);
 
-  const handleReset = useCallback(async () => {
-    if (closeRef.current) {
-      closeRef.current();
-      closeRef.current = null;
-    }
-    if (sessionId) {
-      try {
-        await deleteSession(sessionId);
-      } catch {
-        /* ignore */
+  const onPreviewUpload = useCallback((f: UploadResponse) => {
+    setPreview({
+      source: "upload",
+      id: f.file_id,
+      filename: f.original_name,
+      mime: f.mime,
+    });
+  }, []);
+
+  const onPreviewArtifact = useCallback((a: MessageArtifact) => {
+    setPreview({
+      source: "artifact",
+      id: a.artifact_id,
+      filename: a.filename,
+      mime: a.mime,
+    });
+  }, []);
+
+  const handleDeleteSession = useCallback(
+    async (id: string) => {
+      await store.deleteSession(id);
+      if (id === activeId) {
+        setActiveId(null);
+        setMessages([]);
+        setTrace([]);
+        setPreview(null);
+        window.localStorage.removeItem(ACTIVE_KEY);
       }
-    }
-    window.localStorage.removeItem(SESSION_KEY);
-    setSessionId(null);
-    setMessages([]);
-    setTrace([]);
-    setAttached(null);
-    setBusy(false);
-  }, [sessionId]);
+    },
+    [store, activeId],
+  );
+
+  const handleDeleteGroup = useCallback(
+    async (id: string) => {
+      // Sessions in this group are about to be cascade-deleted server-side.
+      const affected = store.sessions.filter((s) => s.group_id === id);
+      await store.deleteGroup(id);
+      if (activeId && affected.some((s) => s.id === activeId)) {
+        setActiveId(null);
+        setMessages([]);
+        setTrace([]);
+        setPreview(null);
+        window.localStorage.removeItem(ACTIVE_KEY);
+      }
+    },
+    [store, activeId],
+  );
 
   const totals = classifyTotals(trace);
 
@@ -190,19 +312,27 @@ export default function HomePage() {
             </p>
           </div>
           <div className="ml-auto flex items-center gap-1">
-            <button
-              onClick={handleReset}
-              className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg px-2.5 py-1.5 rounded-md hover:bg-bg-subtle transition"
-            >
-              <RefreshCw size={13} />
-              <span>New chat</span>
-            </button>
             <ThemeToggle />
           </div>
         </div>
       </header>
 
       <div className="flex flex-1 overflow-hidden">
+        <SessionSidebar
+          sessions={store.sessions}
+          groups={store.groups}
+          activeId={activeId}
+          collapsed={collapsed}
+          onToggle={() => setCollapsed((c) => !c)}
+          onSelect={loadSession}
+          onNewChat={handleNewChat}
+          onRenameSession={store.renameSession}
+          onMoveSession={store.moveSession}
+          onDeleteSession={handleDeleteSession}
+          onCreateGroup={store.createGroup}
+          onRenameGroup={store.renameGroup}
+          onDeleteGroup={handleDeleteGroup}
+        />
         <ChatPanel
           messages={messages}
           input={input}
@@ -210,10 +340,19 @@ export default function HomePage() {
           onSend={handleSend}
           busy={busy}
           attached={attached}
-          onAttached={setAttached}
-          onCleared={() => setAttached(null)}
+          onAttach={(f) => setAttached((a) => [...a, f])}
+          onRemoveAttached={(id) =>
+            setAttached((a) => a.filter((f) => f.file_id !== id))
+          }
+          onPreviewUpload={onPreviewUpload}
+          onPreviewArtifact={onPreviewArtifact}
         />
-        <TracePanel events={trace} totals={totals} />
+        <PreviewPanel
+          events={trace}
+          totals={totals}
+          preview={preview}
+          defaultTab={preview ? "preview" : "trace"}
+        />
       </div>
     </main>
   );

@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 
 import anthropic
 from fastapi import Request
@@ -18,14 +18,15 @@ _DONE = object()
 async def orchestrator_event_stream(
     client: anthropic.Anthropic,
     conversation: Conversation,
-    prompt: str,
+    prompt: Any,
     request: Request | None = None,
+    on_event_wrapper: Callable[[Callable[[str, dict], None]], Callable[[str, dict], None]] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Yield orchestrator events as they happen.
 
-    The Anthropic call is blocking, so it runs in a worker thread. If the
-    browser disconnects, the already-started model call may still finish, but
-    no further events are enqueued or sent to the client.
+    ``prompt`` may be a string or a list of content blocks (for image attachments).
+    ``on_event_wrapper`` lets callers intercept events for side effects (persistence,
+    artifact binding) while still letting them flow to the SSE client.
     """
     queue: asyncio.Queue[Any] = asyncio.Queue()
     loop = asyncio.get_running_loop()
@@ -39,8 +40,10 @@ async def orchestrator_event_stream(
         except RuntimeError:
             pass
 
-    def on_event(event: str, payload: dict) -> None:
+    def base_emit(event: str, payload: dict) -> None:
         enqueue({"event": event, "payload": payload})
+
+    on_event = on_event_wrapper(base_emit) if on_event_wrapper else base_emit
 
     async def worker() -> None:
         try:

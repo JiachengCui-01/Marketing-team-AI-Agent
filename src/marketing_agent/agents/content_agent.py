@@ -1,26 +1,34 @@
-"""Content generation agent — channel-specific marketing copy."""
+"""Content generation agent — channel-specific marketing copy and PDF deliverables."""
 from __future__ import annotations
+
+from typing import Any, Callable
 
 import anthropic
 
+from ..tools.pdf_tool import GENERATE_PDF_TOOL, generate_pdf
 from .base import run_agent
 
 SYSTEM = """You are a senior B2B marketing copywriter on an enterprise marketing team.
-You write crisp, on-brand copy in the requested format and return ONLY the finished copy
-(plus a very brief one-line rationale at the bottom if a tone/audience choice was non-obvious).
+You write crisp, on-brand copy in the requested format.
 
-Format rules:
+Channels and platform conventions:
+- social_post: LinkedIn (≤1300 chars), Twitter/X (≤280 chars). Each variant prefixed with "Variant N:".
+- 小红书 (Xiaohongshu / Little Red Book): warm, conversational tone, plenty of emoji,
+  hook in the first line, 3-7 short paragraphs, end with 3-5 topic hashtags (#标签).
+- blog: H1 title, hook paragraph, H2 outline. Full draft = 600-900 words.
+- email: `Subject:` line, `Preheader:` line, body ≤200 words, single CTA.
+- ad_copy: Headline (≤40 chars), Description (≤90 chars), CTA. 2-3 variants.
 
-- social_post: 1-3 variants. LinkedIn ≤ 1300 chars; Twitter/X ≤ 280 chars. No hashtag spam (max 3).
-  Each variant on its own line, prefixed with "Variant N:".
-- blog: lead with an H1 title, then a 1-paragraph hook, then an H2 outline (3-6 sections).
-  If asked for a full draft, write 600-900 words.
-- email: structured as `Subject:` line, then `Preheader:` line, then body. Keep body under 200 words,
-  end with a single clear CTA.
-- ad_copy: Headline (≤ 40 chars), Description (≤ 90 chars), CTA. Provide 2-3 variants.
+Company voice (assume unless told otherwise): confident, plain-spoken, benefit-led,
+no jargon, no LLM tics ("delve", "navigate the landscape").
 
-Quality bar: concrete > vague, benefit > feature, active voice, no LLM tics ("delve", "navigate the landscape").
-If a brief is missing context (audience, product), make one reasonable assumption and note it in the rationale.
+When the user asks for a PDF deliverable (a one-pager, brochure, campaign brief, 小红书
+layout, or anything they intend to save/share as a file), CALL the generate_pdf tool
+with a clean title and 3-8 sections. After the tool returns, briefly tell the user the
+PDF was generated — do NOT paste its full body back.
+
+If a brief is missing context (audience, product), make one reasonable assumption and
+note it.
 """
 
 
@@ -31,6 +39,7 @@ def run(
     tone: str | None = None,
     audience: str | None = None,
     length_hint: str | None = None,
+    on_event: Callable[[str, dict], None] | None = None,
 ) -> str:
     brief_lines = [
         f"Task: {task}",
@@ -43,9 +52,37 @@ def run(
     if length_hint:
         brief_lines.append(f"Length hint: {length_hint}")
 
+    def handle_generate_pdf(payload: dict[str, Any]) -> str:
+        result = generate_pdf(payload)
+        # Register artifact in DB and emit trace event so the UI auto-selects it.
+        try:
+            from server import db  # local import to avoid circular at module load
+
+            rec = db.add_artifact(
+                session_id=None,  # session_id wiring happens via on_event in the route layer
+                kind="pdf",
+                filename=result["filename"],
+                mime=result["mime"],
+                path=result["path"],
+            )
+            if on_event:
+                on_event(
+                    "artifact_created",
+                    {
+                        "artifact_id": rec["id"],
+                        "filename": rec["filename"],
+                        "mime": rec["mime"],
+                        "kind": rec["kind"],
+                    },
+                )
+            return f"PDF generated. artifact_id={rec['id']}, filename={rec['filename']}"
+        except Exception as exc:  # noqa: BLE001
+            return f"PDF rendered to {result['path']} but artifact registration failed: {exc}"
+
     return run_agent(
         client=client,
         system=SYSTEM,
         user_message="\n".join(brief_lines),
-        tools=[],
+        tools=[GENERATE_PDF_TOOL],
+        client_tool_handlers={"generate_pdf": handle_generate_pdf},
     )
