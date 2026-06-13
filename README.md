@@ -9,6 +9,9 @@ The orchestrator routes requests to three specialists:
 2. Campaign analytics: CSV analysis with KPI findings and recommendations
 3. Market research: current web research with cited sources
 
+Newly Update：
+<img width="1279" height="698" alt="image" src="https://github.com/user-attachments/assets/13e08e22-d476-4df9-823d-467891f5093b" />
+
 Home page:
 <img width="877" height="479" alt="image" src="https://github.com/user-attachments/assets/0d57cf12-f09a-41a9-af83-c9af5676fc8f" />
 
