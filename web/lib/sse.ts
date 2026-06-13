@@ -12,6 +12,7 @@ export function openEventStream(
   onError: (err: unknown) => void,
 ): () => void {
   const source = new EventSource(url);
+  let terminalReceived = false;
 
   source.onmessage = (msg) => {
     try {
@@ -23,6 +24,7 @@ export function openEventStream(
         data.event === "error" ||
         data.event === "cancelled"
       ) {
+        terminalReceived = true;
         source.close();
         onDone();
       }
@@ -36,7 +38,11 @@ export function openEventStream(
     // We rely on the "result" event to be the canonical "done" signal; if we
     // never got one, surface the error.
     if (source.readyState === EventSource.CLOSED) {
-      onDone();
+      if (terminalReceived) {
+        onDone();
+      } else {
+        onError(new Error("Stream closed before a final response was received."));
+      }
     } else {
       onError(err);
       source.close();

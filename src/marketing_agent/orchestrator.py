@@ -45,6 +45,9 @@ Hard rules:
    delegate to the content agent immediately. If product, audience, or tone details
    are missing, make reasonable assumptions in the specialist task instead of asking
    a clarification question first.
+9. If your previous assistant message asked a clarification question and the latest
+   user message answers it, merge that answer into the original task and execute the
+   task. Do not ask the same clarification again.
 
 Be decisive. Don't ask clarifying questions unless the request is genuinely ambiguous.
 """
