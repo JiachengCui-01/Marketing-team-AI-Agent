@@ -45,9 +45,10 @@ export default function HomePage() {
   const [rightWidth, setRightWidth] = useState(RIGHT_MIN_WIDTH);
   const closeRef = useRef<(() => void) | null>(null);
 
-  const maxSidebarWidth = useCallback((min: number) => {
+  const maxSidebarWidth = useCallback((side: "left" | "right", min: number) => {
     if (typeof window === "undefined") return min;
-    return Math.max(min, Math.floor(window.innerWidth / 4));
+    const divisor = side === "right" ? 2 : 4;
+    return Math.max(min, Math.floor(window.innerWidth / divisor));
   }, []);
 
   const beginResize = useCallback(
@@ -59,7 +60,7 @@ export default function HomePage() {
         const delta = e.clientX - startX;
         const next =
           side === "left" ? startWidth + delta : startWidth - delta;
-        const maxWidth = maxSidebarWidth(minWidth);
+        const maxWidth = maxSidebarWidth(side, minWidth);
         const width = Math.min(maxWidth, Math.max(minWidth, next));
         if (side === "left") setLeftWidth(width);
         else setRightWidth(width);
@@ -83,10 +84,16 @@ export default function HomePage() {
   useEffect(() => {
     function clampWidths() {
       setLeftWidth((w) =>
-        Math.min(maxSidebarWidth(LEFT_MIN_WIDTH), Math.max(LEFT_MIN_WIDTH, w)),
+        Math.min(
+          maxSidebarWidth("left", LEFT_MIN_WIDTH),
+          Math.max(LEFT_MIN_WIDTH, w),
+        ),
       );
       setRightWidth((w) =>
-        Math.min(maxSidebarWidth(RIGHT_MIN_WIDTH), Math.max(RIGHT_MIN_WIDTH, w)),
+        Math.min(
+          maxSidebarWidth("right", RIGHT_MIN_WIDTH),
+          Math.max(RIGHT_MIN_WIDTH, w),
+        ),
       );
     }
     window.addEventListener("resize", clampWidths);
