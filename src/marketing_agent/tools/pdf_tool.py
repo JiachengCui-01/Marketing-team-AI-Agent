@@ -8,6 +8,7 @@ from typing import Any
 from marketing_agent.config import PROJECT_ROOT
 
 ARTIFACTS_DIR = PROJECT_ROOT / "tmp" / "artifacts"
+PDF_FONT_NAME = "STSong-Light"
 
 
 GENERATE_PDF_TOOL = {
@@ -49,6 +50,8 @@ def generate_pdf(payload: dict[str, Any]) -> dict[str, Any]:
         from reportlab.lib.pagesizes import LETTER
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.units import inch
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.cidfonts import UnicodeCIDFont
         from reportlab.platypus import (
             SimpleDocTemplate,
             Paragraph,
@@ -58,6 +61,9 @@ def generate_pdf(payload: dict[str, Any]) -> dict[str, Any]:
     except ImportError as exc:
         raise RuntimeError("reportlab is required for generate_pdf; pip install reportlab") from exc
 
+    if PDF_FONT_NAME not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(UnicodeCIDFont(PDF_FONT_NAME))
+
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     artifact_id = uuid.uuid4().hex
     safe_title = "".join(c if c.isalnum() or c in "-_ " else "_" for c in payload.get("title") or "document").strip()[:60] or "document"
@@ -66,16 +72,36 @@ def generate_pdf(payload: dict[str, Any]) -> dict[str, Any]:
 
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
-        "TitleBig", parent=styles["Title"], fontSize=28, leading=34, spaceAfter=12
+        "TitleBig",
+        parent=styles["Title"],
+        fontName=PDF_FONT_NAME,
+        fontSize=28,
+        leading=34,
+        spaceAfter=12,
     )
     subtitle_style = ParagraphStyle(
-        "Sub", parent=styles["Normal"], fontSize=14, textColor="#666666", spaceAfter=24
+        "Sub",
+        parent=styles["Normal"],
+        fontName=PDF_FONT_NAME,
+        fontSize=14,
+        textColor="#666666",
+        spaceAfter=24,
     )
     heading_style = ParagraphStyle(
-        "H", parent=styles["Heading2"], fontSize=16, spaceBefore=18, spaceAfter=8
+        "H",
+        parent=styles["Heading2"],
+        fontName=PDF_FONT_NAME,
+        fontSize=16,
+        spaceBefore=18,
+        spaceAfter=8,
     )
     body_style = ParagraphStyle(
-        "Body", parent=styles["BodyText"], fontSize=11, leading=16, spaceAfter=10
+        "Body",
+        parent=styles["BodyText"],
+        fontName=PDF_FONT_NAME,
+        fontSize=11,
+        leading=16,
+        spaceAfter=10,
     )
 
     doc = SimpleDocTemplate(
