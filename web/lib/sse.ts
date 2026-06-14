@@ -11,21 +11,21 @@ export function openEventStream(
   onDone: () => void,
   onError: (err: unknown) => void,
 ): () => void {
-  const source = new EventSource(url);
+  const controller = new AbortController();
   let terminalReceived = false;
+  let closedByCaller = false;
 
-  source.onmessage = (msg) => {
+  const handleMessage = (dataText: string) => {
     try {
-      const data = JSON.parse(msg.data) as StreamEvent;
+      const data = JSON.parse(dataText) as StreamEvent;
       onEvent(data);
-      // The server emits a terminal event right before closing.
       if (
         data.event === "result" ||
         data.event === "error" ||
         data.event === "cancelled"
       ) {
         terminalReceived = true;
-        source.close();
+        controller.abort();
         onDone();
       }
     } catch (err) {
@@ -33,21 +33,61 @@ export function openEventStream(
     }
   };
 
-  source.onerror = (err) => {
-    // EventSource fires onerror both on real failures and on normal stream close.
-    // We rely on the "result" event to be the canonical "done" signal; if we
-    // never got one, surface the error.
-    if (source.readyState === EventSource.CLOSED) {
-      if (terminalReceived) {
-        onDone();
-      } else {
-        onError(new Error("Stream closed before a final response was received."));
-      }
-    } else {
-      onError(err);
-      source.close();
-    }
+  const flushFrame = (frame: string) => {
+    const dataLines = frame
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart());
+    if (dataLines.length === 0) return;
+    handleMessage(dataLines.join("\n"));
   };
 
-  return () => source.close();
+  void (async () => {
+    let buffer = "";
+    try {
+      const response = await fetch(url, {
+        headers: { Accept: "text/event-stream" },
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw new Error(`Stream request failed with HTTP ${response.status}`);
+      }
+      if (!response.body) {
+        throw new Error("Stream response did not include a readable body.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (!terminalReceived) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        let boundary = buffer.search(/\r?\n\r?\n/);
+        while (boundary !== -1) {
+          const frame = buffer.slice(0, boundary);
+          const separatorLength = buffer[boundary] === "\r" ? 4 : 2;
+          buffer = buffer.slice(boundary + separatorLength);
+          flushFrame(frame);
+          boundary = buffer.search(/\r?\n\r?\n/);
+        }
+      }
+
+      if (terminalReceived || closedByCaller) return;
+      if (buffer.trim()) flushFrame(buffer);
+      if (!terminalReceived) {
+        onError(new Error("Stream closed before a final response was received."));
+      }
+    } catch (err) {
+      if (terminalReceived || closedByCaller || controller.signal.aborted) return;
+      onError(err);
+    }
+  })();
+
+  return () => {
+    closedByCaller = true;
+    controller.abort();
+  };
 }
