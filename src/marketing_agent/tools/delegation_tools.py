@@ -21,6 +21,24 @@ DELEGATION_TOOLS = [
                     "enum": ["social_post", "blog", "email", "ad_copy", "pdf"],
                     "description": "Channel / format of the copy.",
                 },
+                "platform": {
+                    "type": "string",
+                    "enum": [
+                        "linkedin",
+                        "twitter",
+                        "xiaohongshu",
+                        "blog",
+                        "email",
+                        "ad_copy",
+                        "pdf",
+                        "generic_social",
+                    ],
+                    "description": (
+                        "Optional platform/style skill to apply. Use xiaohongshu for "
+                        "小红书/Little Red Book requests, linkedin for B2B LinkedIn posts, "
+                        "twitter for X/Twitter posts."
+                    ),
+                },
                 "tone": {
                     "type": "string",
                     "description": "Optional tone descriptor (e.g. 'confident', 'playful', 'authoritative').",

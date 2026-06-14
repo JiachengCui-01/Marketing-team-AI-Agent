@@ -7,25 +7,17 @@ import anthropic
 
 from ..tools.pdf_tool import GENERATE_PDF_TOOL, generate_pdf
 from .base import run_agent
+from .content_skills import select_content_skill
 
 SYSTEM = """You are a senior B2B marketing copywriter on an enterprise marketing team.
-You write crisp, on-brand copy in the requested format.
-
-Channels and platform conventions:
-- social_post: LinkedIn (≤1300 chars), Twitter/X (≤280 chars). Each variant prefixed with "Variant N:".
-- 小红书 (Xiaohongshu / Little Red Book): warm, conversational tone, plenty of emoji,
-  hook in the first line, 3-7 short paragraphs, end with 3-5 topic hashtags (#标签).
-- blog: H1 title, hook paragraph, H2 outline. Full draft = 600-900 words.
-- email: `Subject:` line, `Preheader:` line, body ≤200 words, single CTA.
-- ad_copy: Headline (≤40 chars), Description (≤90 chars), CTA. 2-3 variants.
+You write crisp, on-brand copy by following the selected platform skill in the brief.
 
 Company voice (assume unless told otherwise): confident, plain-spoken, benefit-led,
 no jargon, no LLM tics ("delve", "navigate the landscape").
 
-When the user asks for a PDF deliverable (a one-pager, brochure, campaign brief, 小红书
-layout, or anything they intend to save/share as a file), CALL the generate_pdf tool
-with a clean title and 3-8 sections. After the tool returns, briefly tell the user the
-PDF was generated — do NOT paste its full body back.
+When the selected platform skill or user task asks for a PDF deliverable, CALL the
+generate_pdf tool. After the tool returns, briefly tell the user the PDF was generated.
+Do NOT paste the full PDF body back.
 
 If a brief is missing context (audience, product), make one reasonable assumption and
 note it.
@@ -36,15 +28,22 @@ def run(
     client: anthropic.Anthropic,
     task: str,
     format: str,
+    platform: str | None = None,
     tone: str | None = None,
     audience: str | None = None,
     length_hint: str | None = None,
     on_event: Callable[[str, dict], None] | None = None,
 ) -> str:
+    skill = select_content_skill(format, task, platform)
     brief_lines = [
         f"Task: {task}",
         f"Format: {format}",
+        f"Selected platform skill: {skill.key}",
+        "",
+        skill.render(),
     ]
+    if platform:
+        brief_lines.append(f"Requested platform: {platform}")
     if tone:
         brief_lines.append(f"Tone: {tone}")
     if audience:
