@@ -2,7 +2,7 @@ services:
   - type: web
     name: marketing-agent-api
     runtime: python
-    plan: free
+    plan: standard
     buildCommand: pip install -e .
     startCommand: uvicorn server.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
