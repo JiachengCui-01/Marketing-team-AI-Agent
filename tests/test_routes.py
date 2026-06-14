@@ -153,6 +153,32 @@ class RouteTests(unittest.TestCase):
         finally:
             streaming.run_orchestrator = old_run_orchestrator
 
+    def test_complete_session_returns_non_streamed_result(self) -> None:
+        from server import routes
+
+        old_run_orchestrator = routes.run_orchestrator
+
+        def complete_orchestrator(client, conversation, prompt, on_event) -> None:
+            on_event("result", {"text": "Done without streaming."})
+
+        routes.run_orchestrator = complete_orchestrator
+        try:
+            created = self.client.post("/api/sessions")
+            session_id = created.json()["session_id"]
+
+            response = self.client.post(
+                f"/api/sessions/{session_id}/complete",
+                json={"prompt": "write a post"},
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["text"], "Done without streaming.")
+            messages = self.client.get(f"/api/sessions/{session_id}/messages").json()["messages"]
+            self.assertEqual(messages[-1]["role"], "assistant")
+            self.assertEqual(messages[-1]["content"], "Done without streaming.")
+        finally:
+            routes.run_orchestrator = old_run_orchestrator
+
 
 if __name__ == "__main__":
     unittest.main()

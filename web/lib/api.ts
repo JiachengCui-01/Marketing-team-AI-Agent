@@ -89,6 +89,20 @@ export async function getSessionMessages(
   return res.json();
 }
 
+export async function completeSession(
+  id: string,
+  prompt: string,
+  fileIds: string[] = [],
+): Promise<{ ok: boolean; text: string; events?: unknown[] }> {
+  const res = await fetch(`${API_BASE}/api/sessions/${id}/complete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt, file_ids: fileIds }),
+  });
+  if (!res.ok) throw new Error(`completeSession ${res.status}`);
+  return res.json();
+}
+
 // ---------- groups ----------
 
 export async function listGroups(): Promise<GroupRecord[]> {

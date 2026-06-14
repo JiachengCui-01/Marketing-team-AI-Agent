@@ -16,6 +16,7 @@ import { deriveStatus } from "@/components/status-chip";
 import { useSessionsStore } from "@/lib/sessions-store";
 import {
   API_BASE,
+  completeSession,
   getSessionMessages,
   streamUrl,
   type UploadResponse,
@@ -210,6 +211,39 @@ export default function HomePage() {
         }
       } catch (recoveryErr) {
         console.error("stream recovery failed", recoveryErr);
+      }
+
+      try {
+        const completed = await completeSession(sid, text, fileIds);
+        const fallbackEvents = Array.isArray(completed.events)
+          ? (completed.events as TraceEvent[]).map((event) => ({
+              ...event,
+              ts: Date.now(),
+            }))
+          : [];
+        if (fallbackEvents.length > 0) {
+          setTrace((t) => [...t, ...fallbackEvents]);
+        }
+        setMessages((m) =>
+          m.map((msg) =>
+            msg.id === pendingId
+              ? {
+                  ...msg,
+                  pending: false,
+                  status: undefined,
+                  content:
+                    completed.text ||
+                    (completed.ok
+                      ? "The request completed, but no text was returned."
+                      : "The fallback request failed without a message."),
+                }
+              : msg,
+          ),
+        );
+        store.touch();
+        return;
+      } catch (fallbackErr) {
+        console.error("non-stream fallback failed", fallbackErr);
       }
 
       setMessages((m) =>
