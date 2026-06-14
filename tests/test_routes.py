@@ -125,6 +125,34 @@ class RouteTests(unittest.TestCase):
             ],
         )
 
+    def test_stream_errors_are_persisted_to_history(self) -> None:
+        from server import streaming
+
+        old_run_orchestrator = streaming.run_orchestrator
+
+        def fail_orchestrator(*args, **kwargs) -> None:  # noqa: ANN002, ANN003
+            raise RuntimeError("model unavailable")
+
+        streaming.run_orchestrator = fail_orchestrator
+        try:
+            created = self.client.post("/api/sessions")
+            session_id = created.json()["session_id"]
+
+            with self.client.stream(
+                "GET",
+                f"/api/sessions/{session_id}/stream",
+                params={"prompt": "write a post"},
+            ) as response:
+                self.assertEqual(response.status_code, 200)
+                body = response.read().decode("utf-8")
+
+            self.assertIn('"event": "error"', body)
+            messages = self.client.get(f"/api/sessions/{session_id}/messages").json()["messages"]
+            self.assertEqual(messages[-1]["role"], "assistant")
+            self.assertEqual(messages[-1]["content"], "**Error:** model unavailable")
+        finally:
+            streaming.run_orchestrator = old_run_orchestrator
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -189,6 +189,45 @@ export default function HomePage() {
     const fileIds = attached.map((a) => a.file_id);
     const url = streamUrl(sid, text, fileIds);
 
+    const recoverAfterStreamError = async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 1500));
+      try {
+        const { messages: stored } = await getSessionMessages(sid);
+        const hydrated = stored.map((m) => ({
+          id: newId(),
+          role: m.role,
+          content: m.content,
+          artifacts: m.artifacts,
+        }));
+        const recoveredAssistant = [...hydrated]
+          .reverse()
+          .find((msg) => msg.role === "assistant" && msg.content.trim().length > 0);
+
+        if (recoveredAssistant) {
+          setMessages(hydrated);
+          store.touch();
+          return;
+        }
+      } catch (recoveryErr) {
+        console.error("stream recovery failed", recoveryErr);
+      }
+
+      setMessages((m) =>
+        m.map((msg) =>
+          msg.id === pendingId && msg.pending
+            ? {
+                ...msg,
+                pending: false,
+                status: undefined,
+                content:
+                  msg.content ||
+                  `Connection error. Could not keep a live stream open to ${API_BASE}. Please refresh and try again.`,
+              }
+            : msg,
+        ),
+      );
+    };
+
     const close = openEventStream(
       url,
       (e) => {
@@ -286,20 +325,7 @@ export default function HomePage() {
       },
       (err) => {
         console.error("stream error", err);
-        setMessages((m) =>
-          m.map((msg) =>
-            msg.id === pendingId && msg.pending
-              ? {
-                  ...msg,
-                  pending: false,
-                  status: undefined,
-                  content:
-                    msg.content ||
-                    `Connection error. Could not keep a live stream open to ${API_BASE}. Please refresh and try again.`,
-                }
-              : msg,
-          ),
-        );
+        void recoverAfterStreamError();
         setBusy(false);
         closeRef.current = null;
       },

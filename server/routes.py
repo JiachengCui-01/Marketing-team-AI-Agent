@@ -282,6 +282,10 @@ async def stream_session(
                 final_text = str(payload.get("text", ""))
                 if final_text:
                     db.add_message(session_id, "assistant", final_text)
+            elif event == "error":
+                message = str(payload.get("message", "")).strip()
+                if message:
+                    db.add_message(session_id, "assistant", f"**Error:** {message}")
             elif event == "artifact_created":
                 # Re-bind the artifact to this session (it was created with session_id=None).
                 try:

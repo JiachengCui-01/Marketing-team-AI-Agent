@@ -13,6 +13,7 @@ from marketing_agent.conversation import Conversation
 from marketing_agent.orchestrator import run_orchestrator
 
 _DONE = object()
+HEARTBEAT_INTERVAL_SECONDS = 10
 
 
 async def orchestrator_event_stream(
@@ -50,7 +51,7 @@ async def orchestrator_event_stream(
         try:
             await asyncio.to_thread(run_orchestrator, client, conversation, prompt, on_event)
         except Exception as exc:  # noqa: BLE001
-            enqueue({"event": "error", "payload": {"message": str(exc)}})
+            on_event("error", {"message": str(exc)})
         finally:
             try:
                 loop.call_soon_threadsafe(queue.put_nowait, _DONE)
@@ -64,7 +65,11 @@ async def orchestrator_event_stream(
                 cancelled.set()
                 yield {"event": "cancelled", "payload": {"message": "Client disconnected."}}
                 return
-            item = await queue.get()
+            try:
+                item = await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_INTERVAL_SECONDS)
+            except asyncio.TimeoutError:
+                yield {"event": "heartbeat", "payload": {"message": "Still working."}}
+                continue
             if item is _DONE:
                 return
             yield item
