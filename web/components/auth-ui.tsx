@@ -57,9 +57,19 @@ export function removeRememberedAccount(account: string) {
   saveRememberedAccounts(loadRememberedAccounts().filter((item) => item.account !== account));
 }
 
+function findRememberedAccount(account: string): RememberedAccount | undefined {
+  return loadRememberedAccounts().find((item) => item.account === account);
+}
+
 export function rememberAccount(item: RememberedAccount) {
   const next = [item, ...loadRememberedAccounts().filter((old) => old.account !== item.account)];
   saveRememberedAccounts(next.slice(0, 8));
+}
+
+function updateRememberedAccount(account: string, patch: Partial<RememberedAccount>) {
+  const existing = findRememberedAccount(account);
+  if (!existing) return;
+  rememberAccount({ ...existing, ...patch, account });
 }
 
 function contactFromAccount(account: string): Pick<ProfilePayload, "email" | "phone"> {
@@ -174,8 +184,9 @@ function LoginPanel({
   async function submit() {
     setError(null);
     setBusy(true);
+    const trimmedAccount = account.trim();
     try {
-      const res = await loginUser(account.trim(), password);
+      const res = await loginUser(trimmedAccount, password);
       setAuthToken(res.token);
       if (remember) {
         rememberAccount({
@@ -187,6 +198,14 @@ function LoginPanel({
       }
       onAuthenticated(res.token, res.user);
     } catch (err) {
+      const cached = findRememberedAccount(trimmedAccount);
+      if (cached?.password === password) {
+        removeRememberedAccount(trimmedAccount);
+        setRemembered(loadRememberedAccounts());
+        setPassword("");
+        setError(t.rememberedPasswordExpired);
+        return;
+      }
       setError(localizeError(err, locale));
     } finally {
       setBusy(false);
@@ -307,6 +326,14 @@ function RegisterPanel({
         ...contactFromAccount(form.account ?? ""),
       });
       setAuthToken(res.token);
+      if (form.account && form.password && findRememberedAccount(form.account)) {
+        rememberAccount({
+          account: res.user.account,
+          username: res.user.username,
+          avatar: res.user.avatar,
+          password: form.password,
+        });
+      }
       onAuthenticated(res.token, res.user);
     } catch (err) {
       setError(localizeError(err, locale));
@@ -478,7 +505,9 @@ export function SwitchAccountPanel({
       onAuthenticated(res.token, res.user);
       onClose();
     } catch (err) {
-      setError(localizeError(err, locale));
+      removeRememberedAccount(item.account);
+      setItems(loadRememberedAccounts());
+      setError(t.rememberedPasswordExpired);
     }
   }
 
@@ -631,6 +660,18 @@ function ProfileDialog({
     setBusy(true);
     try {
       const next = await updateMe(form);
+      if (form.password) {
+        updateRememberedAccount(user.account, {
+          username: next.username,
+          avatar: next.avatar,
+          password: form.password,
+        });
+      } else {
+        updateRememberedAccount(user.account, {
+          username: next.username,
+          avatar: next.avatar,
+        });
+      }
       onSaved(next);
     } catch (err) {
       setError(localizeError(err, locale));
