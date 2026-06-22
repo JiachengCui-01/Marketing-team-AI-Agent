@@ -27,6 +27,8 @@ import { cn } from "@/lib/cn";
 import { LanguageToggle, localizeError, useI18n } from "@/lib/i18n";
 
 const REMEMBERED_KEY = "marketing-agent-remembered-accounts";
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_RE = /^1[3-9]\d{9}$/;
 
 export type RememberedAccount = {
   account: string;
@@ -57,6 +59,13 @@ export function removeRememberedAccount(account: string) {
 export function rememberAccount(item: RememberedAccount) {
   const next = [item, ...loadRememberedAccounts().filter((old) => old.account !== item.account)];
   saveRememberedAccounts(next.slice(0, 8));
+}
+
+function contactFromAccount(account: string): Pick<ProfilePayload, "email" | "phone"> {
+  const value = account.trim();
+  if (EMAIL_RE.test(value)) return { email: value, phone: "" };
+  if (PHONE_RE.test(value)) return { phone: value, email: "" };
+  return { email: "", phone: "" };
 }
 
 export function DefaultAvatar({ className }: { className?: string }) {
@@ -210,7 +219,7 @@ function LoginPanel({
           />
         ) : null}
         <div className="mt-6 space-y-3">
-          <TextInput label={t.account} value={account} onChange={setAccount} autoComplete="username" placeholder={t.account} />
+          <TextInput label={t.accountLabel} value={account} onChange={setAccount} autoComplete="username" placeholder={t.account} />
           <TextInput label={t.password} value={password} onChange={setPassword} type="password" autoComplete="current-password" placeholder={t.passwordInput} />
           <label className="flex items-center gap-2 text-sm text-fg-muted">
             <input
@@ -272,8 +281,6 @@ function RegisterPanel({
     real_name: "",
     id_card: "",
     avatar: null,
-    phone: "",
-    email: "",
     company: "",
     title: "",
     bio: "",
@@ -294,7 +301,10 @@ function RegisterPanel({
     }
     setBusy(true);
     try {
-      const res = await registerUser(form);
+      const res = await registerUser({
+        ...form,
+        ...contactFromAccount(form.account ?? ""),
+      });
       setAuthToken(res.token);
       onAuthenticated(res.token, res.user);
     } catch (err) {
@@ -320,8 +330,6 @@ function RegisterPanel({
           <TextInput label={t.usernameRequired} value={form.username} onChange={(v) => set("username", v)} placeholder={t.usernameHint} />
           <TextInput label={t.realNameRequired} value={form.real_name ?? ""} onChange={(v) => set("real_name", v)} placeholder={t.realNameHint} />
           <TextInput label={t.idCardRequired} value={form.id_card ?? ""} onChange={(v) => set("id_card", v.toUpperCase())} placeholder={t.idCardHint} error={form.id_card && !idCardValid ? t.idCardError : undefined} />
-          <TextInput label={t.phone} value={form.phone ?? ""} onChange={(v) => set("phone", v)} placeholder={t.phoneHint} />
-          <TextInput label={t.email} value={form.email ?? ""} onChange={(v) => set("email", v)} placeholder={t.emailHint} />
           <TextInput label={t.company} value={form.company ?? ""} onChange={(v) => set("company", v)} placeholder={t.companyHint} />
           <TextInput label={t.title} value={form.title ?? ""} onChange={(v) => set("title", v)} placeholder={t.titleHint} />
           <label className="md:col-span-2 text-xs font-medium text-fg-muted">
@@ -599,11 +607,12 @@ function ProfileDialog({
   onSaved: (user: UserProfile) => void;
 }) {
   const { locale, t } = useI18n();
+  const accountContact = contactFromAccount(user.account);
   const [form, setForm] = useState<ProfilePayload>({
     username: user.username,
     avatar: user.avatar,
-    phone: user.phone ?? "",
-    email: user.email ?? "",
+    phone: user.phone ?? accountContact.phone ?? "",
+    email: user.email ?? accountContact.email ?? "",
     company: user.company ?? "",
     title: user.title ?? "",
     bio: user.bio ?? "",
