@@ -209,9 +209,16 @@ function LoginPanel({
             value={account}
             onChange={setAccount}
             autoComplete="username"
-            placeholder="name@example.com / 13800138000"
+            placeholder="邮箱或手机号"
           />
-          <TextInput label="密码" value={password} onChange={setPassword} type="password" autoComplete="current-password" />
+          <TextInput
+            label="密码"
+            value={password}
+            onChange={setPassword}
+            type="password"
+            autoComplete="current-password"
+            placeholder="请输入密码"
+          />
           <label className="flex items-center gap-2 text-sm text-fg-muted">
             <input
               type="checkbox"
@@ -318,22 +325,23 @@ function RegisterPanel({
             label="邮箱或手机号 *"
             value={form.account ?? ""}
             onChange={(v) => set("account", v)}
-            placeholder="name@example.com / 13800138000"
+            placeholder="邮箱或手机号"
           />
-          <TextInput label="密码 *" type="password" value={form.password ?? ""} onChange={(v) => set("password", v)} />
-          <TextInput label="用户名 *" value={form.username} onChange={(v) => set("username", v)} />
-          <TextInput label="真实姓名 *" value={form.real_name ?? ""} onChange={(v) => set("real_name", v)} />
-          <TextInput label="身份证号 *" value={form.id_card ?? ""} onChange={(v) => set("id_card", v.toUpperCase())} error={form.id_card && !idCardValid ? "身份证号格式或校验位不正确" : undefined} />
-          <TextInput label="手机号" value={form.phone ?? ""} onChange={(v) => set("phone", v)} />
-          <TextInput label="邮箱" value={form.email ?? ""} onChange={(v) => set("email", v)} />
-          <TextInput label="公司" value={form.company ?? ""} onChange={(v) => set("company", v)} />
-          <TextInput label="职位" value={form.title ?? ""} onChange={(v) => set("title", v)} />
+          <TextInput label="密码 *" type="password" value={form.password ?? ""} onChange={(v) => set("password", v)} placeholder="至少 8 位" />
+          <TextInput label="用户名 *" value={form.username} onChange={(v) => set("username", v)} placeholder="展示名称" />
+          <TextInput label="真实姓名 *" value={form.real_name ?? ""} onChange={(v) => set("real_name", v)} placeholder="实名姓名" />
+          <TextInput label="身份证号 *" value={form.id_card ?? ""} onChange={(v) => set("id_card", v.toUpperCase())} placeholder="18 位身份证号" error={form.id_card && !idCardValid ? "身份证号格式或校验位不正确" : undefined} />
+          <TextInput label="手机号" value={form.phone ?? ""} onChange={(v) => set("phone", v)} placeholder="11 位手机号" />
+          <TextInput label="邮箱" value={form.email ?? ""} onChange={(v) => set("email", v)} placeholder="name@example.com" />
+          <TextInput label="公司" value={form.company ?? ""} onChange={(v) => set("company", v)} placeholder="公司名称" />
+          <TextInput label="职位" value={form.title ?? ""} onChange={(v) => set("title", v)} placeholder="职位名称" />
           <label className="md:col-span-2 text-xs font-medium text-fg-muted">
             简介
             <textarea
               value={form.bio ?? ""}
               onChange={(e) => set("bio", e.target.value)}
               rows={3}
+              placeholder="简单介绍"
               className="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent"
             />
           </label>
@@ -607,18 +615,19 @@ function ProfileDialog({
         <AvatarPicker avatar={form.avatar ?? null} onChange={(avatar) => set("avatar", avatar)} />
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <TextInput label="用户名" value={form.username} onChange={(v) => set("username", v)} />
+        <TextInput label="用户名" value={form.username} onChange={(v) => set("username", v)} placeholder="展示名称" />
         <TextInput label="修改密码" type="password" value={form.password ?? ""} onChange={(v) => set("password", v)} placeholder="留空则不修改" />
-        <TextInput label="手机号" value={form.phone ?? ""} onChange={(v) => set("phone", v)} />
-        <TextInput label="邮箱" value={form.email ?? ""} onChange={(v) => set("email", v)} />
-        <TextInput label="公司" value={form.company ?? ""} onChange={(v) => set("company", v)} />
-        <TextInput label="职位" value={form.title ?? ""} onChange={(v) => set("title", v)} />
+        <TextInput label="手机号" value={form.phone ?? ""} onChange={(v) => set("phone", v)} placeholder="11 位手机号" />
+        <TextInput label="邮箱" value={form.email ?? ""} onChange={(v) => set("email", v)} placeholder="name@example.com" />
+        <TextInput label="公司" value={form.company ?? ""} onChange={(v) => set("company", v)} placeholder="公司名称" />
+        <TextInput label="职位" value={form.title ?? ""} onChange={(v) => set("title", v)} placeholder="职位名称" />
         <label className="md:col-span-2 text-xs font-medium text-fg-muted">
           简介
           <textarea
             value={form.bio ?? ""}
             onChange={(e) => set("bio", e.target.value)}
             rows={3}
+            placeholder="简单介绍"
             className="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent"
           />
         </label>
