@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ChevronDown,
   HelpCircle,
@@ -796,9 +797,11 @@ function TextInput({
 
 function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
   const { t } = useI18n();
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-      <section className="w-full max-w-2xl rounded-xl border border-border bg-bg-elevated p-5 shadow-xl">
+      <section className="w-full max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto rounded-xl border border-border bg-bg-elevated p-5 shadow-xl">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-semibold">{title}</h2>
           <button type="button" onClick={onClose} className="text-sm text-fg-subtle hover:text-fg">
@@ -807,7 +810,8 @@ function Modal({ title, children, onClose }: { title: string; children: React.Re
         </div>
         {children}
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
