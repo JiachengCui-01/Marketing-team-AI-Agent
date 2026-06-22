@@ -58,8 +58,10 @@ def login(payload: dict = Body(...)) -> dict:
     account = auth.validate_account(str(payload.get("account") or ""))
     password = str(payload.get("password") or "")
     user = db.get_user_by_account(account)
-    if user is None or not auth.verify_password(password, user["password_hash"]):
-        raise HTTPException(401, "账号或密码不正确。")
+    if user is None:
+        raise HTTPException(404, "账号不存在。")
+    if not auth.verify_password(password, user["password_hash"]):
+        raise HTTPException(401, "密码不正确。")
     token = auth.issue_token(user["id"])
     return {"token": token, "user": auth.public_user(user)}
 

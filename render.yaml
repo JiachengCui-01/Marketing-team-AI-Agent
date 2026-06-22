@@ -6,9 +6,15 @@ services:
     buildCommand: pip install -e .
     startCommand: uvicorn server.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
+    disk:
+      name: marketing-agent-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      - key: MARKETING_AGENT_DB_PATH
+        value: /var/data/marketing_agent.db
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: CORS_ORIGINS

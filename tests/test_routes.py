@@ -104,6 +104,21 @@ class RouteTests(unittest.TestCase):
         me = self.client.get("/api/auth/me", headers=headers)
         self.assertEqual(me.json()["user"]["account"], "13900139000")
 
+    def test_login_distinguishes_missing_account_and_bad_password(self) -> None:
+        missing = self.client.post(
+            "/api/auth/login",
+            json={"account": "missing@example.com", "password": "password123"},
+        )
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(missing.json()["detail"], "账号不存在。")
+
+        bad_password = self.client.post(
+            "/api/auth/login",
+            json={"account": "alice@example.com", "password": "wrong-password"},
+        )
+        self.assertEqual(bad_password.status_code, 401)
+        self.assertEqual(bad_password.json()["detail"], "密码不正确。")
+
     def test_business_routes_require_auth(self) -> None:
         response = self.client.get("/api/sessions")
         self.assertEqual(response.status_code, 401)

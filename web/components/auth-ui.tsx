@@ -203,7 +203,8 @@ function LoginPanel({
         removeRememberedAccount(trimmedAccount);
         setRemembered(loadRememberedAccounts());
         setPassword("");
-        setError(t.rememberedPasswordExpired);
+        const message = localizeError(err, locale);
+        setError(message.includes("账号不存在") || message.includes("Account does not exist") ? message : t.rememberedPasswordExpired);
         return;
       }
       setError(localizeError(err, locale));
@@ -507,7 +508,8 @@ export function SwitchAccountPanel({
     } catch (err) {
       removeRememberedAccount(item.account);
       setItems(loadRememberedAccounts());
-      setError(t.rememberedPasswordExpired);
+      const message = localizeError(err, locale);
+      setError(message.includes("账号不存在") || message.includes("Account does not exist") ? message : t.rememberedPasswordExpired);
     }
   }
 

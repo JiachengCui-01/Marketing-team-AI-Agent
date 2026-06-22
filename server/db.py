@@ -5,6 +5,7 @@ Single-process MVP: one connection per call, WAL mode, foreign keys on.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import threading
 import time
@@ -15,7 +16,7 @@ from typing import Any
 
 from marketing_agent.config import PROJECT_ROOT
 
-DB_PATH = PROJECT_ROOT / "tmp" / "marketing_agent.db"
+DB_PATH = Path(os.environ.get("MARKETING_AGENT_DB_PATH", str(PROJECT_ROOT / "tmp" / "marketing_agent.db")))
 _LOCK = threading.Lock()
 _INITIALIZED = False
 CURRENT_USER_ID: ContextVar[str | None] = ContextVar("CURRENT_USER_ID", default=None)

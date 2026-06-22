@@ -355,6 +355,8 @@ export function localizeError(error: unknown, locale: Locale): string {
     "身份证号校验位不正确。": "Chinese ID checksum is invalid.",
     "账号已存在。": "Account already exists.",
     "账号或密码不正确。": "Account or password is incorrect.",
+    "账号不存在。": "Account does not exist. Please register it again.",
+    "密码不正确。": "Password is incorrect.",
     "请输入确认文本。": "Please enter the confirmation text.",
     "用户名为必填项。": "Username is required.",
     "真实姓名为必填项。": "Legal name is required.",
