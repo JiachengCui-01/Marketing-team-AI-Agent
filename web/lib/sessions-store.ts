@@ -10,6 +10,7 @@ import {
   createGroup as apiCreateGroup,
   renameGroup as apiRenameGroup,
   deleteGroup as apiDeleteGroup,
+  getAuthToken,
   type SessionRecord,
   type GroupRecord,
 } from "./api";
@@ -20,6 +21,12 @@ export function useSessionsStore() {
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
+    if (!getAuthToken()) {
+      setSessions([]);
+      setGroups([]);
+      setLoading(false);
+      return;
+    }
     try {
       const [s, g] = await Promise.all([listSessions(), listGroups()]);
       setSessions(s);

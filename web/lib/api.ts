@@ -1,11 +1,75 @@
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
 
+const TOKEN_KEY = "marketing-agent-auth-token";
+
+export function getAuthToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(TOKEN_KEY);
+}
+
+export function setAuthToken(token: string | null) {
+  if (typeof window === "undefined") return;
+  if (token) window.localStorage.setItem(TOKEN_KEY, token);
+  else window.localStorage.removeItem(TOKEN_KEY);
+}
+
+function authHeaders(extra: HeadersInit = {}): HeadersInit {
+  const token = getAuthToken();
+  return token ? { ...extra, Authorization: `Bearer ${token}` } : extra;
+}
+
+function withToken(url: string): string {
+  const token = getAuthToken();
+  if (!token) return url;
+  const next = new URL(url);
+  next.searchParams.set("token", token);
+  return next.toString();
+}
+
+async function parseJsonError(res: Response): Promise<string> {
+  try {
+    const body = await res.json();
+    return String(body.detail || body.message || res.statusText);
+  } catch {
+    return res.statusText;
+  }
+}
+
+export type UserProfile = {
+  id: string;
+  account: string;
+  username: string;
+  real_name: string;
+  id_card_masked: string;
+  avatar: string | null;
+  phone: string | null;
+  email: string | null;
+  company: string | null;
+  title: string | null;
+  bio: string | null;
+};
+
+export type ProfilePayload = {
+  account?: string;
+  password?: string;
+  username: string;
+  real_name?: string;
+  id_card?: string;
+  avatar?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  company?: string | null;
+  title?: string | null;
+  bio?: string | null;
+};
+
 export type CreateSessionResponse = {
   session_id: string;
   name: string;
   group_id: string | null;
 };
+
 export type UploadResponse = {
   file_id: string;
   original_name: string;
@@ -40,10 +104,76 @@ export type MessageArtifact = {
   mime: string;
 };
 
+// ---------- auth ----------
+
+export async function registerUser(payload: ProfilePayload): Promise<{ token: string; user: UserProfile }> {
+  const res = await fetch(`${API_BASE}/api/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return res.json();
+}
+
+export async function loginUser(account: string, password: string): Promise<{ token: string; user: UserProfile }> {
+  const res = await fetch(`${API_BASE}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ account, password }),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return res.json();
+}
+
+export async function logoutUser(): Promise<void> {
+  await fetch(`${API_BASE}/api/auth/logout`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  setAuthToken(null);
+}
+
+export async function getMe(): Promise<UserProfile> {
+  const res = await fetch(`${API_BASE}/api/auth/me`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  const body = await res.json();
+  return body.user;
+}
+
+export async function updateMe(payload: ProfilePayload): Promise<UserProfile> {
+  const res = await fetch(`${API_BASE}/api/auth/me`, {
+    method: "PATCH",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  const body = await res.json();
+  return body.user;
+}
+
+export async function deleteMe(confirmation: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/auth/me`, {
+    method: "DELETE",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ confirmation }),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  setAuthToken(null);
+}
+
+export async function lookupAvatar(account: string): Promise<{ exists: boolean; avatar: string | null; username: string | null }> {
+  const url = new URL(`${API_BASE}/api/auth/avatar`);
+  url.searchParams.set("account", account);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return res.json();
+}
+
 // ---------- sessions ----------
 
 export async function listSessions(): Promise<SessionRecord[]> {
-  const res = await fetch(`${API_BASE}/api/sessions`);
+  const res = await fetch(`${API_BASE}/api/sessions`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`listSessions ${res.status}`);
   return res.json();
 }
@@ -53,7 +183,7 @@ export async function createSession(
 ): Promise<CreateSessionResponse> {
   const res = await fetch(`${API_BASE}/api/sessions`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(opts),
   });
   if (!res.ok) throw new Error(`createSession ${res.status}`);
@@ -66,7 +196,7 @@ export async function updateSession(
 ): Promise<SessionRecord> {
   const res = await fetch(`${API_BASE}/api/sessions/${id}`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(patch),
   });
   if (!res.ok) throw new Error(`updateSession ${res.status}`);
@@ -76,6 +206,7 @@ export async function updateSession(
 export async function deleteSession(id: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/sessions/${id}`, {
     method: "DELETE",
+    headers: authHeaders(),
   });
   if (!res.ok && res.status !== 404)
     throw new Error(`deleteSession ${res.status}`);
@@ -84,7 +215,9 @@ export async function deleteSession(id: string): Promise<void> {
 export async function getSessionMessages(
   id: string,
 ): Promise<{ session_id: string; messages: StoredMessage[] }> {
-  const res = await fetch(`${API_BASE}/api/sessions/${id}/messages`);
+  const res = await fetch(`${API_BASE}/api/sessions/${id}/messages`, {
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(`getSessionMessages ${res.status}`);
   return res.json();
 }
@@ -96,7 +229,7 @@ export async function completeSession(
 ): Promise<{ ok: boolean; text: string; events?: unknown[] }> {
   const res = await fetch(`${API_BASE}/api/sessions/${id}/complete`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ prompt, file_ids: fileIds }),
   });
   if (!res.ok) throw new Error(`completeSession ${res.status}`);
@@ -106,7 +239,7 @@ export async function completeSession(
 // ---------- groups ----------
 
 export async function listGroups(): Promise<GroupRecord[]> {
-  const res = await fetch(`${API_BASE}/api/groups`);
+  const res = await fetch(`${API_BASE}/api/groups`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`listGroups ${res.status}`);
   return res.json();
 }
@@ -114,7 +247,7 @@ export async function listGroups(): Promise<GroupRecord[]> {
 export async function createGroup(name: string): Promise<GroupRecord> {
   const res = await fetch(`${API_BASE}/api/groups`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ name }),
   });
   if (!res.ok) throw new Error(`createGroup ${res.status}`);
@@ -124,7 +257,7 @@ export async function createGroup(name: string): Promise<GroupRecord> {
 export async function renameGroup(id: string, name: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/groups/${id}`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ name }),
   });
   if (!res.ok) throw new Error(`renameGroup ${res.status}`);
@@ -133,6 +266,7 @@ export async function renameGroup(id: string, name: string): Promise<void> {
 export async function deleteGroup(id: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/groups/${id}`, {
     method: "DELETE",
+    headers: authHeaders(),
   });
   if (!res.ok && res.status !== 404)
     throw new Error(`deleteGroup ${res.status}`);
@@ -145,6 +279,7 @@ export async function uploadFile(file: File): Promise<UploadResponse> {
   form.append("file", file);
   const res = await fetch(`${API_BASE}/api/upload`, {
     method: "POST",
+    headers: authHeaders(),
     body: form,
   });
   if (!res.ok) {
@@ -155,21 +290,21 @@ export async function uploadFile(file: File): Promise<UploadResponse> {
 }
 
 export function uploadPreviewUrl(fileId: string): string {
-  return `${API_BASE}/api/uploads/${fileId}/preview`;
+  return withToken(`${API_BASE}/api/uploads/${fileId}/preview`);
 }
 
 export function uploadDownloadUrl(fileId: string): string {
-  return `${API_BASE}/api/uploads/${fileId}/download`;
+  return withToken(`${API_BASE}/api/uploads/${fileId}/download`);
 }
 
 // ---------- artifacts ----------
 
 export function artifactPreviewUrl(artifactId: string): string {
-  return `${API_BASE}/api/artifacts/${artifactId}/preview`;
+  return withToken(`${API_BASE}/api/artifacts/${artifactId}/preview`);
 }
 
 export function artifactDownloadUrl(artifactId: string): string {
-  return `${API_BASE}/api/artifacts/${artifactId}/download`;
+  return withToken(`${API_BASE}/api/artifacts/${artifactId}/download`);
 }
 
 export type ArtifactMeta = {
@@ -182,7 +317,7 @@ export type ArtifactMeta = {
 };
 
 export async function getArtifactMeta(id: string): Promise<ArtifactMeta> {
-  const res = await fetch(`${API_BASE}/api/artifacts/${id}`);
+  const res = await fetch(`${API_BASE}/api/artifacts/${id}`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`getArtifactMeta ${res.status}`);
   return res.json();
 }
@@ -199,5 +334,7 @@ export function streamUrl(
   if (fileIds.length > 0) {
     url.searchParams.set("file_ids", fileIds.join(","));
   }
+  const token = getAuthToken();
+  if (token) url.searchParams.set("token", token);
   return url.toString();
 }

@@ -6,6 +6,7 @@ import { User, Sparkles, FileText, Download } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { StatusChip, type StatusInfo } from "./status-chip";
 import { artifactDownloadUrl } from "@/lib/api";
+import { AvatarImage } from "./auth-ui";
 
 export type MessageArtifact = {
   artifact_id: string;
@@ -25,9 +26,11 @@ export type ChatMessage = {
 export function MessageBubble({
   message,
   onPreviewArtifact,
+  userAvatar,
 }: {
   message: ChatMessage;
   onPreviewArtifact?: (a: MessageArtifact) => void;
+  userAvatar?: string | null;
 }) {
   const isUser = message.role === "user";
   const showStatus =
@@ -49,7 +52,15 @@ export function MessageBubble({
         )}
         aria-hidden
       >
-        {isUser ? <User size={16} /> : <Sparkles size={16} />}
+        {isUser ? (
+          userAvatar ? (
+            <AvatarImage avatar={userAvatar} className="h-8 w-8" />
+          ) : (
+            <User size={16} />
+          )
+        ) : (
+          <Sparkles size={16} />
+        )}
       </div>
 
       <div

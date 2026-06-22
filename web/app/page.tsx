@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
+import {
+  AuthScreen,
+  SwitchAccountPanel,
+  UserMenu,
+} from "@/components/auth-ui";
 import { ChatPanel } from "@/components/chat-panel";
 import {
   PreviewPanel,
@@ -17,9 +22,13 @@ import { useSessionsStore } from "@/lib/sessions-store";
 import {
   API_BASE,
   completeSession,
+  getMe,
   getSessionMessages,
+  logoutUser,
+  setAuthToken,
   streamUrl,
   type UploadResponse,
+  type UserProfile,
 } from "@/lib/api";
 import { openEventStream } from "@/lib/sse";
 
@@ -33,6 +42,8 @@ function newId() {
 
 export default function HomePage() {
   const store = useSessionsStore();
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [trace, setTrace] = useState<TraceEvent[]>([]);
@@ -42,9 +53,16 @@ export default function HomePage() {
   const [preview, setPreview] = useState<PreviewItem | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
+  const [switchOpen, setSwitchOpen] = useState(false);
   const [leftWidth, setLeftWidth] = useState(LEFT_MIN_WIDTH);
   const [rightWidth, setRightWidth] = useState(RIGHT_MIN_WIDTH);
   const closeRef = useRef<(() => void) | null>(null);
+
+  const activeKey = useCallback(
+    (profile: UserProfile | null = user) =>
+      profile ? `${ACTIVE_KEY}:${profile.account}` : ACTIVE_KEY,
+    [user],
+  );
 
   const maxSidebarWidth = useCallback((side: "left" | "right", min: number) => {
     if (typeof window === "undefined") return min;
@@ -104,32 +122,50 @@ export default function HomePage() {
 
   // Restore active session id.
   useEffect(() => {
+    if (!user) return;
     const stored =
       typeof window !== "undefined"
-        ? window.localStorage.getItem(ACTIVE_KEY)
+        ? window.localStorage.getItem(activeKey(user))
         : null;
     if (stored) setActiveId(stored);
+  }, [activeKey, user]);
+
+  useEffect(() => {
+    getMe()
+      .then((profile) => {
+        setUser(profile);
+        void store.refresh();
+      })
+      .catch(() => {
+        setAuthToken(null);
+        setUser(null);
+      })
+      .finally(() => setAuthLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const loadSession = useCallback(async (id: string) => {
-    setActiveId(id);
-    window.localStorage.setItem(ACTIVE_KEY, id);
-    setTrace([]);
-    setPreview(null);
-    try {
-      const { messages: stored } = await getSessionMessages(id);
-      setMessages(
-        stored.map((m) => ({
-          id: newId(),
-          role: m.role,
-          content: m.content,
-          artifacts: m.artifacts,
-        })),
-      );
-    } catch {
-      setMessages([]);
-    }
-  }, []);
+  const loadSession = useCallback(
+    async (id: string) => {
+      setActiveId(id);
+      window.localStorage.setItem(activeKey(), id);
+      setTrace([]);
+      setPreview(null);
+      try {
+        const { messages: stored } = await getSessionMessages(id);
+        setMessages(
+          stored.map((m) => ({
+            id: newId(),
+            role: m.role,
+            content: m.content,
+            artifacts: m.artifacts,
+          })),
+        );
+      } catch {
+        setMessages([]);
+      }
+    },
+    [activeKey],
+  );
 
   const handleNewChat = useCallback(async () => {
     if (closeRef.current) {
@@ -143,16 +179,16 @@ export default function HomePage() {
     setPreview(null);
     const id = await store.createSession();
     setActiveId(id);
-    window.localStorage.setItem(ACTIVE_KEY, id);
-  }, [store]);
+    window.localStorage.setItem(activeKey(), id);
+  }, [activeKey, store]);
 
   const ensureSession = useCallback(async (): Promise<string> => {
     if (activeId) return activeId;
     const id = await store.createSession();
     setActiveId(id);
-    window.localStorage.setItem(ACTIVE_KEY, id);
+    window.localStorage.setItem(activeKey(), id);
     return id;
-  }, [activeId, store]);
+  }, [activeId, activeKey, store]);
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
@@ -395,10 +431,10 @@ export default function HomePage() {
         setMessages([]);
         setTrace([]);
         setPreview(null);
-        window.localStorage.removeItem(ACTIVE_KEY);
+        window.localStorage.removeItem(activeKey());
       }
     },
-    [store, activeId],
+    [store, activeId, activeKey],
   );
 
   const handleDeleteGroup = useCallback(
@@ -411,13 +447,54 @@ export default function HomePage() {
         setMessages([]);
         setTrace([]);
         setPreview(null);
-        window.localStorage.removeItem(ACTIVE_KEY);
+        window.localStorage.removeItem(activeKey());
       }
     },
-    [store, activeId],
+    [store, activeId, activeKey],
   );
 
+  const handleAuthenticated = useCallback(
+    (token: string, profile: UserProfile) => {
+      setAuthToken(token);
+    setUser(profile);
+    setSwitchOpen(false);
+      setActiveId(null);
+      setMessages([]);
+      setTrace([]);
+      setPreview(null);
+      setAttached([]);
+      void store.refresh();
+    },
+    [store],
+  );
+
+  const handleLogout = useCallback(async () => {
+    if (closeRef.current) {
+      closeRef.current();
+      closeRef.current = null;
+    }
+    await logoutUser().catch(() => undefined);
+    setUser(null);
+    setActiveId(null);
+    setMessages([]);
+    setTrace([]);
+    setPreview(null);
+    setAttached([]);
+  }, []);
+
   const totals = classifyTotals(trace);
+
+  if (authLoading) {
+    return (
+      <main className="h-screen flex items-center justify-center bg-bg text-fg-muted">
+        Loading account...
+      </main>
+    );
+  }
+
+  if (!user) {
+    return <AuthScreen onAuthenticated={handleAuthenticated} />;
+  }
 
   return (
     <main className="h-screen flex flex-col">
@@ -436,6 +513,12 @@ export default function HomePage() {
           </div>
           <div className="ml-auto flex items-center gap-1">
             <ThemeToggle />
+            <UserMenu
+              user={user}
+              onUserChange={setUser}
+              onLogout={handleLogout}
+              onSwitchAccount={() => setSwitchOpen(true)}
+            />
           </div>
         </div>
       </header>
@@ -476,6 +559,7 @@ export default function HomePage() {
           }
           onPreviewUpload={onPreviewUpload}
           onPreviewArtifact={onPreviewArtifact}
+          userAvatar={user.avatar}
         />
         {!previewCollapsed ? (
           <ResizeHandle
@@ -493,6 +577,11 @@ export default function HomePage() {
           defaultTab={preview ? "preview" : "trace"}
         />
       </div>
+      <SwitchAccountPanel
+        open={switchOpen}
+        onClose={() => setSwitchOpen(false)}
+        onAuthenticated={handleAuthenticated}
+      />
     </main>
   );
 }

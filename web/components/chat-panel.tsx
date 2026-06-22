@@ -18,6 +18,7 @@ export function ChatPanel({
   onRemoveAttached,
   onPreviewUpload,
   onPreviewArtifact,
+  userAvatar,
 }: {
   messages: ChatMessage[];
   input: string;
@@ -29,6 +30,7 @@ export function ChatPanel({
   onRemoveAttached: (fileId: string) => void;
   onPreviewUpload: (f: UploadResponse) => void;
   onPreviewArtifact: (a: MessageArtifact) => void;
+  userAvatar?: string | null;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -68,6 +70,7 @@ export function ChatPanel({
                 key={m.id}
                 message={m}
                 onPreviewArtifact={onPreviewArtifact}
+                userAvatar={userAvatar}
               />
             ))}
           </div>

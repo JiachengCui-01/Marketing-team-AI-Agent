@@ -24,9 +24,9 @@ _CACHE: dict[str, StoredSession] = {}
 _CACHE_LOCK = threading.Lock()
 
 
-def _hydrate(session_id: str) -> Conversation | None:
+def _hydrate(session_id: str, user_id: str | None = None) -> Conversation | None:
     """Load message history from SQLite into a fresh Conversation."""
-    if db.get_session(session_id) is None:
+    if db.get_session(session_id, user_id) is None:
         return None
     conv = Conversation()
     for row in db.list_messages(session_id):
@@ -40,19 +40,21 @@ def _hydrate(session_id: str) -> Conversation | None:
     return conv
 
 
-def create(name: str = "New chat", group_id: str | None = None) -> str:
-    rec = db.create_session(name=name, group_id=group_id)
+def create(user_id: str, name: str = "New chat", group_id: str | None = None) -> str:
+    rec = db.create_session(user_id=user_id, name=name, group_id=group_id)
     with _CACHE_LOCK:
         _CACHE[rec["id"]] = StoredSession(Conversation())
     return rec["id"]
 
 
-def get(session_id: str) -> Conversation | None:
+def get(session_id: str, user_id: str | None = None) -> Conversation | None:
+    if user_id is not None and db.get_session(session_id, user_id) is None:
+        return None
     with _CACHE_LOCK:
         stored = _CACHE.get(session_id)
         if stored is not None:
             return stored.conversation
-    conv = _hydrate(session_id)
+    conv = _hydrate(session_id, user_id)
     if conv is None:
         return None
     with _CACHE_LOCK:
@@ -60,17 +62,19 @@ def get(session_id: str) -> Conversation | None:
         return _CACHE[session_id].conversation
 
 
-def delete(session_id: str) -> bool:
+def delete(session_id: str, user_id: str | None = None) -> bool:
     with _CACHE_LOCK:
         _CACHE.pop(session_id, None)
-    return db.delete_session(session_id)
+    return db.delete_session(session_id, user_id)
 
 
-def exists(session_id: str) -> bool:
+def exists(session_id: str, user_id: str | None = None) -> bool:
     with _CACHE_LOCK:
         if session_id in _CACHE:
-            return True
-    return db.get_session(session_id) is not None
+            if user_id is None:
+                return True
+            return db.get_session(session_id, user_id) is not None
+    return db.get_session(session_id, user_id) is not None
 
 
 def reset_for_tests() -> None:
