@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { User, Sparkles, FileText, Download } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { useI18n } from "@/lib/i18n";
 import { StatusChip, type StatusInfo } from "./status-chip";
 import { artifactDownloadUrl } from "@/lib/api";
 import { AvatarImage } from "./auth-ui";
@@ -32,6 +33,7 @@ export function MessageBubble({
   onPreviewArtifact?: (a: MessageArtifact) => void;
   userAvatar?: string | null;
 }) {
+  const { t } = useI18n();
   const isUser = message.role === "user";
   const showStatus =
     message.pending && !!message.status && message.content.length === 0;
@@ -91,6 +93,7 @@ export function MessageBubble({
                     key={a.artifact_id}
                     artifact={a}
                     onPreview={onPreviewArtifact}
+                    downloadLabel={t.download}
                   />
                 ))}
               </div>
@@ -105,9 +108,11 @@ export function MessageBubble({
 function ArtifactChip({
   artifact,
   onPreview,
+  downloadLabel,
 }: {
   artifact: MessageArtifact;
   onPreview?: (a: MessageArtifact) => void;
+  downloadLabel: string;
 }) {
   return (
     <div className="inline-flex items-center gap-2 rounded-lg border border-border bg-bg-subtle/60 px-2.5 py-1.5 text-xs">
@@ -123,7 +128,7 @@ function ArtifactChip({
         href={artifactDownloadUrl(artifact.artifact_id)}
         download={artifact.filename}
         className="inline-flex items-center gap-1 text-fg-muted hover:text-accent transition"
-        title="Download"
+        title={downloadLabel}
       >
         <Download size={12} />
       </a>

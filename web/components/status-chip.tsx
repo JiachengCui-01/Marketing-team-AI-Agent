@@ -1,22 +1,26 @@
 "use client";
 
 import {
-  Loader2,
-  PenLine,
-  BarChart3,
-  Search,
-  CheckCircle2,
   AlertCircle,
+  BarChart3,
+  CheckCircle2,
   Cpu,
   FileText,
+  Loader2,
+  PenLine,
+  Search,
   type LucideIcon,
 } from "lucide-react";
+import type { I18nText } from "@/lib/i18n";
 import type { TraceEvent } from "./preview-panel";
 
-const SPECIALIST_LABEL: Record<string, { label: string; icon: LucideIcon }> = {
-  delegate_to_content_agent: { label: "Content agent", icon: PenLine },
-  delegate_to_analytics_agent: { label: "Analytics agent", icon: BarChart3 },
-  delegate_to_research_agent: { label: "Research agent", icon: Search },
+const SPECIALIST_LABEL: Record<
+  string,
+  { key: "contentAgent" | "analyticsAgent" | "researchAgent"; icon: LucideIcon }
+> = {
+  delegate_to_content_agent: { key: "contentAgent", icon: PenLine },
+  delegate_to_analytics_agent: { key: "analyticsAgent", icon: BarChart3 },
+  delegate_to_research_agent: { key: "researchAgent", icon: Search },
 };
 
 export type StatusInfo = {
@@ -25,59 +29,59 @@ export type StatusInfo = {
   tone: "working" | "ok" | "error";
 };
 
-export function deriveStatus(events: TraceEvent[]): StatusInfo {
+export function deriveStatus(events: TraceEvent[], t: I18nText): StatusInfo {
   // Pick the most recent meaningful event for the status chip.
   for (let i = events.length - 1; i >= 0; i--) {
-    const e = events[i];
-    const t = e.event;
-    if (t === "started") {
+    const event = events[i];
+    const type = event.event;
+    if (type === "started") {
       return {
-        label: "Connected. Starting work...",
+        label: `${t.connected} ${t.startingWork}`,
         icon: Loader2,
         tone: "working",
       };
     }
-    if (t === "delegating") {
-      const name = e.payload.specialist as string;
+    if (type === "delegating") {
+      const name = event.payload.specialist as string;
       const meta = SPECIALIST_LABEL[name];
       return {
-        label: meta ? `Delegating to ${meta.label}…` : `Delegating to ${name}…`,
+        label: meta ? `${t.delegating} ${t[meta.key]}...` : `${t.delegating} ${name}...`,
         icon: meta?.icon ?? Cpu,
         tone: "working",
       };
     }
-    if (t === "specialist_done") {
-      const name = e.payload.specialist as string;
+    if (type === "specialist_done") {
+      const name = event.payload.specialist as string;
       const meta = SPECIALIST_LABEL[name];
       return {
-        label: meta ? `${meta.label} returned` : `${name} returned`,
+        label: meta ? `${t[meta.key]} ${t.specialistReturned}` : `${name} ${t.specialistReturned}`,
         icon: CheckCircle2,
         tone: "ok",
       };
     }
-    if (t === "specialist_error") {
+    if (type === "specialist_error") {
       return {
-        label: `${e.payload.specialist} failed`,
+        label: `${String(event.payload.specialist ?? t.specialist)} ${t.specialistFailed}`,
         icon: AlertCircle,
         tone: "error",
       };
     }
-    if (t === "orchestrator_response") {
+    if (type === "orchestrator_response") {
       return {
-        label: "Synthesizing response…",
+        label: t.synthesizing,
         icon: Cpu,
         tone: "working",
       };
     }
-    if (t === "artifact_created") {
+    if (type === "artifact_created") {
       return {
-        label: `Generating ${String(e.payload.filename ?? "file")}…`,
+        label: `${t.generating} ${String(event.payload.filename ?? "file")}...`,
         icon: FileText,
         tone: "working",
       };
     }
   }
-  return { label: "Thinking…", icon: Loader2, tone: "working" };
+  return { label: t.thinking, icon: Loader2, tone: "working" };
 }
 
 export function StatusChip({ status }: { status: StatusInfo }) {

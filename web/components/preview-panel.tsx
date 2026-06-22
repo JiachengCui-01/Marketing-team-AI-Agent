@@ -27,32 +27,27 @@ import {
   uploadDownloadUrl,
   uploadPreviewUrl,
 } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 
 export type TraceEvent = StreamEvent & { ts: number };
 
 export type PreviewItem =
-  | {
-      source: "artifact";
-      id: string;
-      filename: string;
-      mime: string;
-    }
-  | {
-      source: "upload";
-      id: string;
-      filename: string;
-      mime: string;
-    };
+  | { source: "artifact"; id: string; filename: string; mime: string }
+  | { source: "upload"; id: string; filename: string; mime: string };
 
-const SPECIALIST_META: Record<string, { label: string; icon: LucideIcon }> = {
-  delegate_to_content_agent: { label: "Content agent", icon: PenLine },
-  delegate_to_analytics_agent: { label: "Analytics agent", icon: BarChart3 },
-  delegate_to_research_agent: { label: "Research agent", icon: Search },
+const SPECIALIST_META: Record<string, { key: "content" | "analytics" | "research"; icon: LucideIcon }> = {
+  delegate_to_content_agent: { key: "content", icon: PenLine },
+  delegate_to_analytics_agent: { key: "analytics", icon: BarChart3 },
+  delegate_to_research_agent: { key: "research", icon: Search },
 };
 
-function specialistLabel(name?: string) {
-  if (!name) return "specialist";
-  return SPECIALIST_META[name]?.label ?? name;
+function specialistLabel(name: string | undefined, t: ReturnType<typeof useI18n>["t"]) {
+  if (!name) return t.specialist;
+  const meta = SPECIALIST_META[name];
+  if (!meta) return name;
+  if (meta.key === "content") return t.draftContent;
+  if (meta.key === "analytics") return t.analyzeData;
+  return t.researchCompetitors;
 }
 
 function specialistIcon(name?: string) {
@@ -77,19 +72,15 @@ export function PreviewPanel({
   width?: number;
   onToggle: () => void;
 }) {
+  const { t } = useI18n();
   const [tab, setTab] = useState<"preview" | "trace">(
     defaultTab ?? (preview ? "preview" : "trace"),
   );
-
-  // Auto-switch to Preview whenever a new item is selected (artifact created or
-  // user clicks a file chip). Keyed on the item id so re-selecting the same item
-  // after manually switching to Trace won't yank the user back.
   const lastIdRef = useRef<string | null>(null);
+
   useEffect(() => {
     const id = preview ? `${preview.source}:${preview.id}` : null;
-    if (id && id !== lastIdRef.current) {
-      setTab("preview");
-    }
+    if (id && id !== lastIdRef.current) setTab("preview");
     lastIdRef.current = id;
   }, [preview]);
 
@@ -99,8 +90,8 @@ export function PreviewPanel({
         <button
           onClick={onToggle}
           className="w-9 h-9 inline-flex items-center justify-center rounded-md hover:bg-bg-elevated text-fg-muted"
-          aria-label="Expand preview panel"
-          title="Expand preview panel"
+          aria-label={t.expandPreview}
+          title={t.expandPreview}
         >
           <PanelRight size={16} />
         </button>
@@ -114,26 +105,16 @@ export function PreviewPanel({
       style={{ width: width ?? 384 }}
     >
       <header className="px-2 py-2 border-b border-border flex items-center gap-1">
-        <TabButton
-          active={tab === "preview"}
-          onClick={() => setTab("preview")}
-          icon={Eye}
-          label="Preview"
-        />
-        <TabButton
-          active={tab === "trace"}
-          onClick={() => setTab("trace")}
-          icon={Activity}
-          label="Trace"
-        />
+        <TabButton active={tab === "preview"} onClick={() => setTab("preview")} icon={Eye} label={t.preview} />
+        <TabButton active={tab === "trace"} onClick={() => setTab("trace")} icon={Activity} label={t.trace} />
         <span className="ml-auto text-[10px] text-fg-subtle pr-2">
-          {tab === "trace" ? "live" : preview ? preview.filename : "no preview"}
+          {tab === "trace" ? t.live : preview ? preview.filename : t.noPreview}
         </span>
         <button
           onClick={onToggle}
           className="w-8 h-8 inline-flex items-center justify-center rounded-md hover:bg-bg-elevated text-fg-muted"
-          aria-label="Collapse preview panel"
-          title="Collapse preview panel"
+          aria-label={t.collapsePreview}
+          title={t.collapsePreview}
         >
           <PanelRightClose size={14} />
         </button>
@@ -177,38 +158,26 @@ function TabButton({
 function iconForMime(mime: string): LucideIcon {
   if (mime.startsWith("image/")) return FileImage;
   if (mime === "application/pdf") return FileText;
-  if (mime.includes("csv") || mime.includes("excel") || mime.includes("spreadsheet"))
-    return FileSpreadsheet;
+  if (mime.includes("csv") || mime.includes("excel") || mime.includes("spreadsheet")) return FileSpreadsheet;
   return FileIcon;
 }
 
 function PreviewBody({ item }: { item: PreviewItem | null }) {
+  const { t } = useI18n();
   if (!item) {
     return (
       <div className="flex-1 flex items-center justify-center p-8">
         <div className="text-center max-w-xs">
           <Eye size={28} className="mx-auto text-fg-subtle mb-3" />
-          <p className="text-sm text-fg-muted">
-            Generated PDFs and uploaded files appear here.
-          </p>
-          <p className="mt-2 text-xs text-fg-subtle">
-            Ask for a PDF deliverable and the result will be previewable
-            with a download button — your save location is chosen at
-            download time.
-          </p>
+          <p className="text-sm text-fg-muted">{t.previewEmptyTitle}</p>
+          <p className="mt-2 text-xs text-fg-subtle">{t.previewEmptyBody}</p>
         </div>
       </div>
     );
   }
 
-  const previewUrl =
-    item.source === "artifact"
-      ? artifactPreviewUrl(item.id)
-      : uploadPreviewUrl(item.id);
-  const downloadUrl =
-    item.source === "artifact"
-      ? artifactDownloadUrl(item.id)
-      : uploadDownloadUrl(item.id);
+  const previewUrl = item.source === "artifact" ? artifactPreviewUrl(item.id) : uploadPreviewUrl(item.id);
+  const downloadUrl = item.source === "artifact" ? artifactDownloadUrl(item.id) : uploadDownloadUrl(item.id);
   const Icon = iconForMime(item.mime);
 
   return (
@@ -222,40 +191,27 @@ function PreviewBody({ item }: { item: PreviewItem | null }) {
           href={downloadUrl}
           download={item.filename}
           className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-accent text-accent-fg text-xs font-medium hover:opacity-90 transition"
-          title="Choose a location and download"
+          title={t.download}
         >
           <Download size={12} />
-          <span>Download</span>
+          <span>{t.download}</span>
         </a>
       </div>
       <div className="flex-1 overflow-hidden bg-bg">
         {item.mime === "application/pdf" ? (
-          <iframe
-            src={previewUrl}
-            title={item.filename}
-            className="w-full h-full border-0"
-          />
+          <iframe src={previewUrl} title={item.filename} className="w-full h-full border-0" />
         ) : item.mime.startsWith("image/") ? (
           <div className="w-full h-full flex items-center justify-center overflow-auto p-4">
-            {/* Dynamic API file previews are intentionally served directly. */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={previewUrl}
-              alt={item.filename}
-              className="max-w-full max-h-full object-contain"
-            />
+            <img src={previewUrl} alt={item.filename} className="max-w-full max-h-full object-contain" />
           </div>
         ) : item.mime === "text/csv" ? (
           <CsvPreview url={previewUrl} />
         ) : (
           <div className="p-6 text-center">
             <Icon size={32} className="mx-auto text-fg-subtle mb-3" />
-            <p className="text-sm text-fg-muted">
-              {item.filename}
-            </p>
-            <p className="mt-1 text-xs text-fg-subtle">
-              No inline preview for this file type — use Download.
-            </p>
+            <p className="text-sm text-fg-muted">{item.filename}</p>
+            <p className="mt-1 text-xs text-fg-subtle">{t.noInlinePreview}</p>
           </div>
         )}
       </div>
@@ -264,6 +220,7 @@ function PreviewBody({ item }: { item: PreviewItem | null }) {
 }
 
 function CsvPreview({ url }: { url: string }) {
+  const { t } = useI18n();
   const [rows, setRows] = useState<string[][] | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -287,7 +244,7 @@ function CsvPreview({ url }: { url: string }) {
   }, [url]);
 
   if (err) return <p className="p-4 text-xs text-danger">{err}</p>;
-  if (!rows) return <p className="p-4 text-xs text-fg-subtle">Loading…</p>;
+  if (!rows) return <p className="p-4 text-xs text-fg-subtle">{t.csvLoading}</p>;
 
   const [header, ...body] = rows;
   return (
@@ -314,9 +271,7 @@ function CsvPreview({ url }: { url: string }) {
           ))}
         </tbody>
       </table>
-      {body.length >= 49 ? (
-        <p className="text-fg-subtle mt-2">Preview truncated to first 50 rows.</p>
-      ) : null}
+      {body.length >= 49 ? <p className="text-fg-subtle mt-2">{t.csvTruncated}</p> : null}
     </div>
   );
 }
@@ -328,23 +283,22 @@ function TraceBody({
   events: TraceEvent[];
   totals: { input: number; output: number };
 }) {
+  const { t } = useI18n();
   return (
     <>
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
         {events.length === 0 ? (
-          <p className="text-xs text-fg-subtle px-2 py-6 text-center">
-            Specialist activity will appear here in real time.
-          </p>
+          <p className="text-xs text-fg-subtle px-2 py-6 text-center">{t.traceEmpty}</p>
         ) : (
           events.map((e, i) => <TraceItem key={i} event={e} />)
         )}
       </div>
       <footer className="px-4 py-3 border-t border-border text-[11px] text-fg-muted flex justify-between">
         <span>
-          tokens in: <strong className="text-fg">{totals.input}</strong>
+          {t.tokensIn}: <strong className="text-fg">{totals.input}</strong>
         </span>
         <span>
-          tokens out: <strong className="text-fg">{totals.output}</strong>
+          {t.tokensOut}: <strong className="text-fg">{totals.output}</strong>
         </span>
       </footer>
     </>
@@ -352,6 +306,7 @@ function TraceBody({
 }
 
 function TraceItem({ event }: { event: TraceEvent }) {
+  const { t } = useI18n();
   const { event: type, payload } = event;
 
   if (type === "started") {
@@ -359,7 +314,7 @@ function TraceItem({ event }: { event: TraceEvent }) {
       <div className="rounded-lg border border-border/60 bg-bg-elevated/60 px-3 py-2 animate-fade-in">
         <div className="flex items-center gap-2 text-[11px] text-fg-muted">
           <Cpu size={12} />
-          <span>{String(payload.message ?? "Connected.")}</span>
+          <span>{t.connected}</span>
         </div>
       </div>
     );
@@ -375,11 +330,9 @@ function TraceItem({ event }: { event: TraceEvent }) {
         <div className="flex items-center gap-2 text-xs font-medium text-accent">
           <ChevronRight size={14} />
           <Icon size={14} />
-          <span>Delegating → {specialistLabel(name)}</span>
+          <span>{t.delegating} {specialistLabel(name, t)}</span>
         </div>
-        {task ? (
-          <p className="mt-1.5 text-[11px] text-fg-muted line-clamp-3">{task}</p>
-        ) : null}
+        {task ? <p className="mt-1.5 text-[11px] text-fg-muted line-clamp-3">{task}</p> : null}
       </div>
     );
   }
@@ -391,9 +344,9 @@ function TraceItem({ event }: { event: TraceEvent }) {
       <div className="rounded-lg border border-border bg-bg-elevated p-3 animate-fade-in">
         <div className="flex items-center gap-2 text-xs font-medium text-success">
           <CheckCircle2 size={14} />
-          <span>{specialistLabel(name)} returned</span>
+          <span>{specialistLabel(name, t)} {t.specialistReturned}</span>
         </div>
-        <p className="mt-1 text-[11px] text-fg-subtle">{chars} chars</p>
+        <p className="mt-1 text-[11px] text-fg-subtle">{chars} {t.chars}</p>
       </div>
     );
   }
@@ -403,26 +356,21 @@ function TraceItem({ event }: { event: TraceEvent }) {
       <div className="rounded-lg border border-danger/40 bg-danger/10 p-3 animate-fade-in">
         <div className="flex items-center gap-2 text-xs font-medium text-danger">
           <AlertCircle size={14} />
-          <span>{specialistLabel(payload.specialist as string)} failed</span>
+          <span>{specialistLabel(payload.specialist as string, t)} {t.specialistFailed}</span>
         </div>
-        <p className="mt-1 text-[11px] text-fg-muted">
-          {String(payload.error ?? "")}
-        </p>
+        <p className="mt-1 text-[11px] text-fg-muted">{String(payload.error ?? "")}</p>
       </div>
     );
   }
 
   if (type === "orchestrator_response") {
-    const usage = payload.usage as
-      | { input_tokens?: number; output_tokens?: number }
-      | undefined;
+    const usage = payload.usage as { input_tokens?: number; output_tokens?: number } | undefined;
     return (
       <div className="rounded-lg border border-border/60 bg-bg-elevated/60 px-3 py-2 animate-fade-in">
         <div className="flex items-center gap-2 text-[11px] text-fg-muted">
           <Cpu size={12} />
           <span>
-            orchestrator {String(payload.stop_reason)} · in= {usage?.input_tokens ?? 0}
-            {" "}out={usage?.output_tokens ?? 0}
+            {t.orchestrator} {String(payload.stop_reason)} · {t.tokensShortIn}={usage?.input_tokens ?? 0} {t.tokensShortOut}={usage?.output_tokens ?? 0}
           </span>
         </div>
       </div>
@@ -434,7 +382,7 @@ function TraceItem({ event }: { event: TraceEvent }) {
       <div className="rounded-lg border border-accent/40 bg-accent/10 p-3 animate-fade-in">
         <div className="flex items-center gap-2 text-xs font-medium text-accent">
           <FileText size={14} />
-          <span>Artifact ready: {String(payload.filename)}</span>
+          <span>{t.artifactReady}: {String(payload.filename)}</span>
         </div>
       </div>
     );
@@ -445,11 +393,9 @@ function TraceItem({ event }: { event: TraceEvent }) {
       <div className="rounded-lg border border-danger/40 bg-danger/10 p-3 animate-fade-in">
         <div className="flex items-center gap-2 text-xs font-medium text-danger">
           <AlertCircle size={14} />
-          <span>Error</span>
+          <span>{t.error}</span>
         </div>
-        <p className="mt-1 text-[11px] text-fg-muted">
-          {String(payload.message ?? "")}
-        </p>
+        <p className="mt-1 text-[11px] text-fg-muted">{String(payload.message ?? "")}</p>
       </div>
     );
   }
@@ -459,11 +405,9 @@ function TraceItem({ event }: { event: TraceEvent }) {
       <div className="rounded-lg border border-border bg-bg-elevated p-3 animate-fade-in">
         <div className="flex items-center gap-2 text-xs font-medium text-fg-muted">
           <AlertCircle size={14} />
-          <span>Stream cancelled</span>
+          <span>{t.streamCancelled}</span>
         </div>
-        <p className="mt-1 text-[11px] text-fg-muted">
-          {String(payload.message ?? "The connection was closed.")}
-        </p>
+        <p className="mt-1 text-[11px] text-fg-muted">{String(payload.message ?? "")}</p>
       </div>
     );
   }
@@ -479,9 +423,7 @@ export function classifyTotals(events: TraceEvent[]): {
   let output = 0;
   for (const e of events) {
     if (e.event === "orchestrator_response") {
-      const usage = e.payload.usage as
-        | { input_tokens?: number; output_tokens?: number }
-        | undefined;
+      const usage = e.payload.usage as { input_tokens?: number; output_tokens?: number } | undefined;
       input += usage?.input_tokens ?? 0;
       output += usage?.output_tokens ?? 0;
     }

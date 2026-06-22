@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useRef, useState } from "react";
 import { uploadFile, type UploadResponse } from "@/lib/api";
+import { localizeError, useI18n } from "@/lib/i18n";
 
 const ACCEPT = ".csv,.pdf,.docx,image/png,image/jpeg";
 
@@ -32,6 +33,7 @@ export function FileUploader({
   onRemove: (fileId: string) => void;
   onPreview?: (f: UploadResponse) => void;
 }) {
+  const { locale, t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +47,7 @@ export function FileUploader({
         onAttach(resp);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Upload failed");
+      setError(localizeError(e, locale));
     } finally {
       setBusy(false);
     }
@@ -65,10 +67,10 @@ export function FileUploader({
           ) : (
             <Paperclip size={14} />
           )}
-          <span>{busy ? "Uploading…" : "Attach Files"}</span>
+          <span>{busy ? t.uploading : t.attachFiles}</span>
         </button>
         <span className="text-[10px] text-fg-subtle">
-          CSV · PDF · Word · PNG/JPG
+          {t.fileTypes}
         </span>
         <input
           ref={inputRef}
@@ -106,7 +108,7 @@ export function FileUploader({
                 <button
                   onClick={() => onRemove(f.file_id)}
                   className="ml-0.5 text-fg-subtle hover:text-danger transition"
-                  aria-label="Remove file"
+                  aria-label={t.removeFile}
                 >
                   <X size={13} />
                 </button>

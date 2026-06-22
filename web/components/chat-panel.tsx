@@ -6,6 +6,7 @@ import { MessageBubble, type ChatMessage, type MessageArtifact } from "./message
 import { FileUploader } from "./file-uploader";
 import { ExamplePrompts } from "./example-prompts";
 import type { UploadResponse } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 
 export function ChatPanel({
   messages,
@@ -32,6 +33,7 @@ export function ChatPanel({
   onPreviewArtifact: (a: MessageArtifact) => void;
   userAvatar?: string | null;
 }) {
+  const { t } = useI18n();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -49,12 +51,10 @@ export function ChatPanel({
           <div className="h-full flex flex-col items-center justify-center px-6 py-12 gap-8">
             <div className="text-center max-w-xl">
               <h1 className="text-3xl font-semibold tracking-tight">
-                Your marketing team&apos;s AI copilot
+                {t.heroTitle}
               </h1>
               <p className="mt-2 text-fg-muted text-sm">
-                Ask for content, campaign analysis, or competitor research.
-                The orchestrator routes to specialists and synthesizes the
-                result.
+                {t.heroBody}
               </p>
             </div>
             <ExamplePrompts
@@ -96,7 +96,7 @@ export function ChatPanel({
                 }
               }}
               rows={1}
-              placeholder="Ask the marketing team anything…  (Enter to send, Shift+Enter for newline)"
+              placeholder={t.inputPlaceholder}
               disabled={busy}
               className="flex-1 resize-none bg-transparent px-4 py-3 text-sm placeholder:text-fg-subtle focus:outline-none disabled:opacity-50 max-h-48"
               style={{ minHeight: 48 }}
@@ -105,7 +105,7 @@ export function ChatPanel({
               onClick={onSend}
               disabled={busy || !input.trim()}
               className="m-1.5 inline-flex items-center justify-center w-9 h-9 rounded-lg bg-accent text-accent-fg hover:opacity-90 transition disabled:opacity-40 disabled:cursor-not-allowed"
-              aria-label="Send"
+              aria-label={t.send}
             >
               {busy ? (
                 <Loader2 size={16} className="animate-spin" />

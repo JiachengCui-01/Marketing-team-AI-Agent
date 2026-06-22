@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { ContextMenu, type MenuItem } from "./context-menu";
 import type { GroupRecord, SessionRecord } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 
 type MenuState =
   | { kind: "session"; id: string; x: number; y: number }
@@ -52,6 +53,7 @@ export function SessionSidebar({
   onRenameGroup: (id: string, name: string) => void;
   onDeleteGroup: (id: string) => void;
 }) {
+  const { t } = useI18n();
   const [menu, setMenu] = useState<MenuState>(null);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
@@ -73,16 +75,16 @@ export function SessionSidebar({
         <button
           onClick={onToggle}
           className="w-9 h-9 inline-flex items-center justify-center rounded-md hover:bg-bg-elevated text-fg-muted"
-          aria-label="Expand sidebar"
-          title="Expand sidebar"
+          aria-label={t.expandSidebar}
+          title={t.expandSidebar}
         >
           <PanelLeft size={16} />
         </button>
         <button
           onClick={onNewChat}
           className="w-9 h-9 inline-flex items-center justify-center rounded-md bg-accent text-accent-fg hover:opacity-90"
-          aria-label="New chat"
-          title="New chat"
+          aria-label={t.newChat}
+          title={t.newChat}
         >
           <Plus size={16} />
         </button>
@@ -108,15 +110,15 @@ export function SessionSidebar({
       })),
       ...(groups.length ? [{ type: "separator" as const }] : []),
       {
-        label: "Ungrouped",
+        label: t.ungrouped,
         icon: FolderInput,
         onClick: () => onMoveSession(id, null),
       },
       {
-        label: "New group…",
+        label: t.newGroup,
         icon: FolderPlus,
         onClick: async () => {
-          const name = window.prompt("Group name:");
+          const name = window.prompt(t.groupNamePrompt);
           if (!name) return;
           const newId = await onCreateGroup(name.trim());
           if (typeof newId === "string") onMoveSession(id, newId);
@@ -126,27 +128,27 @@ export function SessionSidebar({
 
     return [
       {
-        label: "Rename",
+        label: t.rename,
         icon: Pencil,
         onClick: () => {
           const current = sessions.find((s) => s.id === id);
-          const name = window.prompt("Rename chat:", current?.name ?? "");
+          const name = window.prompt(t.renameChatPrompt, current?.name ?? "");
           if (name && name.trim()) onRenameSession(id, name.trim());
         },
       },
       {
         type: "submenu",
-        label: "Move to group",
+        label: t.moveToGroup,
         icon: FolderInput,
         items: moveItems,
       },
       { type: "separator" },
       {
-        label: "Delete",
+        label: t.deleteChat,
         icon: Trash2,
         danger: true,
         onClick: () => {
-          if (window.confirm("Delete this chat? This cannot be undone."))
+          if (window.confirm(t.deleteChatConfirm))
             onDeleteSession(id);
         },
       },
@@ -156,23 +158,23 @@ export function SessionSidebar({
   function buildGroupMenu(id: string): MenuItem[] {
     return [
       {
-        label: "Rename group",
+        label: t.renameGroup,
         icon: Pencil,
         onClick: () => {
           const current = groups.find((g) => g.id === id);
-          const name = window.prompt("Rename group:", current?.name ?? "");
+          const name = window.prompt(t.renameGroupPrompt, current?.name ?? "");
           if (name && name.trim()) onRenameGroup(id, name.trim());
         },
       },
       { type: "separator" },
       {
-        label: "Delete group (and its chats)",
+        label: t.deleteGroup,
         icon: Trash2,
         danger: true,
         onClick: () => {
           if (
             window.confirm(
-              "Delete this group and ALL chats inside it? This cannot be undone.",
+              t.deleteGroupConfirm,
             )
           )
             onDeleteGroup(id);
@@ -192,24 +194,24 @@ export function SessionSidebar({
           className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md bg-accent text-accent-fg text-sm font-medium hover:opacity-90 transition"
         >
           <Plus size={14} />
-          <span>New chat</span>
+          <span>{t.newChat}</span>
         </button>
         <button
           onClick={async () => {
-            const name = window.prompt("New group name:");
+            const name = window.prompt(t.groupNamePrompt);
             if (name && name.trim()) await onCreateGroup(name.trim());
           }}
           className="w-9 h-9 inline-flex items-center justify-center rounded-md border border-border hover:bg-bg-elevated text-fg-muted"
-          title="New group"
-          aria-label="New group"
+          title={t.newGroup}
+          aria-label={t.newGroup}
         >
           <FolderPlus size={14} />
         </button>
         <button
           onClick={onToggle}
           className="w-9 h-9 inline-flex items-center justify-center rounded-md hover:bg-bg-elevated text-fg-muted"
-          title="Collapse sidebar"
-          aria-label="Collapse sidebar"
+          title={t.collapseSidebar}
+          aria-label={t.collapseSidebar}
         >
           <PanelLeftClose size={14} />
         </button>
@@ -218,7 +220,7 @@ export function SessionSidebar({
       <div className="flex-1 overflow-y-auto py-2 px-1.5 text-sm">
         {groups.length === 0 && sessions.length === 0 ? (
           <p className="px-3 py-6 text-xs text-fg-subtle text-center">
-            No chats yet. Start one with &ldquo;New chat&rdquo;.
+            {t.noChats}
           </p>
         ) : null}
 
@@ -255,7 +257,7 @@ export function SessionSidebar({
 
         {ungrouped.length > 0 && groups.length > 0 ? (
           <div className="px-2 mt-2 mb-1 text-[10px] uppercase tracking-wider text-fg-subtle">
-            Ungrouped
+            {t.ungrouped}
           </div>
         ) : null}
         {ungrouped.map((s) => (

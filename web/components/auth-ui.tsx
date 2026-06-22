@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Check,
   ChevronDown,
   HelpCircle,
   LogOut,
@@ -25,6 +24,7 @@ import {
   type UserProfile,
 } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { LanguageToggle, localizeError, useI18n } from "@/lib/i18n";
 
 const REMEMBERED_KEY = "marketing-agent-remembered-accounts";
 
@@ -76,12 +76,13 @@ export function AvatarImage({
   className?: string;
   label?: string;
 }) {
+  const { locale, t } = useI18n();
   if (!avatar) return <DefaultAvatar className={className} />;
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={avatar}
-      alt={label ?? "User avatar"}
+      alt={label ?? t.userAvatar}
       className={cn("rounded-full object-cover bg-bg-subtle", className)}
     />
   );
@@ -97,6 +98,7 @@ export function AuthScreen({ onAuthenticated }: { onAuthenticated: (token: strin
 }
 
 function AuthShell({ children }: { children: React.ReactNode }) {
+  const { locale, t } = useI18n();
   return (
     <main className="min-h-screen bg-bg text-fg flex flex-col">
       <header className="border-b border-border bg-bg-elevated/60 backdrop-blur">
@@ -105,8 +107,11 @@ function AuthShell({ children }: { children: React.ReactNode }) {
             <Sparkles size={16} />
           </div>
           <div>
-            <h1 className="text-sm font-semibold tracking-tight">Marketing Agent</h1>
-            <p className="text-[11px] text-fg-subtle">Account workspace</p>
+            <h1 className="text-sm font-semibold tracking-tight">{t.appName}</h1>
+            <p className="text-[11px] text-fg-subtle">{t.authSubtitle}</p>
+          </div>
+          <div className="ml-auto">
+            <LanguageToggle />
           </div>
         </div>
       </header>
@@ -122,6 +127,7 @@ function LoginPanel({
   onAuthenticated: (token: string, user: UserProfile) => void;
   onRegister: () => void;
 }) {
+  const { locale, t } = useI18n();
   const [account, setAccount] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
@@ -171,7 +177,7 @@ function LoginPanel({
       }
       onAuthenticated(res.token, res.user);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(localizeError(err, locale));
     } finally {
       setBusy(false);
     }
@@ -191,7 +197,7 @@ function LoginPanel({
           type="button"
           onClick={() => setAvatarOpen((open) => !open)}
           className="relative mx-auto block"
-          title="选择记住的登录账号"
+          title={t.chooseRememberedAccount}
         >
           <AvatarImage avatar={avatar} className="h-20 w-20 ring-4 ring-bg-subtle" />
         </button>
@@ -204,21 +210,8 @@ function LoginPanel({
           />
         ) : null}
         <div className="mt-6 space-y-3">
-          <TextInput
-            label="邮箱或手机号"
-            value={account}
-            onChange={setAccount}
-            autoComplete="username"
-            placeholder="邮箱或手机号"
-          />
-          <TextInput
-            label="密码"
-            value={password}
-            onChange={setPassword}
-            type="password"
-            autoComplete="current-password"
-            placeholder="请输入密码"
-          />
+          <TextInput label={t.account} value={account} onChange={setAccount} autoComplete="username" placeholder={t.account} />
+          <TextInput label={t.password} value={password} onChange={setPassword} type="password" autoComplete="current-password" placeholder={t.passwordInput} />
           <label className="flex items-center gap-2 text-sm text-fg-muted">
             <input
               type="checkbox"
@@ -226,7 +219,7 @@ function LoginPanel({
               onChange={(e) => setRemember(e.target.checked)}
               className="h-4 w-4 accent-accent"
             />
-            记住我
+            {t.rememberMe}
           </label>
           {error ? <p className="text-xs text-danger">{error}</p> : null}
           <button
@@ -235,22 +228,22 @@ function LoginPanel({
             disabled={busy || !account.trim() || !password}
             className="w-full rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-accent-fg disabled:opacity-40"
           >
-            {busy ? "登录中..." : "登录"}
+            {busy ? t.loggingIn : t.login}
           </button>
           <button
             type="button"
             onClick={onRegister}
             className="w-full rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-fg-muted hover:bg-bg-subtle"
           >
-            注册账号
+            {t.registerAccount}
           </button>
         </div>
       </section>
       {deleteTarget ? (
         <ConfirmDialog
-          title="删除记住的登录账号"
-          body={`仅从当前设备删除 ${deleteTarget.account} 的记住记录，数据库账号不会被删除。`}
-          confirmLabel="删除"
+          title={t.deleteRememberedTitle}
+          body={t.deleteRememberedBody(deleteTarget.account)}
+          confirmLabel={t.delete}
           danger
           onCancel={() => setDeleteTarget(null)}
           onConfirm={() => {
@@ -271,8 +264,9 @@ function RegisterPanel({
   onAuthenticated: (token: string, user: UserProfile) => void;
   onBack: () => void;
 }) {
+  const { locale, t } = useI18n();
   const [form, setForm] = useState<ProfilePayload>({
-        account: "",
+    account: "",
     password: "",
     username: "",
     real_name: "",
@@ -295,7 +289,7 @@ function RegisterPanel({
   async function submit() {
     setError(null);
     if (!idCardValid) {
-      setError("身份证号格式或校验位不正确。");
+      setError(t.idCardError);
       return;
     }
     setBusy(true);
@@ -304,7 +298,7 @@ function RegisterPanel({
       setAuthToken(res.token);
       onAuthenticated(res.token, res.user);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(localizeError(err, locale));
     } finally {
       setBusy(false);
     }
@@ -315,33 +309,28 @@ function RegisterPanel({
       <section className="w-full max-w-2xl rounded-xl border border-border bg-bg-elevated p-6 shadow-sm">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-base font-semibold">注册账号</h2>
-            <p className="text-xs text-fg-subtle">带 * 的项目为必填。</p>
+            <h2 className="text-base font-semibold">{t.registerTitle}</h2>
+            <p className="text-xs text-fg-subtle">{t.requiredHint}</p>
           </div>
           <AvatarPicker avatar={form.avatar ?? null} onChange={(avatar) => set("avatar", avatar)} />
         </div>
         <div className="mt-5 grid gap-3 md:grid-cols-2">
-          <TextInput
-            label="邮箱或手机号 *"
-            value={form.account ?? ""}
-            onChange={(v) => set("account", v)}
-            placeholder="邮箱或手机号"
-          />
-          <TextInput label="密码 *" type="password" value={form.password ?? ""} onChange={(v) => set("password", v)} placeholder="至少 8 位" />
-          <TextInput label="用户名 *" value={form.username} onChange={(v) => set("username", v)} placeholder="展示名称" />
-          <TextInput label="真实姓名 *" value={form.real_name ?? ""} onChange={(v) => set("real_name", v)} placeholder="实名姓名" />
-          <TextInput label="身份证号 *" value={form.id_card ?? ""} onChange={(v) => set("id_card", v.toUpperCase())} placeholder="18 位身份证号" error={form.id_card && !idCardValid ? "身份证号格式或校验位不正确" : undefined} />
-          <TextInput label="手机号" value={form.phone ?? ""} onChange={(v) => set("phone", v)} placeholder="11 位手机号" />
-          <TextInput label="邮箱" value={form.email ?? ""} onChange={(v) => set("email", v)} placeholder="name@example.com" />
-          <TextInput label="公司" value={form.company ?? ""} onChange={(v) => set("company", v)} placeholder="公司名称" />
-          <TextInput label="职位" value={form.title ?? ""} onChange={(v) => set("title", v)} placeholder="职位名称" />
+          <TextInput label={t.accountRequired} value={form.account ?? ""} onChange={(v) => set("account", v)} placeholder={t.account} />
+          <TextInput label={t.passwordRequired} type="password" value={form.password ?? ""} onChange={(v) => set("password", v)} placeholder={t.passwordHint} />
+          <TextInput label={t.usernameRequired} value={form.username} onChange={(v) => set("username", v)} placeholder={t.usernameHint} />
+          <TextInput label={t.realNameRequired} value={form.real_name ?? ""} onChange={(v) => set("real_name", v)} placeholder={t.realNameHint} />
+          <TextInput label={t.idCardRequired} value={form.id_card ?? ""} onChange={(v) => set("id_card", v.toUpperCase())} placeholder={t.idCardHint} error={form.id_card && !idCardValid ? t.idCardError : undefined} />
+          <TextInput label={t.phone} value={form.phone ?? ""} onChange={(v) => set("phone", v)} placeholder={t.phoneHint} />
+          <TextInput label={t.email} value={form.email ?? ""} onChange={(v) => set("email", v)} placeholder={t.emailHint} />
+          <TextInput label={t.company} value={form.company ?? ""} onChange={(v) => set("company", v)} placeholder={t.companyHint} />
+          <TextInput label={t.title} value={form.title ?? ""} onChange={(v) => set("title", v)} placeholder={t.titleHint} />
           <label className="md:col-span-2 text-xs font-medium text-fg-muted">
-            简介
+            {t.bio}
             <textarea
               value={form.bio ?? ""}
               onChange={(e) => set("bio", e.target.value)}
               rows={3}
-              placeholder="简单介绍"
+              placeholder={t.bioHint}
               className="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent"
             />
           </label>
@@ -349,10 +338,10 @@ function RegisterPanel({
         {error ? <p className="mt-3 text-xs text-danger">{error}</p> : null}
         <div className="mt-5 flex justify-end gap-2">
           <button type="button" onClick={onBack} className="rounded-lg border border-border px-4 py-2 text-sm text-fg-muted hover:bg-bg-subtle">
-            返回登录
+            {t.backToLogin}
           </button>
           <button type="button" onClick={submit} disabled={busy} className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg disabled:opacity-40">
-            {busy ? "提交中..." : "完成注册"}
+            {busy ? t.submitting : t.finishRegister}
           </button>
         </div>
       </section>
@@ -371,19 +360,21 @@ export function UserMenu({
   onLogout: () => void;
   onSwitchAccount: () => void;
 }) {
+  const { locale, t } = useI18n();
   const [open, setOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [placeholder, setPlaceholder] = useState<string | null>(null);
 
   const menuItems = [
-    { label: "设置", icon: Settings, onClick: () => setPlaceholder("设置") },
-    { label: "切换账号", icon: UserRoundCog, onClick: onSwitchAccount },
-    { label: "个人信息", icon: UserRound, onClick: () => setProfileOpen(true) },
-    { label: "订阅套餐", icon: WalletCards, onClick: () => setPlaceholder("订阅套餐") },
-    { label: "帮助", icon: HelpCircle, onClick: () => setPlaceholder("帮助") },
-    { label: "退出登录", icon: LogOut, onClick: onLogout },
-    { label: "注销账号", icon: ShieldAlert, danger: true, onClick: () => setDeleteOpen(true) },
+    { label: t.settings, icon: Settings, onClick: () => setSettingsOpen(true) },
+    { label: t.switchAccount, icon: UserRoundCog, onClick: onSwitchAccount },
+    { label: t.profile, icon: UserRound, onClick: () => setProfileOpen(true) },
+    { label: t.subscription, icon: WalletCards, onClick: () => setPlaceholder(t.subscription) },
+    { label: t.help, icon: HelpCircle, onClick: () => setPlaceholder(t.help) },
+    { label: t.logout, icon: LogOut, onClick: onLogout },
+    { label: t.deleteAccount, icon: ShieldAlert, danger: true, onClick: () => setDeleteOpen(true) },
   ];
 
   return (
@@ -401,7 +392,7 @@ export function UserMenu({
           <div className="absolute right-0 top-11 z-30 w-52 rounded-xl border border-border bg-bg-elevated p-1.5 shadow-lg">
             <div className="px-3 py-2">
               <p className="truncate text-sm font-medium">{user.username}</p>
-          <p className="truncate text-xs text-fg-subtle">{user.account}</p>
+              <p className="truncate text-xs text-fg-subtle">{user.account}</p>
             </div>
             <div className="my-1 h-px bg-border" />
             {menuItems.map((item) => {
@@ -427,6 +418,7 @@ export function UserMenu({
           </div>
         ) : null}
       </div>
+      {settingsOpen ? <SettingsDialog onClose={() => setSettingsOpen(false)} /> : null}
       {profileOpen ? (
         <ProfileDialog
           user={user}
@@ -441,7 +433,7 @@ export function UserMenu({
       {placeholder ? (
         <InfoDialog
           title={placeholder}
-          body={`${placeholder}功能入口已预留，后续可在这里接入完整业务内容。`}
+          body={t.placeholderBody(placeholder)}
           onClose={() => setPlaceholder(null)}
         />
       ) : null}
@@ -458,6 +450,7 @@ export function SwitchAccountPanel({
   onClose: () => void;
   onAuthenticated: (token: string, user: UserProfile) => void;
 }) {
+  const { locale, t } = useI18n();
   const [items, setItems] = useState<RememberedAccount[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<RememberedAccount | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -476,7 +469,7 @@ export function SwitchAccountPanel({
       onAuthenticated(res.token, res.user);
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(localizeError(err, locale));
     }
   }
 
@@ -484,9 +477,9 @@ export function SwitchAccountPanel({
     <>
       <aside className="fixed right-4 top-20 z-30 w-72 rounded-xl border border-border bg-bg-elevated p-3 shadow-xl">
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-sm font-semibold">切换账号</h3>
+          <h3 className="text-sm font-semibold">{t.switchAccount}</h3>
           <button type="button" onClick={onClose} className="text-xs text-fg-subtle hover:text-fg">
-            关闭
+            {t.close}
           </button>
         </div>
         <RememberedList items={items} onPick={pick} onDelete={(item) => setDeleteTarget(item)} />
@@ -494,9 +487,9 @@ export function SwitchAccountPanel({
       </aside>
       {deleteTarget ? (
         <ConfirmDialog
-          title="删除记住的登录账号"
-          body={`仅从当前设备删除 ${deleteTarget.account} 的记住记录。`}
-          confirmLabel="删除"
+          title={t.deleteRememberedTitle}
+          body={t.deleteRememberedShortBody(deleteTarget.account)}
+          confirmLabel={t.delete}
           danger
           onCancel={() => setDeleteTarget(null)}
           onConfirm={() => {
@@ -537,8 +530,9 @@ function RememberedList({
   onPick: (item: RememberedAccount) => void;
   onDelete: (item: RememberedAccount) => void;
 }) {
+  const { locale, t } = useI18n();
   if (items.length === 0) {
-    return <p className="px-2 py-4 text-center text-xs text-fg-subtle">当前设备暂无记住的登录账号。</p>;
+    return <p className="px-2 py-4 text-center text-xs text-fg-subtle">{t.noRememberedAccounts}</p>;
   }
   return (
     <div className="space-y-1">
@@ -555,13 +549,43 @@ function RememberedList({
             type="button"
             onClick={() => onDelete(item)}
             className="inline-flex h-7 w-7 items-center justify-center rounded-md text-fg-subtle hover:bg-danger/10 hover:text-danger"
-            title="删除记住记录"
+            title={t.deleteRememberedRecord}
           >
             <Minus size={14} />
           </button>
         </div>
       ))}
     </div>
+  );
+}
+
+function SettingsDialog({ onClose }: { onClose: () => void }) {
+  const { locale, setLocale, t } = useI18n();
+  return (
+    <Modal title={t.settings} onClose={onClose}>
+      <div className="flex items-center justify-between rounded-lg border border-border bg-bg p-3">
+        <div>
+          <p className="text-sm font-medium">{t.language}</p>
+          <p className="text-xs text-fg-subtle">{locale === "zh" ? t.chinese : t.english}</p>
+        </div>
+        <div className="inline-flex rounded-lg border border-border bg-bg-elevated p-1">
+          <button
+            type="button"
+            onClick={() => setLocale("zh")}
+            className={cn("rounded-md px-3 py-1.5 text-xs", locale === "zh" ? "bg-accent text-accent-fg" : "text-fg-muted")}
+          >
+            {t.chinese}
+          </button>
+          <button
+            type="button"
+            onClick={() => setLocale("en")}
+            className={cn("rounded-md px-3 py-1.5 text-xs", locale === "en" ? "bg-accent text-accent-fg" : "text-fg-muted")}
+          >
+            {t.english}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -574,6 +598,7 @@ function ProfileDialog({
   onClose: () => void;
   onSaved: (user: UserProfile) => void;
 }) {
+  const { locale, t } = useI18n();
   const [form, setForm] = useState<ProfilePayload>({
     username: user.username,
     avatar: user.avatar,
@@ -598,36 +623,36 @@ function ProfileDialog({
       const next = await updateMe(form);
       onSaved(next);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(localizeError(err, locale));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <Modal title="个人信息" onClose={onClose}>
+    <Modal title={t.profile} onClose={onClose}>
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-sm text-fg-muted">登录账号：{user.account}</p>
-          <p className="text-sm text-fg-muted">实名：{user.real_name}</p>
-          <p className="text-sm text-fg-muted">身份证：{user.id_card_masked}</p>
+          <p className="text-sm text-fg-muted">{t.loginAccount}: {user.account}</p>
+          <p className="text-sm text-fg-muted">{t.realName}: {user.real_name}</p>
+          <p className="text-sm text-fg-muted">{t.idCard}: {user.id_card_masked}</p>
         </div>
         <AvatarPicker avatar={form.avatar ?? null} onChange={(avatar) => set("avatar", avatar)} />
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <TextInput label="用户名" value={form.username} onChange={(v) => set("username", v)} placeholder="展示名称" />
-        <TextInput label="修改密码" type="password" value={form.password ?? ""} onChange={(v) => set("password", v)} placeholder="留空则不修改" />
-        <TextInput label="手机号" value={form.phone ?? ""} onChange={(v) => set("phone", v)} placeholder="11 位手机号" />
-        <TextInput label="邮箱" value={form.email ?? ""} onChange={(v) => set("email", v)} placeholder="name@example.com" />
-        <TextInput label="公司" value={form.company ?? ""} onChange={(v) => set("company", v)} placeholder="公司名称" />
-        <TextInput label="职位" value={form.title ?? ""} onChange={(v) => set("title", v)} placeholder="职位名称" />
+        <TextInput label={t.usernameHint} value={form.username} onChange={(v) => set("username", v)} placeholder={t.usernameHint} />
+        <TextInput label={t.changePassword} type="password" value={form.password ?? ""} onChange={(v) => set("password", v)} placeholder={t.keepBlankPassword} />
+        <TextInput label={t.phone} value={form.phone ?? ""} onChange={(v) => set("phone", v)} placeholder={t.phoneHint} />
+        <TextInput label={t.email} value={form.email ?? ""} onChange={(v) => set("email", v)} placeholder={t.emailHint} />
+        <TextInput label={t.company} value={form.company ?? ""} onChange={(v) => set("company", v)} placeholder={t.companyHint} />
+        <TextInput label={t.title} value={form.title ?? ""} onChange={(v) => set("title", v)} placeholder={t.titleHint} />
         <label className="md:col-span-2 text-xs font-medium text-fg-muted">
-          简介
+          {t.bio}
           <textarea
             value={form.bio ?? ""}
             onChange={(e) => set("bio", e.target.value)}
             rows={3}
-            placeholder="简单介绍"
+            placeholder={t.bioHint}
             className="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent"
           />
         </label>
@@ -635,10 +660,10 @@ function ProfileDialog({
       {error ? <p className="mt-3 text-xs text-danger">{error}</p> : null}
       <div className="mt-5 flex justify-end gap-2">
         <button type="button" onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-sm text-fg-muted hover:bg-bg-subtle">
-          取消
+          {t.cancel}
         </button>
         <button type="button" onClick={save} disabled={busy} className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg disabled:opacity-40">
-          {busy ? "保存中..." : "保存"}
+          {busy ? t.saving : t.save}
         </button>
       </div>
     </Modal>
@@ -654,34 +679,35 @@ function DeleteAccountDialog({
   onClose: () => void;
   onDeleted: () => void;
 }) {
+  const { locale, t } = useI18n();
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const enabled = text.trim() === "我确认注销账号";
+  const enabled = text.trim() === t.deleteAccountConfirmText;
 
   async function submit() {
     setError(null);
     try {
-      await deleteMe(text.trim());
+      await deleteMe("我确认注销账号");
       removeRememberedAccount(account);
       onDeleted();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(localizeError(err, locale));
     }
   }
 
   return (
-    <Modal title="注销账号" onClose={onClose}>
+    <Modal title={t.deleteAccount} onClose={onClose}>
       <div className="rounded-lg border border-danger/30 bg-danger/10 p-3 text-sm text-fg-muted">
-        注销后会删除该账号和所有会话、上传文件、生成材料，且无法恢复。
+        {t.deleteAccountNotice}
       </div>
-      <TextInput label="请输入：我确认注销账号" value={text} onChange={setText} className="mt-4" />
+      <TextInput label={t.deleteAccountConfirmLabel} value={text} onChange={setText} className="mt-4" />
       {error ? <p className="mt-3 text-xs text-danger">{error}</p> : null}
       <div className="mt-5 flex justify-end gap-2">
         <button type="button" onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-sm text-fg-muted hover:bg-bg-subtle">
-          取消
+          {t.cancel}
         </button>
         <button type="button" onClick={submit} disabled={!enabled} className="rounded-lg bg-danger px-4 py-2 text-sm font-medium text-white disabled:opacity-40">
-          确认注销
+          {t.confirmDeleteAccount}
         </button>
       </div>
     </Modal>
@@ -689,17 +715,18 @@ function DeleteAccountDialog({
 }
 
 function AvatarPicker({ avatar, onChange }: { avatar: string | null; onChange: (avatar: string | null) => void }) {
+  const { t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
   return (
     <div className="flex items-center gap-3">
       <AvatarImage avatar={avatar} className="h-14 w-14" />
       <div className="space-y-1">
         <button type="button" onClick={() => inputRef.current?.click()} className="block rounded-lg border border-border px-3 py-1.5 text-xs text-fg-muted hover:bg-bg-subtle">
-          设置头像
+          {t.setAvatar}
         </button>
         {avatar ? (
           <button type="button" onClick={() => onChange(null)} className="block text-xs text-fg-subtle hover:text-danger">
-            使用默认头像
+            {t.useDefaultAvatar}
           </button>
         ) : null}
       </div>
@@ -749,7 +776,7 @@ function TextInput({
         autoComplete={autoComplete}
         placeholder={placeholder}
         className={cn(
-          "mt-1 w-full rounded-lg border bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent",
+          "mt-1 w-full rounded-lg border bg-bg px-3 py-2 text-sm text-fg outline-none placeholder:text-fg-subtle focus:border-accent",
           error ? "border-danger" : "border-border",
         )}
       />
@@ -759,13 +786,14 @@ function TextInput({
 }
 
 function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
+  const { t } = useI18n();
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
       <section className="w-full max-w-2xl rounded-xl border border-border bg-bg-elevated p-5 shadow-xl">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-semibold">{title}</h2>
           <button type="button" onClick={onClose} className="text-sm text-fg-subtle hover:text-fg">
-            关闭
+            {t.close}
           </button>
         </div>
         {children}
@@ -775,12 +803,13 @@ function Modal({ title, children, onClose }: { title: string; children: React.Re
 }
 
 function InfoDialog({ title, body, onClose }: { title: string; body: string; onClose: () => void }) {
+  const { t } = useI18n();
   return (
     <Modal title={title} onClose={onClose}>
       <p className="text-sm text-fg-muted">{body}</p>
       <div className="mt-5 flex justify-end">
         <button type="button" onClick={onClose} className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg">
-          知道了
+          {t.ok}
         </button>
       </div>
     </Modal>
@@ -802,12 +831,13 @@ function ConfirmDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <Modal title={title} onClose={onCancel}>
       <p className="text-sm text-fg-muted">{body}</p>
       <div className="mt-5 flex justify-end gap-2">
         <button type="button" onClick={onCancel} className="rounded-lg border border-border px-4 py-2 text-sm text-fg-muted hover:bg-bg-subtle">
-          取消
+          {t.cancel}
         </button>
         <button
           type="button"

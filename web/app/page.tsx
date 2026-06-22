@@ -18,6 +18,7 @@ import { SessionSidebar } from "@/components/session-sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
 import type { ChatMessage, MessageArtifact } from "@/components/message";
 import { deriveStatus } from "@/components/status-chip";
+import { useI18n } from "@/lib/i18n";
 import { useSessionsStore } from "@/lib/sessions-store";
 import {
   API_BASE,
@@ -41,6 +42,7 @@ function newId() {
 }
 
 export default function HomePage() {
+  const { t } = useI18n();
   const store = useSessionsStore();
   const [user, setUser] = useState<UserProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -204,7 +206,7 @@ export default function HomePage() {
       role: "assistant",
       content: "",
       pending: true,
-      status: deriveStatus([]),
+      status: deriveStatus([], t),
     };
     setMessages((m) => [...m, userMsg, pendingMsg]);
 
@@ -215,7 +217,7 @@ export default function HomePage() {
       setMessages((m) =>
         m.map((msg) =>
           msg.id === pendingId
-            ? { ...msg, pending: false, content: `Failed to start session: ${String(e)}` }
+            ? { ...msg, pending: false, content: `${t.failedToStartSession}: ${String(e)}` }
             : msg,
         ),
       );
@@ -270,8 +272,8 @@ export default function HomePage() {
                   content:
                     completed.text ||
                     (completed.ok
-                      ? "The request completed, but no text was returned."
-                      : "The fallback request failed without a message."),
+                      ? `${t.error}: ${t.noTextReturned}`
+                      : `${t.error}: ${t.noMessageReturned}`),
                 }
               : msg,
           ),
@@ -291,7 +293,7 @@ export default function HomePage() {
                 status: undefined,
                 content:
                   msg.content ||
-                  `Connection error. Could not keep a live stream open to ${API_BASE}. Please refresh and try again.`,
+                  `${t.error}: ${API_BASE}`,
               }
             : msg,
         ),
@@ -302,13 +304,13 @@ export default function HomePage() {
       url,
       (e) => {
         const traced = { ...e, ts: Date.now() } as TraceEvent;
-        setTrace((t) => {
-          const next = [...t, traced];
+        setTrace((prevTrace) => {
+          const next = [...prevTrace, traced];
           // Update the pending bubble's status chip from the latest trace.
           setMessages((m) =>
             m.map((msg) =>
               msg.id === pendingId && msg.pending && msg.content.length === 0
-                ? { ...msg, status: deriveStatus(next) }
+                ? { ...msg, status: deriveStatus(next, t) }
                 : msg,
             ),
           );
@@ -366,7 +368,7 @@ export default function HomePage() {
                     ...msg,
                     pending: false,
                     status: undefined,
-                    content: `**Error:** ${String(e.payload.message ?? "")}`,
+                    content: `**${t.error}:** ${String(e.payload.message ?? "")}`,
                   }
                 : msg,
             ),
@@ -381,7 +383,7 @@ export default function HomePage() {
                     status: undefined,
                     content:
                       msg.content ||
-                      `**Cancelled:** ${String(e.payload.message ?? "The connection was closed.")}`,
+                      `**${t.streamCancelled}:** ${String(e.payload.message ?? t.connectionClosed)}`,
                   }
                 : msg,
             ),
@@ -403,7 +405,7 @@ export default function HomePage() {
     closeRef.current = close;
     // Clear attachments after sending.
     setAttached([]);
-  }, [input, busy, attached, ensureSession, store]);
+  }, [input, busy, attached, ensureSession, store, t]);
 
   const onPreviewUpload = useCallback((f: UploadResponse) => {
     setPreview({
@@ -456,8 +458,8 @@ export default function HomePage() {
   const handleAuthenticated = useCallback(
     (token: string, profile: UserProfile) => {
       setAuthToken(token);
-    setUser(profile);
-    setSwitchOpen(false);
+      setUser(profile);
+      setSwitchOpen(false);
       setActiveId(null);
       setMessages([]);
       setTrace([]);
@@ -487,7 +489,7 @@ export default function HomePage() {
   if (authLoading) {
     return (
       <main className="h-screen flex items-center justify-center bg-bg text-fg-muted">
-        Loading account...
+        {t.loadingAccount}
       </main>
     );
   }
@@ -505,10 +507,10 @@ export default function HomePage() {
           </div>
           <div>
             <h1 className="text-sm font-semibold tracking-tight">
-              Marketing Agent
+              {t.appName}
             </h1>
             <p className="text-[11px] text-fg-subtle">
-              Content · Analytics · Research
+              {t.navSubtitle}
             </p>
           </div>
           <div className="ml-auto flex items-center gap-1">
@@ -593,10 +595,11 @@ function ResizeHandle({
   side: "left" | "right";
   onMouseDown: (e: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
+  const { t } = useI18n();
   return (
     <button
       type="button"
-      aria-label={`Resize ${side} panel`}
+      aria-label={t.resizePanel(side)}
       onMouseDown={onMouseDown}
       className={`hidden ${
         side === "left" ? "md:block" : "lg:block"
