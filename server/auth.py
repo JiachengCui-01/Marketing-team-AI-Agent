@@ -14,7 +14,6 @@ from fastapi import HTTPException, Request
 from . import db
 
 TOKEN_TTL_SECONDS = 60 * 60 * 24 * 14
-ACCOUNT_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{2,31}$")
 PHONE_RE = re.compile(r"^$|^1[3-9]\d{9}$")
 EMAIL_RE = re.compile(r"^$|^[^@\s]+@[^@\s]+\.[^@\s]+$")
 AVATAR_MAX_CHARS = 300_000
@@ -41,9 +40,11 @@ def verify_password(password: str, encoded: str) -> bool:
 
 def validate_account(account: str) -> str:
     value = account.strip()
-    if not ACCOUNT_RE.fullmatch(value):
-        raise HTTPException(400, "账号需为 3-32 位字母、数字、下划线、点或横线，且以字母/数字/下划线开头。")
-    return value
+    if EMAIL_RE.fullmatch(value):
+        return value.lower()
+    if PHONE_RE.fullmatch(value):
+        return value
+    raise HTTPException(400, "账号必须是有效邮箱或中国大陆手机号。")
 
 
 def validate_password(password: str) -> str:

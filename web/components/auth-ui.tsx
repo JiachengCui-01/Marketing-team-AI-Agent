@@ -191,7 +191,7 @@ function LoginPanel({
           type="button"
           onClick={() => setAvatarOpen((open) => !open)}
           className="relative mx-auto block"
-          title="选择记住的账号"
+          title="选择记住的登录账号"
         >
           <AvatarImage avatar={avatar} className="h-20 w-20 ring-4 ring-bg-subtle" />
         </button>
@@ -204,7 +204,13 @@ function LoginPanel({
           />
         ) : null}
         <div className="mt-6 space-y-3">
-          <TextInput label="账号" value={account} onChange={setAccount} autoComplete="username" />
+          <TextInput
+            label="邮箱或手机号"
+            value={account}
+            onChange={setAccount}
+            autoComplete="username"
+            placeholder="name@example.com / 13800138000"
+          />
           <TextInput label="密码" value={password} onChange={setPassword} type="password" autoComplete="current-password" />
           <label className="flex items-center gap-2 text-sm text-fg-muted">
             <input
@@ -235,7 +241,7 @@ function LoginPanel({
       </section>
       {deleteTarget ? (
         <ConfirmDialog
-          title="删除记住的账号"
+          title="删除记住的登录账号"
           body={`仅从当前设备删除 ${deleteTarget.account} 的记住记录，数据库账号不会被删除。`}
           confirmLabel="删除"
           danger
@@ -259,7 +265,7 @@ function RegisterPanel({
   onBack: () => void;
 }) {
   const [form, setForm] = useState<ProfilePayload>({
-    account: "",
+        account: "",
     password: "",
     username: "",
     real_name: "",
@@ -308,7 +314,12 @@ function RegisterPanel({
           <AvatarPicker avatar={form.avatar ?? null} onChange={(avatar) => set("avatar", avatar)} />
         </div>
         <div className="mt-5 grid gap-3 md:grid-cols-2">
-          <TextInput label="账号 *" value={form.account ?? ""} onChange={(v) => set("account", v)} />
+          <TextInput
+            label="邮箱或手机号 *"
+            value={form.account ?? ""}
+            onChange={(v) => set("account", v)}
+            placeholder="name@example.com / 13800138000"
+          />
           <TextInput label="密码 *" type="password" value={form.password ?? ""} onChange={(v) => set("password", v)} />
           <TextInput label="用户名 *" value={form.username} onChange={(v) => set("username", v)} />
           <TextInput label="真实姓名 *" value={form.real_name ?? ""} onChange={(v) => set("real_name", v)} />
@@ -382,7 +393,7 @@ export function UserMenu({
           <div className="absolute right-0 top-11 z-30 w-52 rounded-xl border border-border bg-bg-elevated p-1.5 shadow-lg">
             <div className="px-3 py-2">
               <p className="truncate text-sm font-medium">{user.username}</p>
-              <p className="truncate text-xs text-fg-subtle">{user.account}</p>
+          <p className="truncate text-xs text-fg-subtle">{user.account}</p>
             </div>
             <div className="my-1 h-px bg-border" />
             {menuItems.map((item) => {
@@ -475,7 +486,7 @@ export function SwitchAccountPanel({
       </aside>
       {deleteTarget ? (
         <ConfirmDialog
-          title="删除记住的账号"
+          title="删除记住的登录账号"
           body={`仅从当前设备删除 ${deleteTarget.account} 的记住记录。`}
           confirmLabel="删除"
           danger
@@ -519,7 +530,7 @@ function RememberedList({
   onDelete: (item: RememberedAccount) => void;
 }) {
   if (items.length === 0) {
-    return <p className="px-2 py-4 text-center text-xs text-fg-subtle">当前设备暂无记住的账号。</p>;
+    return <p className="px-2 py-4 text-center text-xs text-fg-subtle">当前设备暂无记住的登录账号。</p>;
   }
   return (
     <div className="space-y-1">
@@ -589,7 +600,7 @@ function ProfileDialog({
     <Modal title="个人信息" onClose={onClose}>
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-sm text-fg-muted">账号：{user.account}</p>
+          <p className="text-sm text-fg-muted">登录账号：{user.account}</p>
           <p className="text-sm text-fg-muted">实名：{user.real_name}</p>
           <p className="text-sm text-fg-muted">身份证：{user.id_card_masked}</p>
         </div>

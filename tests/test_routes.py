@@ -19,7 +19,7 @@ class RouteTests(unittest.TestCase):
         self.old_upload_dir = uploads.UPLOAD_DIR
         uploads.UPLOAD_DIR = Path(self.upload_tmp.name)
         self.client = TestClient(app)
-        self.headers = self._register("alice")
+        self.headers = self._register("alice@example.com")
 
     def tearDown(self) -> None:
         uploads.UPLOAD_DIR = self.old_upload_dir
@@ -32,7 +32,7 @@ class RouteTests(unittest.TestCase):
             json={
                 "account": account,
                 "password": "password123",
-                "username": account.title(),
+                "username": account.split("@", 1)[0].title(),
                 "real_name": "张三",
                 "id_card": "11010519491231002X",
             },
@@ -54,7 +54,7 @@ class RouteTests(unittest.TestCase):
         duplicate = self.client.post(
             "/api/auth/register",
             json={
-                "account": "alice",
+                "account": "ALICE@EXAMPLE.COM",
                 "password": "password123",
                 "username": "Alice",
                 "real_name": "张三",
@@ -65,14 +65,14 @@ class RouteTests(unittest.TestCase):
 
         me = self.client.get("/api/auth/me", headers=self.headers)
         self.assertEqual(me.status_code, 200)
-        self.assertEqual(me.json()["user"]["account"], "alice")
+        self.assertEqual(me.json()["user"]["account"], "alice@example.com")
         self.assertEqual(me.json()["user"]["id_card_masked"], "11010*********002X")
 
     def test_invalid_id_card_rejected(self) -> None:
         response = self.client.post(
             "/api/auth/register",
             json={
-                "account": "badid",
+                "account": "badid@example.com",
                 "password": "password123",
                 "username": "Bad",
                 "real_name": "李四",
@@ -80,6 +80,29 @@ class RouteTests(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 400)
+
+    def test_account_must_be_email_or_phone(self) -> None:
+        response = self.client.post(
+            "/api/auth/register",
+            json={
+                "account": "plain_user",
+                "password": "password123",
+                "username": "Plain",
+                "real_name": "Li Si",
+                "id_card": "11010519491231002X",
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_phone_account_can_login(self) -> None:
+        headers = self._register("13900139000")
+        login = self.client.post(
+            "/api/auth/login",
+            json={"account": "13900139000", "password": "password123"},
+        )
+        self.assertEqual(login.status_code, 200)
+        me = self.client.get("/api/auth/me", headers=headers)
+        self.assertEqual(me.json()["user"]["account"], "13900139000")
 
     def test_business_routes_require_auth(self) -> None:
         response = self.client.get("/api/sessions")
@@ -159,7 +182,7 @@ class RouteTests(unittest.TestCase):
         db_path.write_bytes(b"%PDF-1.4")
         from server import db
 
-        user_id = db.get_user_by_account("alice")["id"]
+        user_id = db.get_user_by_account("alice@example.com")["id"]
         db.add_message(session_id, "user", "make a pdf")
         db.add_message(session_id, "assistant", "PDF generated.")
         rec = db.add_artifact(
@@ -242,7 +265,7 @@ class RouteTests(unittest.TestCase):
 
     def test_user_isolation_and_delete_account(self) -> None:
         alice_session = self._create_session(self.headers)
-        bob_headers = self._register("bob")
+        bob_headers = self._register("13800138000")
 
         hidden = self.client.get(f"/api/sessions/{alice_session}/messages", headers=bob_headers)
         self.assertEqual(hidden.status_code, 404)

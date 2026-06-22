@@ -15,7 +15,7 @@ class SessionStoreTests(unittest.TestCase):
 
     def create_user(self) -> str:
         user = db.create_user(
-            account="alice",
+            account="alice@example.com",
             password_hash=auth.hash_password("password123"),
             username="Alice",
             real_name="张三",
