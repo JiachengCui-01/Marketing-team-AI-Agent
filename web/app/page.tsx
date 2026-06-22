@@ -185,7 +185,15 @@ export default function HomePage() {
   }, [activeKey, store]);
 
   const ensureSession = useCallback(async (): Promise<string> => {
-    if (activeId) return activeId;
+    if (activeId) {
+      try {
+        await getSessionMessages(activeId);
+        return activeId;
+      } catch {
+        window.localStorage.removeItem(activeKey());
+        setActiveId(null);
+      }
+    }
     const id = await store.createSession();
     setActiveId(id);
     window.localStorage.setItem(activeKey(), id);
