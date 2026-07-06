@@ -19,6 +19,23 @@ from . import db
 WINDOW_HOURS = 24
 
 
+class NewsGenerationError(RuntimeError):
+    """Raised when research failed rather than producing a usable digest."""
+
+
+def _research_failed(summary: str) -> bool:
+    text = summary.casefold()
+    failure_markers = (
+        "## research unavailable",
+        "wasn't able to complete a usable search",
+        "could not retrieve any verifiable",
+        "no parseable, date-confirmed results",
+        "search-tool limit",
+        "max_uses_exceeded",
+    )
+    return not summary.strip() or any(marker in text for marker in failure_markers)
+
+
 def _detail_instruction(detail_level: str) -> str:
     if detail_level == "detailed":
         return (
@@ -59,6 +76,10 @@ def generate_summary(config: dict, client: anthropic.Anthropic | None = None) ->
 
     task, window_start, window_end = build_task(industry, config["detail_level"], now)
     summary = research_agent.run(client, task=task, topics=[industry])
+    if _research_failed(summary):
+        raise NewsGenerationError(
+            "新闻检索未返回可用来源，请稍后重试。上一份有效摘要不会被覆盖。"
+        )
 
     record = db.add_news_summary(
         user_id=config["user_id"],

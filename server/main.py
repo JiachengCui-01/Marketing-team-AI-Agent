@@ -45,6 +45,9 @@ async def _run_due_job(config: dict) -> None:
         await asyncio.to_thread(news.generate_summary, config)
         logger.info("Generated daily news summary for user %s", config.get("user_id"))
     except Exception as exc:  # noqa: BLE001 - keep the scheduler alive
+        # Count the scheduled attempt so a persistent provider failure does not
+        # retry every minute. Manual refresh remains available immediately.
+        db.set_news_config_last_run(config["user_id"], datetime.now().timestamp())
         logger.warning("News summary failed for user %s: %s", config.get("user_id"), exc)
 
 

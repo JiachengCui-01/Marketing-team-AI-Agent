@@ -13,10 +13,10 @@ moves, and industry signals using the web_search tool.
 
 Rules:
 
-- Run exactly one compact web search query that covers the user's task.
-- Gather 3-5 distinct, reputable sources from that one result set when available.
-- Do not run follow-up searches. If the first result set is imperfect, synthesize
-  from the best available sources and clearly note any gaps.
+- Start with one compact web search query that covers the user's task.
+- Gather 3-5 distinct, reputable sources when available.
+- You may run up to two focused follow-up searches if the first result set is
+  malformed, empty, or lacks enough date-confirmed sources.
 - If the server reports a search/tool limit after you have any relevant sources,
   stop searching and synthesize from the sources already gathered.
 - Cite every claim with a URL and (where visible) publication date.
@@ -41,7 +41,9 @@ Output format (markdown):
 Numbered list of all URLs used.
 """
 
-TOOLS = [{"type": "web_search_20260209", "name": "web_search", "max_uses": 1}]
+# The basic search tool is more predictable for time-windowed news retrieval than
+# dynamic filtering, and three searches is Anthropic's recommended low-latency cap.
+TOOLS = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}]
 
 
 def _research_unavailable(exc: Exception) -> str:

@@ -179,7 +179,10 @@ async def refresh_news(request: Request) -> dict:
     if config is None:
         raise HTTPException(400, "请先设置新闻总结任务。")
     client = _client()
-    record = await asyncio.to_thread(news.generate_summary, config, client)
+    try:
+        record = await asyncio.to_thread(news.generate_summary, config, client)
+    except news.NewsGenerationError as exc:
+        raise HTTPException(502, str(exc)) from exc
     return {"summary": record}
 
 
