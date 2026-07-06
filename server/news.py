@@ -36,6 +36,14 @@ def _research_failed(summary: str) -> bool:
     return not summary.strip() or any(marker in text for marker in failure_markers)
 
 
+def _trim_search_preamble(summary: str, language: str) -> str:
+    """Hide tool-process narration before the actual localized digest."""
+    headings = ("## 摘要", "## Summary") if language == "zh" else ("## Summary",)
+    positions = [summary.find(heading) for heading in headings]
+    positions = [position for position in positions if position >= 0]
+    return summary[min(positions) :].strip() if positions else summary.strip()
+
+
 def _detail_instruction(detail_level: str) -> str:
     if detail_level == "detailed":
         return (
@@ -91,7 +99,14 @@ def generate_summary(config: dict, client: anthropic.Anthropic | None = None) ->
         now,
         config.get("language") or "zh",
     )
-    summary = research_agent.run(client, task=task, topics=[industry])
+    language = config.get("language") or "zh"
+    summary = research_agent.run(
+        client,
+        task=task,
+        topics=[industry],
+        response_language=language,
+    )
+    summary = _trim_search_preamble(summary, language)
     if _research_failed(summary):
         raise NewsGenerationError(
             "新闻检索未返回可用来源，请稍后重试。上一份有效摘要不会被覆盖。"

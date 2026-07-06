@@ -61,6 +61,7 @@ def run(
     task: str,
     topics: list[str],
     competitors: list[str] | None = None,
+    response_language: str | None = None,
 ) -> str:
     parts = [
         f"Task: {task}",
@@ -69,11 +70,24 @@ def run(
     if competitors:
         parts.append(f"Competitors of interest: {', '.join(competitors)}")
 
+    system = SYSTEM
+    if response_language == "zh":
+        system += (
+            "\n\nLANGUAGE REQUIREMENT: Write every part of the final response in "
+            "Simplified Chinese, including any introductory sentence and all headings. "
+            "Do not narrate the search process in English."
+        )
+    elif response_language == "en":
+        system += (
+            "\n\nLANGUAGE REQUIREMENT: Write every part of the final response in English, "
+            "including any introductory sentence and all headings."
+        )
+
     try:
         response = client.messages.create(
             model=MODEL_ID,
             max_tokens=4096,
-            system=SYSTEM,
+            system=system,
             thinking={"type": "adaptive"},
             output_config={"effort": SUBAGENT_EFFORT},
             tools=TOOLS,

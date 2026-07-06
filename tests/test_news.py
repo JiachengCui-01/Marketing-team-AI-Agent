@@ -45,6 +45,13 @@ class NewsTests(unittest.TestCase):
         self.assertIn("Simplified Chinese", zh_task)
         self.assertIn("entire response in English", en_task)
 
+    def test_chinese_digest_removes_english_search_preamble(self) -> None:
+        raw = "I'll search first.\n\n## 摘要\n这是中文摘要。\n\n## 来源\n1. 示例"
+        self.assertEqual(
+            news._trim_search_preamble(raw, "zh"),
+            "## 摘要\n这是中文摘要。\n\n## 来源\n1. 示例",
+        )
+
     def test_failed_research_does_not_replace_last_good_summary(self) -> None:
         previous = db.add_news_summary(
             self.user["id"],
