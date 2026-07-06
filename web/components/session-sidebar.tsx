@@ -12,6 +12,7 @@ import {
   FolderInput,
   PanelLeftClose,
   PanelLeft,
+  Newspaper,
 } from "lucide-react";
 import { ContextMenu, type MenuItem } from "./context-menu";
 import type { GroupRecord, SessionRecord } from "@/lib/api";
@@ -37,6 +38,7 @@ export function SessionSidebar({
   onCreateGroup,
   onRenameGroup,
   onDeleteGroup,
+  onOpenNews,
 }: {
   sessions: SessionRecord[];
   groups: GroupRecord[];
@@ -52,6 +54,7 @@ export function SessionSidebar({
   onCreateGroup: (name: string) => Promise<string> | void;
   onRenameGroup: (id: string, name: string) => void;
   onDeleteGroup: (id: string) => void;
+  onOpenNews: () => void;
 }) {
   const { t } = useI18n();
   const [menu, setMenu] = useState<MenuState>(null);
@@ -87,6 +90,14 @@ export function SessionSidebar({
           title={t.newChat}
         >
           <Plus size={16} />
+        </button>
+        <button
+          onClick={onOpenNews}
+          className="w-9 h-9 inline-flex items-center justify-center rounded-md hover:bg-bg-elevated text-fg-muted"
+          aria-label={t.industryNews}
+          title={t.industryNews}
+        >
+          <Newspaper size={16} />
         </button>
       </aside>
     );
@@ -214,6 +225,16 @@ export function SessionSidebar({
           aria-label={t.collapseSidebar}
         >
           <PanelLeftClose size={14} />
+        </button>
+      </div>
+
+      <div className="px-1.5 pt-2">
+        <button
+          onClick={onOpenNews}
+          className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-bg-elevated text-fg-muted hover:text-fg text-sm font-medium transition"
+        >
+          <Newspaper size={15} className="text-accent shrink-0" />
+          <span className="truncate">{t.industryNews}</span>
         </button>
       </div>
 

@@ -322,6 +322,79 @@ export async function getArtifactMeta(id: string): Promise<ArtifactMeta> {
   return res.json();
 }
 
+// ---------- news ----------
+
+export type NewsConfig = {
+  id: string;
+  industry: string;
+  detail_level: "brief" | "detailed";
+  summary_time: string;
+  timezone: string;
+  enabled: boolean;
+  last_run_at: number | null;
+  created_at: number;
+  updated_at: number;
+};
+
+export type NewsConfigPayload = {
+  industry: string;
+  detail_level: "brief" | "detailed";
+  summary_time: string;
+  timezone: string;
+};
+
+export type NewsSummary = {
+  id: string;
+  summary: string;
+  generated_at: number;
+  window_start: number | null;
+  window_end: number | null;
+  created_at: number;
+};
+
+export async function getNewsConfig(): Promise<NewsConfig | null> {
+  const res = await fetch(`${API_BASE}/api/news/config`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  const body = await res.json();
+  return body.config;
+}
+
+export async function saveNewsConfig(payload: NewsConfigPayload): Promise<NewsConfig> {
+  const res = await fetch(`${API_BASE}/api/news/config`, {
+    method: "PUT",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  const body = await res.json();
+  return body.config;
+}
+
+export async function deleteNewsConfig(): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/news/config`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+}
+
+export async function getNewsSummary(): Promise<NewsSummary | null> {
+  const res = await fetch(`${API_BASE}/api/news/summary`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  const body = await res.json();
+  return body.summary;
+}
+
+export async function refreshNews(): Promise<NewsSummary> {
+  const res = await fetch(`${API_BASE}/api/news/refresh`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  const body = await res.json();
+  return body.summary;
+}
+
 // ---------- stream ----------
 
 export function streamUrl(

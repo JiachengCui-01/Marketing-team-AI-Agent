@@ -58,10 +58,11 @@ DELEGATION_TOOLS = [
     {
         "name": "delegate_to_analytics_agent",
         "description": (
-            "Send a campaign-analytics task to the analytics specialist. Use this for any "
-            "request that involves analyzing a CSV of campaign data, computing KPIs (CTR, "
-            "ROAS, CPA, etc.), spotting trends, or producing performance insights. The "
-            "specialist runs code in a sandbox — never compute metrics yourself."
+            "Send a data-analytics task to the analytics specialist. Use this for any "
+            "request that involves analyzing a data file (CSV, Excel, or JSON) of campaign "
+            "data, computing KPIs (CTR, ROAS, CPA, etc.), spotting trends, or producing "
+            "performance insights. The specialist loads the file in a code-execution "
+            "sandbox and can handle large files — never compute metrics yourself."
         ),
         "input_schema": {
             "type": "object",
@@ -70,9 +71,12 @@ DELEGATION_TOOLS = [
                     "type": "string",
                     "description": "What the analyst should investigate or report on.",
                 },
-                "csv_path": {
+                "data_path": {
                     "type": "string",
-                    "description": "Path to the CSV file on the user's machine.",
+                    "description": (
+                        "Path to the uploaded data file (CSV, Excel .xlsx/.xls, or JSON). "
+                        "Use the path noted next to the attached data file."
+                    ),
                 },
                 "questions": {
                     "type": "array",
@@ -80,7 +84,7 @@ DELEGATION_TOOLS = [
                     "description": "Optional list of specific questions the analysis should answer.",
                 },
             },
-            "required": ["task", "csv_path"],
+            "required": ["task", "data_path"],
         },
     },
     {

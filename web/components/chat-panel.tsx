@@ -4,7 +4,6 @@ import { Send, Loader2 } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { MessageBubble, type ChatMessage, type MessageArtifact } from "./message";
 import { FileUploader } from "./file-uploader";
-import { ExamplePrompts } from "./example-prompts";
 import type { UploadResponse } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
@@ -48,7 +47,7 @@ export function ChatPanel({
     <div className="flex-1 flex flex-col min-w-0">
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
         {empty ? (
-          <div className="h-full flex flex-col items-center justify-center px-6 py-12 gap-8">
+          <div className="h-full flex flex-col items-center justify-center px-6 py-12">
             <div className="text-center max-w-xl">
               <h1 className="text-3xl font-semibold tracking-tight">
                 {t.heroTitle}
@@ -57,11 +56,6 @@ export function ChatPanel({
                 {t.heroBody}
               </p>
             </div>
-            <ExamplePrompts
-              onPick={(prompt) => {
-                setInput(prompt);
-              }}
-            />
           </div>
         ) : (
           <div className="max-w-3xl mx-auto px-4 py-6 space-y-5">

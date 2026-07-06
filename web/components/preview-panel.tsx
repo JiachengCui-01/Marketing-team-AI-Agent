@@ -28,6 +28,7 @@ import {
   uploadPreviewUrl,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { Modal } from "@/components/modal";
 
 export type TraceEvent = StreamEvent & { ts: number };
 
@@ -284,15 +285,27 @@ function TraceBody({
   totals: { input: number; output: number };
 }) {
   const { t } = useI18n();
+  const [expanded, setExpanded] = useState<TraceEvent | null>(null);
   return (
     <>
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
         {events.length === 0 ? (
           <p className="text-xs text-fg-subtle px-2 py-6 text-center">{t.traceEmpty}</p>
         ) : (
-          events.map((e, i) => <TraceItem key={i} event={e} />)
+          events.map((e, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => setExpanded(e)}
+              className="block w-full text-left cursor-pointer transition hover:opacity-90"
+              title={t.traceDetailHint}
+            >
+              <TraceItem event={e} />
+            </button>
+          ))
         )}
       </div>
+      {expanded ? <TraceDetailModal event={expanded} onClose={() => setExpanded(null)} /> : null}
       <footer className="px-4 py-3 border-t border-border text-[11px] text-fg-muted flex justify-between">
         <span>
           {t.tokensIn}: <strong className="text-fg">{totals.input}</strong>
@@ -413,6 +426,60 @@ function TraceItem({ event }: { event: TraceEvent }) {
   }
 
   return null;
+}
+
+function TraceDetailModal({ event, onClose }: { event: TraceEvent; onClose: () => void }) {
+  const { t } = useI18n();
+  const { event: type, payload } = event;
+
+  let heading = String(type);
+  let body = "";
+
+  if (type === "started") {
+    heading = t.connected;
+  } else if (type === "delegating") {
+    const input = payload.input as Record<string, unknown> | undefined;
+    heading = `${t.delegating} ${specialistLabel(payload.specialist as string, t)}`;
+    body = String(input?.task ?? "");
+  } else if (type === "specialist_done") {
+    heading = `${specialistLabel(payload.specialist as string, t)} ${t.specialistReturned}`;
+    body = `${payload.chars} ${t.chars}`;
+  } else if (type === "specialist_error") {
+    heading = `${specialistLabel(payload.specialist as string, t)} ${t.specialistFailed}`;
+    body = String(payload.error ?? "");
+  } else if (type === "orchestrator_response") {
+    const usage = payload.usage as { input_tokens?: number; output_tokens?: number } | undefined;
+    heading = t.orchestrator;
+    body = `${payload.stop_reason}\n${t.tokensShortIn}=${usage?.input_tokens ?? 0} ${t.tokensShortOut}=${usage?.output_tokens ?? 0}`;
+  } else if (type === "artifact_created") {
+    heading = t.artifactReady;
+    body = String(payload.filename ?? "");
+  } else if (type === "error") {
+    heading = t.error;
+    body = String(payload.message ?? "");
+  } else if (type === "cancelled") {
+    heading = t.streamCancelled;
+    body = String(payload.message ?? "");
+  }
+
+  const raw = JSON.stringify(payload, null, 2);
+
+  return (
+    <Modal title={t.traceDetailTitle} onClose={onClose} wide>
+      <p className="text-sm font-medium text-fg">{heading}</p>
+      {body ? (
+        <div className="mt-3 whitespace-pre-wrap break-words rounded-lg border border-border bg-bg p-3 text-xs text-fg-muted max-h-[50vh] overflow-y-auto">
+          {body}
+        </div>
+      ) : null}
+      <details className="mt-3">
+        <summary className="cursor-pointer text-xs text-fg-subtle hover:text-fg">{t.traceRaw}</summary>
+        <pre className="mt-2 whitespace-pre-wrap break-words rounded-lg border border-border bg-bg p-3 text-[11px] text-fg-muted max-h-[40vh] overflow-y-auto">
+          {raw}
+        </pre>
+      </details>
+    </Modal>
+  );
 }
 
 export function classifyTotals(events: TraceEvent[]): {

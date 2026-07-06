@@ -18,23 +18,71 @@ def _extract_text(content: list[Any]) -> str:
     return "\n".join(block.text for block in content if block.type == "text").strip()
 
 
+def unavailable_markdown(
+    exc: Exception,
+    *,
+    title: str,
+    feature: str,
+    retry_noun: str,
+    credits_for: str,
+) -> str:
+    """Return a normal markdown result for a failed Anthropic call.
+
+    Shared by sub-agents so a transient API error surfaces as a helpful message
+    instead of bubbling up and being retried forever by the orchestrator.
+    """
+    message = str(exc) or exc.__class__.__name__
+    lower = message.lower()
+    if "credit balance is too low" in lower:
+        reason = (
+            "Anthropic rejected the request because the account credit balance is too low. "
+            f"Add credits or update billing, then retry the {retry_noun}."
+        )
+    elif isinstance(exc, anthropic.APIConnectionError):
+        cause = getattr(exc, "__cause__", None)
+        detail = f" ({cause})" if cause else ""
+        reason = (
+            f"The server could not connect to the Anthropic API for {feature}"
+            f"{detail}. Check network/firewall permissions and retry."
+        )
+    else:
+        reason = f"Anthropic API error: {message}"
+
+    return "\n".join(
+        [
+            title,
+            "",
+            reason,
+            "",
+            "## What to do next",
+            "1. Confirm `ANTHROPIC_API_KEY` is set for the API server.",
+            f"2. Confirm the Anthropic account has enough credits for {credits_for}.",
+            "3. Retry after billing/network access is fixed.",
+        ]
+    )
+
+
 def run_agent(
     client: anthropic.Anthropic,
     system: str,
-    user_message: str,
+    user_message: str | list[dict],
     tools: list[dict] | None = None,
     *,
     effort: str = SUBAGENT_EFFORT,
     max_tokens: int = SUBAGENT_MAX_TOKENS,
     client_tool_handlers: dict[str, Callable[[dict], str]] | None = None,
     on_event: Callable[[str, Any], None] | None = None,
+    extra_headers: dict[str, str] | None = None,
 ) -> str:
     """Run a single agent turn to completion.
 
+    - ``user_message`` may be a plain string or a list of content blocks (e.g. to
+      attach a ``container_upload`` for the code-execution sandbox).
     - Server-side tools (web_search, code_execution) resolve automatically.
     - Client-side tools are dispatched via ``client_tool_handlers`` keyed by tool name;
       each handler takes the parsed ``input`` dict and returns a string result.
     - ``on_event`` is called for observability with (event_type, payload).
+    - ``extra_headers`` is forwarded to the API (e.g. the Files API beta header).
 
     Returns the final assistant text.
     """
@@ -51,6 +99,7 @@ def run_agent(
             output_config={"effort": effort},
             tools=tools,
             messages=messages,
+            extra_headers=extra_headers,
         )
 
         if on_event:

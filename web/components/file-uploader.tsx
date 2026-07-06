@@ -13,12 +13,12 @@ import { useRef, useState } from "react";
 import { uploadFile, type UploadResponse } from "@/lib/api";
 import { localizeError, useI18n } from "@/lib/i18n";
 
-const ACCEPT = ".csv,.pdf,.docx,image/png,image/jpeg";
+const ACCEPT = ".csv,.xlsx,.xls,.json,.pdf,.docx,image/png,image/jpeg";
 
 function iconFor(mime: string) {
   if (mime.startsWith("image/")) return FileImage;
   if (mime === "application/pdf") return FileText;
-  if (mime.includes("csv") || mime.includes("excel")) return FileSpreadsheet;
+  if (mime.includes("csv") || mime.includes("excel") || mime.includes("spreadsheet")) return FileSpreadsheet;
   return FileIcon;
 }
 

@@ -116,6 +116,34 @@ CREATE TABLE IF NOT EXISTS uploads (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_uploads_user ON uploads(user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS news_configs (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL UNIQUE,
+    industry TEXT NOT NULL,
+    detail_level TEXT NOT NULL,
+    summary_time TEXT NOT NULL,
+    timezone TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_run_at REAL,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_news_configs_enabled ON news_configs(enabled);
+
+CREATE TABLE IF NOT EXISTS news_summaries (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    config_id TEXT,
+    summary TEXT NOT NULL,
+    generated_at REAL NOT NULL,
+    window_start REAL,
+    window_end REAL,
+    created_at REAL NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_news_summaries_user ON news_summaries(user_id, created_at);
 """
 
 
@@ -545,6 +573,124 @@ def get_upload(file_id: str, user_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+# ---------- news ----------
+
+def get_news_config(user_id: str) -> dict | None:
+    _ensure()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id, user_id, industry, detail_level, summary_time, timezone, enabled, "
+            "last_run_at, created_at, updated_at FROM news_configs WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    data = dict(row)
+    data["enabled"] = bool(data["enabled"])
+    return data
+
+
+def upsert_news_config(
+    user_id: str,
+    *,
+    industry: str,
+    detail_level: str,
+    summary_time: str,
+    timezone: str,
+    enabled: bool = True,
+) -> dict:
+    """Create or update the single news config for a user."""
+    _ensure()
+    now = time.time()
+    existing = get_news_config(user_id)
+    with _connect() as conn:
+        if existing is None:
+            cid = uuid.uuid4().hex
+            conn.execute(
+                "INSERT INTO news_configs (id, user_id, industry, detail_level, summary_time, "
+                "timezone, enabled, last_run_at, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+                (cid, user_id, industry, detail_level, summary_time, timezone, int(enabled), now, now),
+            )
+        else:
+            conn.execute(
+                "UPDATE news_configs SET industry = ?, detail_level = ?, summary_time = ?, "
+                "timezone = ?, enabled = ?, updated_at = ? WHERE user_id = ?",
+                (industry, detail_level, summary_time, timezone, int(enabled), now, user_id),
+            )
+    return get_news_config(user_id)  # type: ignore[return-value]
+
+
+def delete_news_config(user_id: str) -> bool:
+    _ensure()
+    with _connect() as conn:
+        cur = conn.execute("DELETE FROM news_configs WHERE user_id = ?", (user_id,))
+        return cur.rowcount > 0
+
+
+def set_news_config_last_run(user_id: str, ts: float) -> None:
+    _ensure()
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE news_configs SET last_run_at = ? WHERE user_id = ?", (ts, user_id)
+        )
+
+
+def list_enabled_news_configs() -> list[dict]:
+    _ensure()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, user_id, industry, detail_level, summary_time, timezone, enabled, "
+            "last_run_at, created_at, updated_at FROM news_configs WHERE enabled = 1"
+        ).fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["enabled"] = bool(d["enabled"])
+        result.append(d)
+    return result
+
+
+def add_news_summary(
+    user_id: str,
+    config_id: str | None,
+    summary: str,
+    generated_at: float,
+    window_start: float | None,
+    window_end: float | None,
+) -> dict:
+    _ensure()
+    sid = uuid.uuid4().hex
+    now = time.time()
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO news_summaries (id, user_id, config_id, summary, generated_at, "
+            "window_start, window_end, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (sid, user_id, config_id, summary, generated_at, window_start, window_end, now),
+        )
+    return {
+        "id": sid,
+        "user_id": user_id,
+        "config_id": config_id,
+        "summary": summary,
+        "generated_at": generated_at,
+        "window_start": window_start,
+        "window_end": window_end,
+        "created_at": now,
+    }
+
+
+def get_latest_news_summary(user_id: str) -> dict | None:
+    _ensure()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id, user_id, config_id, summary, generated_at, window_start, window_end, "
+            "created_at FROM news_summaries WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def reset_for_tests() -> None:
     global _INITIALIZED
     with _LOCK:
@@ -557,6 +703,8 @@ def reset_for_tests() -> None:
                     conn.executescript(
                         """
                         DROP TABLE IF EXISTS auth_tokens;
+                        DROP TABLE IF EXISTS news_summaries;
+                        DROP TABLE IF EXISTS news_configs;
                         DROP TABLE IF EXISTS uploads;
                         DROP TABLE IF EXISTS artifacts;
                         DROP TABLE IF EXISTS messages;

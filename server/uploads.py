@@ -13,10 +13,13 @@ from marketing_agent.config import PROJECT_ROOT
 UPLOAD_DIR = PROJECT_ROOT / "tmp" / "uploads"
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
-ALLOWED_EXT = {".csv", ".pdf", ".docx", ".png", ".jpg", ".jpeg"}
+ALLOWED_EXT = {".csv", ".xlsx", ".xls", ".json", ".pdf", ".docx", ".png", ".jpg", ".jpeg"}
 
 EXT_MIME = {
     ".csv": "text/csv",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xls": "application/vnd.ms-excel",
+    ".json": "application/json",
     ".pdf": "application/pdf",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".png": "image/png",

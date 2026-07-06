@@ -14,7 +14,7 @@ from sse_starlette.sse import EventSourceResponse
 from marketing_agent.file_inputs import build_prompt_addendum, extract
 from marketing_agent.orchestrator import run_orchestrator
 
-from . import auth, db, sessions, uploads
+from . import auth, db, news, sessions, uploads
 from .streaming import orchestrator_event_stream, to_sse
 
 router = APIRouter(prefix="/api")
@@ -111,6 +111,76 @@ def avatar_lookup(account: str) -> dict:
     if user is None:
         return {"exists": False, "avatar": None, "username": None}
     return {"exists": True, "avatar": user.get("avatar"), "username": user.get("username")}
+
+
+# ---------- news ----------
+
+import re as _re
+from zoneinfo import ZoneInfo, available_timezones
+
+_TIME_RE = _re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+_VALID_TZS = available_timezones()
+
+
+def _validate_news_payload(payload: dict) -> dict:
+    industry = str(payload.get("industry") or "").strip()
+    if not industry:
+        raise HTTPException(400, "行业/主题不能为空。")
+    if len(industry) > 200:
+        raise HTTPException(400, "行业/主题过长。")
+    detail_level = str(payload.get("detail_level") or "brief").strip()
+    if detail_level not in {"brief", "detailed"}:
+        raise HTTPException(400, "内容细节取值不正确。")
+    summary_time = str(payload.get("summary_time") or "").strip()
+    if not _TIME_RE.match(summary_time):
+        raise HTTPException(400, "总结时间格式应为 HH:MM。")
+    timezone = str(payload.get("timezone") or "UTC").strip()
+    if timezone not in _VALID_TZS:
+        timezone = "UTC"
+    return {
+        "industry": industry,
+        "detail_level": detail_level,
+        "summary_time": summary_time,
+        "timezone": timezone,
+        "enabled": bool(payload.get("enabled", True)),
+    }
+
+
+@router.get("/news/config")
+def get_news_config(request: Request) -> dict:
+    user = auth.require_user(request)
+    return {"config": db.get_news_config(user["id"])}
+
+
+@router.put("/news/config")
+def save_news_config(request: Request, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    fields = _validate_news_payload(payload)
+    return {"config": db.upsert_news_config(user["id"], **fields)}
+
+
+@router.delete("/news/config")
+def remove_news_config(request: Request) -> dict:
+    user = auth.require_user(request)
+    db.delete_news_config(user["id"])
+    return {"ok": True}
+
+
+@router.get("/news/summary")
+def get_news_summary(request: Request) -> dict:
+    user = auth.require_user(request)
+    return {"summary": db.get_latest_news_summary(user["id"])}
+
+
+@router.post("/news/refresh")
+async def refresh_news(request: Request) -> dict:
+    user = auth.require_user(request)
+    config = db.get_news_config(user["id"])
+    if config is None:
+        raise HTTPException(400, "请先设置新闻总结任务。")
+    client = _client()
+    record = await asyncio.to_thread(news.generate_summary, config, client)
+    return {"summary": record}
 
 
 # ---------- groups ----------
@@ -332,12 +402,24 @@ def _build_user_message(user_id: str, prompt: str, file_ids: str | list[str] | N
     extracted: list[dict] = []
     image_blocks: list[dict] = []
 
+    # Data files are analyzed in the code-execution sandbox by the analytics agent,
+    # so we never inline their contents — we only pass the path. This keeps large
+    # datasets out of the prompt.
+    data_exts = {".csv", ".xlsx", ".xls", ".json"}
+
     for fid in _attached_ids(file_ids, csv_id):
         rec = db.get_upload(fid, user_id)
         if rec is None:
             raise HTTPException(404, f"file_id '{fid}' not found.")
         from pathlib import Path
         path = Path(rec["path"])
+        if path.suffix.lower() in data_exts:
+            extracted.append({
+                "kind": "text",
+                "name": path.name,
+                "text": f"(data file available at: {path})",
+            })
+            continue
         info = extract(path)
         if info["kind"] == "image":
             image_blocks.append({
@@ -350,12 +432,6 @@ def _build_user_message(user_id: str, prompt: str, file_ids: str | list[str] | N
             })
         else:
             extracted.append(info)
-            if info["ext"] == ".csv":
-                extracted.append({
-                    "kind": "text",
-                    "name": info["name"],
-                    "text": f"(CSV available at: {path})",
-                })
 
     addendum = build_prompt_addendum(extracted) if extracted else ""
     if image_blocks:

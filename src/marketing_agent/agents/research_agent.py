@@ -6,6 +6,7 @@ from typing import Any
 import anthropic
 
 from ..config import MODEL_ID, SUBAGENT_EFFORT
+from .base import unavailable_markdown
 
 SYSTEM = """You are a marketing research analyst. You investigate market trends, competitor
 moves, and industry signals using the web_search tool.
@@ -44,35 +45,12 @@ TOOLS = [{"type": "web_search_20260209", "name": "web_search", "max_uses": 1}]
 
 
 def _research_unavailable(exc: Exception) -> str:
-    """Return a normal markdown result so the orchestrator does not retry forever."""
-    message = str(exc) or exc.__class__.__name__
-    lower = message.lower()
-    if "credit balance is too low" in lower:
-        reason = (
-            "Anthropic rejected the request because the account credit balance is too low. "
-            "Add credits or update billing, then retry the research request."
-        )
-    elif isinstance(exc, anthropic.APIConnectionError):
-        cause = getattr(exc, "__cause__", None)
-        detail = f" ({cause})" if cause else ""
-        reason = (
-            "The server could not connect to the Anthropic API for web research"
-            f"{detail}. Check network/firewall permissions and retry."
-        )
-    else:
-        reason = f"Anthropic API error: {message}"
-
-    return "\n".join(
-        [
-            "## Research Unavailable",
-            "",
-            reason,
-            "",
-            "## What to do next",
-            "1. Confirm `ANTHROPIC_API_KEY` is set for the API server.",
-            "2. Confirm the Anthropic account has enough credits for web search.",
-            "3. Retry after billing/network access is fixed.",
-        ]
+    return unavailable_markdown(
+        exc,
+        title="## Research Unavailable",
+        feature="web research",
+        retry_noun="research request",
+        credits_for="web search",
     )
 
 
