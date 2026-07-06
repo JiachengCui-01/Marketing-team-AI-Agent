@@ -46,7 +46,7 @@ export function NewsPanel({ onBack }: { onBack: () => void }) {
     setRefreshing(true);
     setError(null);
     try {
-      const sum = await refreshNews();
+      const sum = await refreshNews(locale);
       setSummary(sum);
     } catch (e) {
       setError(localizeError(e, locale));
@@ -175,6 +175,7 @@ function NewsSettingsDialog({
         detail_level: detailLevel,
         summary_time: summaryTime,
         timezone,
+        language: locale,
       });
       onSaved(cfg);
     } catch (e) {

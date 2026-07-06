@@ -137,11 +137,15 @@ def _validate_news_payload(payload: dict) -> dict:
     timezone = str(payload.get("timezone") or "UTC").strip()
     if timezone not in _VALID_TZS:
         timezone = "UTC"
+    language = str(payload.get("language") or "zh").strip().lower()
+    if language not in {"zh", "en"}:
+        language = "zh"
     return {
         "industry": industry,
         "detail_level": detail_level,
         "summary_time": summary_time,
         "timezone": timezone,
+        "language": language,
         "enabled": bool(payload.get("enabled", True)),
     }
 
@@ -178,6 +182,16 @@ async def refresh_news(request: Request) -> dict:
     config = db.get_news_config(user["id"])
     if config is None:
         raise HTTPException(400, "请先设置新闻总结任务。")
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001 - remain compatible with older deployed clients
+        payload = {}
+    language = str(payload.get("language") or config.get("language") or "zh").lower()
+    if language not in {"zh", "en"}:
+        language = "zh"
+    if language != config.get("language"):
+        db.set_news_config_language(user["id"], language)
+    config = {**config, "language": language}
     client = _client()
     try:
         record = await asyncio.to_thread(news.generate_summary, config, client)

@@ -45,18 +45,29 @@ def _detail_instruction(detail_level: str) -> str:
     return "Keep it brief: one concise sentence per item, only the most important developments."
 
 
-def build_task(industry: str, detail_level: str, tz_now: datetime) -> tuple[str, float, float]:
+def build_task(
+    industry: str,
+    detail_level: str,
+    tz_now: datetime,
+    language: str = "zh",
+) -> tuple[str, float, float]:
     """Return (task_prompt, window_start_ts, window_end_ts)."""
     window_end = tz_now
     window_start = tz_now - timedelta(hours=WINDOW_HOURS)
     fmt = "%Y-%m-%d %H:%M %Z"
+    language_instruction = (
+        "Write the entire response in Simplified Chinese, including all headings and "
+        "analysis. Keep source titles in their original language when necessary."
+        if language == "zh"
+        else "Write the entire response in English, including all headings and analysis."
+    )
     task = (
         f"Summarize the most important {industry} industry news published in the last "
         f"{WINDOW_HOURS} hours — strictly between {window_start.strftime(fmt)} and "
         f"{window_end.strftime(fmt)}. Only include items published within that window; "
         f"ignore older material. {_detail_instruction(detail_level)} "
         f"If little or nothing was published in this window, say so plainly rather than "
-        f"padding with older news."
+        f"padding with older news. {language_instruction}"
     )
     return task, window_start.timestamp(), window_end.timestamp()
 
@@ -74,7 +85,12 @@ def generate_summary(config: dict, client: anthropic.Anthropic | None = None) ->
         tz = ZoneInfo("UTC")
     now = datetime.now(tz)
 
-    task, window_start, window_end = build_task(industry, config["detail_level"], now)
+    task, window_start, window_end = build_task(
+        industry,
+        config["detail_level"],
+        now,
+        config.get("language") or "zh",
+    )
     summary = research_agent.run(client, task=task, topics=[industry])
     if _research_failed(summary):
         raise NewsGenerationError(

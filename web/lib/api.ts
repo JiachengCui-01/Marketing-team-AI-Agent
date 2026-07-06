@@ -330,6 +330,7 @@ export type NewsConfig = {
   detail_level: "brief" | "detailed";
   summary_time: string;
   timezone: string;
+  language: "zh" | "en";
   enabled: boolean;
   last_run_at: number | null;
   created_at: number;
@@ -341,6 +342,7 @@ export type NewsConfigPayload = {
   detail_level: "brief" | "detailed";
   summary_time: string;
   timezone: string;
+  language: "zh" | "en";
 };
 
 export type NewsSummary = {
@@ -385,10 +387,11 @@ export async function getNewsSummary(): Promise<NewsSummary | null> {
   return body.summary;
 }
 
-export async function refreshNews(): Promise<NewsSummary> {
+export async function refreshNews(language: "zh" | "en"): Promise<NewsSummary> {
   const res = await fetch(`${API_BASE}/api/news/refresh`, {
     method: "POST",
-    headers: authHeaders(),
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ language }),
   });
   if (!res.ok) throw new Error(await parseJsonError(res));
   const body = await res.json();

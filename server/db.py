@@ -124,6 +124,7 @@ CREATE TABLE IF NOT EXISTS news_configs (
     detail_level TEXT NOT NULL,
     summary_time TEXT NOT NULL,
     timezone TEXT NOT NULL,
+    language TEXT NOT NULL DEFAULT 'zh',
     enabled INTEGER NOT NULL DEFAULT 1,
     last_run_at REAL,
     created_at REAL NOT NULL,
@@ -155,6 +156,7 @@ def init() -> None:
         with _connect() as conn:
             _drop_anonymous_tables_if_needed(conn)
             conn.executescript(SCHEMA)
+            _migrate_news_config_language(conn)
         _INITIALIZED = True
 
 
@@ -166,6 +168,13 @@ def _ensure() -> None:
 def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
     rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
     return {str(row["name"]) for row in rows}
+
+
+def _migrate_news_config_language(conn: sqlite3.Connection) -> None:
+    if "language" not in _table_columns(conn, "news_configs"):
+        conn.execute(
+            "ALTER TABLE news_configs ADD COLUMN language TEXT NOT NULL DEFAULT 'zh'"
+        )
 
 
 def _drop_anonymous_tables_if_needed(conn: sqlite3.Connection) -> None:
@@ -579,7 +588,7 @@ def get_news_config(user_id: str) -> dict | None:
     _ensure()
     with _connect() as conn:
         row = conn.execute(
-            "SELECT id, user_id, industry, detail_level, summary_time, timezone, enabled, "
+            "SELECT id, user_id, industry, detail_level, summary_time, timezone, language, enabled, "
             "last_run_at, created_at, updated_at FROM news_configs WHERE user_id = ?",
             (user_id,),
         ).fetchone()
@@ -597,6 +606,7 @@ def upsert_news_config(
     detail_level: str,
     summary_time: str,
     timezone: str,
+    language: str = "zh",
     enabled: bool = True,
 ) -> dict:
     """Create or update the single news config for a user."""
@@ -608,15 +618,15 @@ def upsert_news_config(
             cid = uuid.uuid4().hex
             conn.execute(
                 "INSERT INTO news_configs (id, user_id, industry, detail_level, summary_time, "
-                "timezone, enabled, last_run_at, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
-                (cid, user_id, industry, detail_level, summary_time, timezone, int(enabled), now, now),
+                "timezone, language, enabled, last_run_at, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+                (cid, user_id, industry, detail_level, summary_time, timezone, language, int(enabled), now, now),
             )
         else:
             conn.execute(
                 "UPDATE news_configs SET industry = ?, detail_level = ?, summary_time = ?, "
-                "timezone = ?, enabled = ?, updated_at = ? WHERE user_id = ?",
-                (industry, detail_level, summary_time, timezone, int(enabled), now, user_id),
+                "timezone = ?, language = ?, enabled = ?, updated_at = ? WHERE user_id = ?",
+                (industry, detail_level, summary_time, timezone, language, int(enabled), now, user_id),
             )
     return get_news_config(user_id)  # type: ignore[return-value]
 
@@ -636,11 +646,20 @@ def set_news_config_last_run(user_id: str, ts: float) -> None:
         )
 
 
+def set_news_config_language(user_id: str, language: str) -> None:
+    _ensure()
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE news_configs SET language = ?, updated_at = ? WHERE user_id = ?",
+            (language, time.time(), user_id),
+        )
+
+
 def list_enabled_news_configs() -> list[dict]:
     _ensure()
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT id, user_id, industry, detail_level, summary_time, timezone, enabled, "
+            "SELECT id, user_id, industry, detail_level, summary_time, timezone, language, enabled, "
             "last_run_at, created_at, updated_at FROM news_configs WHERE enabled = 1"
         ).fetchall()
     result = []

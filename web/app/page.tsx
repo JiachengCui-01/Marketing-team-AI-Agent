@@ -510,7 +510,7 @@ export default function HomePage() {
 
   return (
     <main className="h-screen flex flex-col">
-      <header className="border-b border-border bg-bg-elevated/60 backdrop-blur">
+      <header className="relative z-50 border-b border-border bg-bg-elevated/60 backdrop-blur">
         <div className="px-4 py-3 flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-accent text-accent-fg flex items-center justify-center">
             <Sparkles size={16} />

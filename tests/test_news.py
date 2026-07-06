@@ -32,6 +32,19 @@ class NewsTests(unittest.TestCase):
         self.assertEqual(research_agent.TOOLS[0]["type"], "web_search_20250305")
         self.assertEqual(research_agent.TOOLS[0]["max_uses"], 3)
 
+    def test_build_task_uses_requested_language(self) -> None:
+        from datetime import datetime, timezone
+
+        zh_task, _, _ = news.build_task(
+            "AI marketing", "brief", datetime.now(timezone.utc), "zh"
+        )
+        en_task, _, _ = news.build_task(
+            "AI marketing", "brief", datetime.now(timezone.utc), "en"
+        )
+
+        self.assertIn("Simplified Chinese", zh_task)
+        self.assertIn("entire response in English", en_task)
+
     def test_failed_research_does_not_replace_last_good_summary(self) -> None:
         previous = db.add_news_summary(
             self.user["id"],

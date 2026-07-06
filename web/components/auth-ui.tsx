@@ -426,7 +426,7 @@ export function UserMenu({
           <ChevronDown size={14} className="text-fg-muted" />
         </button>
         {open ? (
-          <div className="absolute right-0 top-11 z-30 w-52 rounded-xl border border-border bg-bg-elevated p-1.5 shadow-lg">
+          <div className="absolute right-0 top-11 z-[60] w-52 rounded-xl border border-border bg-bg-elevated p-1.5 shadow-lg">
             <div className="px-3 py-2">
               <p className="truncate text-sm font-medium">{user.username}</p>
               <p className="truncate text-xs text-fg-subtle">{user.account}</p>
