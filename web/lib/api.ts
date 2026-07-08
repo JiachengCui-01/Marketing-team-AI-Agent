@@ -332,6 +332,8 @@ export type NewsConfig = {
   timezone: string;
   language: "zh" | "en";
   enabled: boolean;
+  cancelled_at: number | null;
+  revert_at?: number | null;
   last_run_at: number | null;
   created_at: number;
   updated_at: number;
@@ -378,6 +380,16 @@ export async function deleteNewsConfig(): Promise<void> {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error(await parseJsonError(res));
+}
+
+export async function cancelNews(): Promise<NewsConfig> {
+  const res = await fetch(`${API_BASE}/api/news/cancel`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  const body = await res.json();
+  return body.config;
 }
 
 export async function getNewsSummary(): Promise<NewsSummary | null> {

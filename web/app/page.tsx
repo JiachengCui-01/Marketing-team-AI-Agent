@@ -470,6 +470,7 @@ export default function HomePage() {
       setAuthToken(token);
       setUser(profile);
       setSwitchOpen(false);
+      setNewsOpen(false);
       setActiveId(null);
       setMessages([]);
       setTrace([]);
@@ -560,7 +561,7 @@ export default function HomePage() {
           />
         ) : null}
         {newsOpen ? (
-          <NewsPanel onBack={() => setNewsOpen(false)} />
+          <NewsPanel key={user.id} onBack={() => setNewsOpen(false)} />
         ) : (
           <>
             <ChatPanel

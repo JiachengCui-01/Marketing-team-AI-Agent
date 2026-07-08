@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from server import sessions, uploads
+from server import db, sessions, uploads
 from server.main import app
 
 
@@ -277,6 +277,72 @@ class RouteTests(unittest.TestCase):
             self.assertEqual(messages[-1]["content"], "Done without streaming.")
         finally:
             routes.run_orchestrator = old_run_orchestrator
+
+    def _save_news_config(self, headers: dict[str, str]) -> dict:
+        response = self.client.put(
+            "/api/news/config",
+            headers=headers,
+            json={
+                "industry": "AI marketing",
+                "detail_level": "brief",
+                "summary_time": "09:00",
+                "timezone": "UTC",
+                "language": "zh",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()["config"]
+
+    def test_news_cancel_keeps_content_then_reactivates(self) -> None:
+        config = self._save_news_config(self.headers)
+        me = self.client.get("/api/auth/me", headers=self.headers).json()["user"]
+        db.add_news_summary(
+            me["id"], config["id"], "## Summary\nheld content",
+            generated_at=1.0, window_start=0.0, window_end=1.0,
+        )
+
+        cancelled = self.client.post("/api/news/cancel", headers=self.headers)
+        self.assertEqual(cancelled.status_code, 200, cancelled.text)
+        body = cancelled.json()["config"]
+        self.assertFalse(body["enabled"])
+        self.assertIsNotNone(body["cancelled_at"])
+        self.assertIn("revert_at", body)
+
+        # Within the window: config still visible (disabled), content retained.
+        cfg = self.client.get("/api/news/config", headers=self.headers).json()["config"]
+        self.assertFalse(cfg["enabled"])
+        self.assertIsNotNone(cfg["revert_at"])
+        summary = self.client.get("/api/news/summary", headers=self.headers).json()["summary"]
+        self.assertEqual(summary["summary"], "## Summary\nheld content")
+
+        # Manual refresh is blocked while cancelled.
+        blocked = self.client.post("/api/news/refresh", headers=self.headers)
+        self.assertEqual(blocked.status_code, 409)
+
+        # Saving a new task reactivates and clears the cancellation.
+        reactivated = self._save_news_config(self.headers)
+        self.assertTrue(reactivated["enabled"])
+        self.assertIsNone(reactivated["cancelled_at"])
+
+    def test_news_cancel_reverts_to_empty_after_deadline(self) -> None:
+        self._save_news_config(self.headers)
+        me = self.client.get("/api/auth/me", headers=self.headers).json()["user"]
+        db.add_news_summary(
+            me["id"], None, "## Summary\nold",
+            generated_at=1.0, window_start=0.0, window_end=1.0,
+        )
+        self.client.post("/api/news/cancel", headers=self.headers)
+        # Force the cancellation well into the past so it is expired.
+        db.cancel_news_config(me["id"], 1000.0)
+
+        cfg = self.client.get("/api/news/config", headers=self.headers).json()["config"]
+        self.assertIsNone(cfg)
+        summary = self.client.get("/api/news/summary", headers=self.headers).json()["summary"]
+        self.assertIsNone(summary)
+
+    def test_news_cancel_requires_existing_config(self) -> None:
+        response = self.client.post("/api/news/cancel", headers=self.headers)
+        self.assertEqual(response.status_code, 400)
 
     def test_user_isolation_and_delete_account(self) -> None:
         alice_session = self._create_session(self.headers)

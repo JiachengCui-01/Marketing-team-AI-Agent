@@ -82,6 +82,84 @@ class NewsTests(unittest.TestCase):
         self.assertEqual(record["summary"], digest)
         self.assertIsNotNone(db.get_news_config(self.user["id"])["last_run_at"])
 
+    def test_revert_time_is_next_calendar_day_at_summary_time(self) -> None:
+        from datetime import datetime, timezone
+
+        # Cancel at 15:00 UTC — after the 09:00 summary time → next day 09:00.
+        after = datetime(2026, 7, 8, 15, 0, tzinfo=timezone.utc).timestamp()
+        cfg_after = {**self.config, "cancelled_at": after, "enabled": False}
+        self.assertEqual(
+            news.cancellation_revert_ts(cfg_after),
+            datetime(2026, 7, 9, 9, 0, tzinfo=timezone.utc).timestamp(),
+        )
+
+        # Cancel at 07:00 UTC — before the 09:00 summary time → still next day 09:00.
+        before = datetime(2026, 7, 8, 7, 0, tzinfo=timezone.utc).timestamp()
+        cfg_before = {**self.config, "cancelled_at": before, "enabled": False}
+        self.assertEqual(
+            news.cancellation_revert_ts(cfg_before),
+            datetime(2026, 7, 9, 9, 0, tzinfo=timezone.utc).timestamp(),
+        )
+
+    def test_revert_time_respects_timezone(self) -> None:
+        from datetime import datetime, timezone
+        from zoneinfo import ZoneInfo
+
+        cfg = db.upsert_news_config(
+            self.user["id"],
+            industry="AI marketing",
+            detail_level="brief",
+            summary_time="09:00",
+            timezone="Asia/Shanghai",
+        )
+        cancelled_at = datetime(2026, 7, 8, 23, 0, tzinfo=timezone.utc).timestamp()  # 07-09 07:00 CST
+        cfg = {**cfg, "cancelled_at": cancelled_at, "enabled": False}
+        expected = datetime(2026, 7, 10, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai")).timestamp()
+        self.assertEqual(news.cancellation_revert_ts(cfg), expected)
+
+    def test_is_cancel_expired_transitions_at_revert_time(self) -> None:
+        cancelled_at = 1_000_000.0
+        cfg = {**self.config, "cancelled_at": cancelled_at, "enabled": False}
+        revert = news.cancellation_revert_ts(cfg)
+        self.assertTrue(news.is_cancelled(cfg))
+        self.assertFalse(news.is_cancel_expired(cfg, revert - 1))
+        self.assertTrue(news.is_cancel_expired(cfg, revert))
+        # An active config is never "cancelled" / expired.
+        self.assertFalse(news.is_cancelled(self.config))
+        self.assertFalse(news.is_cancel_expired(self.config, revert))
+
+    def test_cancel_news_config_soft_cancels(self) -> None:
+        cancelled = db.cancel_news_config(self.user["id"], 1234.5)
+        self.assertIsNotNone(cancelled)
+        self.assertFalse(cancelled["enabled"])
+        self.assertEqual(cancelled["cancelled_at"], 1234.5)
+        # Scheduler no longer sees it as an enabled job.
+        enabled_ids = {c["user_id"] for c in db.list_enabled_news_configs()}
+        self.assertNotIn(self.user["id"], enabled_ids)
+        cancelled_ids = {c["user_id"] for c in db.list_cancelled_news_configs()}
+        self.assertIn(self.user["id"], cancelled_ids)
+
+    def test_saving_config_reactivates_and_clears_cancellation(self) -> None:
+        db.cancel_news_config(self.user["id"], 1234.5)
+        reactivated = db.upsert_news_config(
+            self.user["id"],
+            industry="Fintech",
+            detail_level="detailed",
+            summary_time="08:00",
+            timezone="UTC",
+        )
+        self.assertTrue(reactivated["enabled"])
+        self.assertIsNone(reactivated["cancelled_at"])
+
+    def test_delete_news_data_wipes_config_and_summaries(self) -> None:
+        db.add_news_summary(
+            self.user["id"], self.config["id"], "## Summary\nx",
+            generated_at=1.0, window_start=0.0, window_end=1.0,
+        )
+        db.delete_news_data(self.user["id"])
+        self.assertIsNone(db.get_news_config(self.user["id"]))
+        self.assertIsNone(db.get_latest_news_summary(self.user["id"]))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,7 +7,7 @@ the manual "refresh now" endpoint and by the background scheduler in ``main.py``
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, time as dtime, timedelta
 from zoneinfo import ZoneInfo
 
 import anthropic
@@ -21,6 +21,43 @@ WINDOW_HOURS = 24
 
 class NewsGenerationError(RuntimeError):
     """Raised when research failed rather than producing a usable digest."""
+
+
+def _config_tz(config: dict) -> ZoneInfo:
+    try:
+        return ZoneInfo(config.get("timezone") or "UTC")
+    except Exception:  # noqa: BLE001 - unknown tz string
+        return ZoneInfo("UTC")
+
+
+def is_cancelled(config: dict | None) -> bool:
+    """True when a config has been soft-cancelled but not yet reverted."""
+    return bool(config) and not config.get("enabled") and config.get("cancelled_at") is not None
+
+
+def cancellation_revert_ts(config: dict) -> float:
+    """Timestamp at which a cancelled task reverts to the pre-activation empty state.
+
+    Defined as the configured ``summary_time`` on the calendar day AFTER the day the
+    task was cancelled, in the config's timezone. Guarantees the retained content
+    stays visible through at least the next day's default update slot.
+    """
+    tz = _config_tz(config)
+    cancelled_local = datetime.fromtimestamp(float(config["cancelled_at"]), tz=tz)
+    try:
+        hh, mm = (int(x) for x in str(config["summary_time"]).split(":"))
+    except (ValueError, KeyError):
+        hh, mm = 9, 0
+    next_day = (cancelled_local + timedelta(days=1)).date()
+    revert_local = datetime.combine(next_day, dtime(hour=hh, minute=mm), tzinfo=tz)
+    return revert_local.timestamp()
+
+
+def is_cancel_expired(config: dict | None, now_ts: float) -> bool:
+    """True when a cancelled config has passed its revert time and should be wiped."""
+    if not is_cancelled(config):
+        return False
+    return now_ts >= cancellation_revert_ts(config)
 
 
 def _research_failed(summary: str) -> bool:
@@ -87,10 +124,7 @@ def generate_summary(config: dict, client: anthropic.Anthropic | None = None) ->
     """
     client = client or anthropic.Anthropic()
     industry = config["industry"]
-    try:
-        tz = ZoneInfo(config.get("timezone") or "UTC")
-    except Exception:  # noqa: BLE001 - unknown tz string
-        tz = ZoneInfo("UTC")
+    tz = _config_tz(config)
     now = datetime.now(tz)
 
     task, window_start, window_end = build_task(

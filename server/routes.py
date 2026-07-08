@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from typing import AsyncIterator
 from urllib.parse import quote
 
@@ -150,10 +151,29 @@ def _validate_news_payload(payload: dict) -> dict:
     }
 
 
+def _resolved_news_config(user_id: str) -> dict | None:
+    """Fetch the user's news config, lazily reverting an expired cancellation.
+
+    If a soft-cancelled config has passed its revert time, wipe both the config and
+    the stored summaries so the panel shows the pre-activation empty state — even if
+    the background scheduler has not yet run its cleanup tick. On the way out, attach
+    ``revert_at`` for a still-cancelled config so the UI can reason about the window.
+    """
+    config = db.get_news_config(user_id)
+    if config is None:
+        return None
+    if news.is_cancelled(config):
+        if news.is_cancel_expired(config, time.time()):
+            db.delete_news_data(user_id)
+            return None
+        config = {**config, "revert_at": news.cancellation_revert_ts(config)}
+    return config
+
+
 @router.get("/news/config")
 def get_news_config(request: Request) -> dict:
     user = auth.require_user(request)
-    return {"config": db.get_news_config(user["id"])}
+    return {"config": _resolved_news_config(user["id"])}
 
 
 @router.put("/news/config")
@@ -166,22 +186,44 @@ def save_news_config(request: Request, payload: dict = Body(...)) -> dict:
 @router.delete("/news/config")
 def remove_news_config(request: Request) -> dict:
     user = auth.require_user(request)
-    db.delete_news_config(user["id"])
+    db.delete_news_data(user["id"])
     return {"ok": True}
+
+
+@router.post("/news/cancel")
+def cancel_news(request: Request) -> dict:
+    """Soft-cancel the auto-summary task.
+
+    Stops the scheduler and stamps the cancel time, but keeps the last summary
+    visible until the next day's summary time (see ``news.cancellation_revert_ts``).
+    """
+    user = auth.require_user(request)
+    if db.get_news_config(user["id"]) is None:
+        raise HTTPException(400, "尚未设置新闻总结任务。")
+    config = db.cancel_news_config(user["id"], time.time())
+    if config is None:
+        raise HTTPException(404, "News task not found.")
+    config = {**config, "revert_at": news.cancellation_revert_ts(config)}
+    return {"config": config}
 
 
 @router.get("/news/summary")
 def get_news_summary(request: Request) -> dict:
     user = auth.require_user(request)
+    # Trigger the shared expiry cleanup; after an expired revert the summaries are
+    # wiped, so get_latest_news_summary naturally returns None.
+    _resolved_news_config(user["id"])
     return {"summary": db.get_latest_news_summary(user["id"])}
 
 
 @router.post("/news/refresh")
 async def refresh_news(request: Request) -> dict:
     user = auth.require_user(request)
-    config = db.get_news_config(user["id"])
+    config = _resolved_news_config(user["id"])
     if config is None:
         raise HTTPException(400, "请先设置新闻总结任务。")
+    if news.is_cancelled(config):
+        raise HTTPException(409, "自动总结任务已中断，请先设置新任务。")
     try:
         payload = await request.json()
     except Exception:  # noqa: BLE001 - remain compatible with older deployed clients

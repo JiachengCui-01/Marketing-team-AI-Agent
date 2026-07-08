@@ -66,9 +66,23 @@ async def _news_scheduler() -> None:
                     tz = ZoneInfo("UTC")
                 if _is_due(config, datetime.now(tz)):
                     await _run_due_job(config)
+            _expire_cancelled_configs()
         except Exception as exc:  # noqa: BLE001 - never let the loop die
             logger.warning("News scheduler tick failed: %s", exc)
         await asyncio.sleep(_SCHEDULER_INTERVAL_SECONDS)
+
+
+def _expire_cancelled_configs() -> None:
+    """Wipe soft-cancelled configs (and their summaries) once past their revert time.
+
+    Backstop for users who never reopen the panel — the GET endpoints do the same
+    lazy cleanup when the panel is opened.
+    """
+    now_ts = datetime.now().timestamp()
+    for config in db.list_cancelled_news_configs():
+        if news.is_cancel_expired(config, now_ts):
+            db.delete_news_data(config["user_id"])
+            logger.info("Reverted cancelled news task for user %s", config.get("user_id"))
 
 
 @asynccontextmanager

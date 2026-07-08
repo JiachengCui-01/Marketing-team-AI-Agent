@@ -126,6 +126,7 @@ CREATE TABLE IF NOT EXISTS news_configs (
     timezone TEXT NOT NULL,
     language TEXT NOT NULL DEFAULT 'zh',
     enabled INTEGER NOT NULL DEFAULT 1,
+    cancelled_at REAL,
     last_run_at REAL,
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL,
@@ -157,6 +158,7 @@ def init() -> None:
             _drop_anonymous_tables_if_needed(conn)
             conn.executescript(SCHEMA)
             _migrate_news_config_language(conn)
+            _migrate_news_config_cancelled_at(conn)
         _INITIALIZED = True
 
 
@@ -175,6 +177,11 @@ def _migrate_news_config_language(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE news_configs ADD COLUMN language TEXT NOT NULL DEFAULT 'zh'"
         )
+
+
+def _migrate_news_config_cancelled_at(conn: sqlite3.Connection) -> None:
+    if "cancelled_at" not in _table_columns(conn, "news_configs"):
+        conn.execute("ALTER TABLE news_configs ADD COLUMN cancelled_at REAL")
 
 
 def _drop_anonymous_tables_if_needed(conn: sqlite3.Connection) -> None:
@@ -589,7 +596,7 @@ def get_news_config(user_id: str) -> dict | None:
     with _connect() as conn:
         row = conn.execute(
             "SELECT id, user_id, industry, detail_level, summary_time, timezone, language, enabled, "
-            "last_run_at, created_at, updated_at FROM news_configs WHERE user_id = ?",
+            "cancelled_at, last_run_at, created_at, updated_at FROM news_configs WHERE user_id = ?",
             (user_id,),
         ).fetchone()
     if row is None:
@@ -618,14 +625,16 @@ def upsert_news_config(
             cid = uuid.uuid4().hex
             conn.execute(
                 "INSERT INTO news_configs (id, user_id, industry, detail_level, summary_time, "
-                "timezone, language, enabled, last_run_at, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+                "timezone, language, enabled, cancelled_at, last_run_at, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)",
                 (cid, user_id, industry, detail_level, summary_time, timezone, language, int(enabled), now, now),
             )
         else:
+            # Saving a config (re)activates the task: clear any cancellation marker.
             conn.execute(
                 "UPDATE news_configs SET industry = ?, detail_level = ?, summary_time = ?, "
-                "timezone = ?, language = ?, enabled = ?, updated_at = ? WHERE user_id = ?",
+                "timezone = ?, language = ?, enabled = ?, cancelled_at = NULL, updated_at = ? "
+                "WHERE user_id = ?",
                 (industry, detail_level, summary_time, timezone, language, int(enabled), now, user_id),
             )
     return get_news_config(user_id)  # type: ignore[return-value]
@@ -636,6 +645,35 @@ def delete_news_config(user_id: str) -> bool:
     with _connect() as conn:
         cur = conn.execute("DELETE FROM news_configs WHERE user_id = ?", (user_id,))
         return cur.rowcount > 0
+
+
+def delete_news_data(user_id: str) -> None:
+    """Wipe both the news config and all stored summaries for a user.
+
+    Used when a cancelled task reaches its revert time — the panel returns to the
+    pre-activation empty state.
+    """
+    _ensure()
+    with _connect() as conn:
+        conn.execute("DELETE FROM news_summaries WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM news_configs WHERE user_id = ?", (user_id,))
+
+
+def cancel_news_config(user_id: str, ts: float) -> dict | None:
+    """Soft-cancel: stop the scheduler for this config and stamp the cancel time.
+
+    The row is kept (enabled=0, cancelled_at=ts) so the panel can keep showing the
+    last summary until the revert time, after which it is fully deleted.
+    """
+    _ensure()
+    with _connect() as conn:
+        cur = conn.execute(
+            "UPDATE news_configs SET enabled = 0, cancelled_at = ?, updated_at = ? WHERE user_id = ?",
+            (ts, time.time(), user_id),
+        )
+        if cur.rowcount == 0:
+            return None
+    return get_news_config(user_id)
 
 
 def set_news_config_last_run(user_id: str, ts: float) -> None:
@@ -660,7 +698,24 @@ def list_enabled_news_configs() -> list[dict]:
     with _connect() as conn:
         rows = conn.execute(
             "SELECT id, user_id, industry, detail_level, summary_time, timezone, language, enabled, "
-            "last_run_at, created_at, updated_at FROM news_configs WHERE enabled = 1"
+            "cancelled_at, last_run_at, created_at, updated_at FROM news_configs WHERE enabled = 1"
+        ).fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["enabled"] = bool(d["enabled"])
+        result.append(d)
+    return result
+
+
+def list_cancelled_news_configs() -> list[dict]:
+    """Configs that were soft-cancelled and are awaiting their revert-time cleanup."""
+    _ensure()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, user_id, industry, detail_level, summary_time, timezone, language, enabled, "
+            "cancelled_at, last_run_at, created_at, updated_at FROM news_configs "
+            "WHERE enabled = 0 AND cancelled_at IS NOT NULL"
         ).fetchall()
     result = []
     for r in rows:

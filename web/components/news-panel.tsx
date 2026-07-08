@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, Settings, RefreshCw, Loader2, Newspaper } from "lucide-react";
+import { ArrowLeft, Settings, RefreshCw, Loader2, Newspaper, AlertTriangle } from "lucide-react";
 import {
   getNewsConfig,
   getNewsSummary,
   saveNewsConfig,
   refreshNews,
+  cancelNews,
   type NewsConfig,
   type NewsSummary,
 } from "@/lib/api";
@@ -23,6 +24,8 @@ export function NewsPanel({ onBack }: { onBack: () => void }) {
   const [refreshing, setRefreshing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const cancelled = !!config && config.enabled === false && config.cancelled_at != null;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -81,6 +84,13 @@ export function NewsPanel({ onBack }: { onBack: () => void }) {
 
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-4 py-6">
+          {cancelled ? (
+            <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3.5 py-3 text-sm text-amber-700 dark:text-amber-300">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <p>{t.newsCancelledNotice}</p>
+            </div>
+          ) : null}
+
           <div className="mb-4 flex items-center justify-between">
             <div className="text-xs text-fg-subtle">
               {config
@@ -89,7 +99,7 @@ export function NewsPanel({ onBack }: { onBack: () => void }) {
             </div>
             <button
               onClick={handleRefresh}
-              disabled={refreshing || !config}
+              disabled={refreshing || !config || cancelled}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-accent-fg text-xs font-medium hover:opacity-90 transition disabled:opacity-40"
             >
               {refreshing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
@@ -153,13 +163,34 @@ function NewsSettingsDialog({
   onSaved: (cfg: NewsConfig) => void;
 }) {
   const { locale, t } = useI18n();
-  const [industry, setIndustry] = useState(config?.industry ?? "");
+  // A cancelled task keeps its row on the backend, but the settings form should read
+  // as a blank slate (defaults) so it reflects "no active task".
+  const isCancelled = !!config && config.enabled === false && config.cancelled_at != null;
+  const canCancel = !!config && config.enabled !== false;
+  const [industry, setIndustry] = useState(isCancelled ? "" : config?.industry ?? "");
   const [detailLevel, setDetailLevel] = useState<"brief" | "detailed">(
-    config?.detail_level ?? "brief",
+    isCancelled ? "brief" : config?.detail_level ?? "brief",
   );
-  const [summaryTime, setSummaryTime] = useState(config?.summary_time ?? "09:00");
+  const [summaryTime, setSummaryTime] = useState(isCancelled ? "09:00" : config?.summary_time ?? "09:00");
   const [saving, setSaving] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  async function handleCancelTask() {
+    setCancelling(true);
+    setError(null);
+    try {
+      const cfg = await cancelNews();
+      setIndustry("");
+      setDetailLevel("brief");
+      setSummaryTime("09:00");
+      onSaved(cfg);
+    } catch (e) {
+      setError(localizeError(e, locale));
+    } finally {
+      setCancelling(false);
+    }
+  }
 
   async function handleSave() {
     if (!industry.trim()) {
@@ -223,22 +254,35 @@ function NewsSettingsDialog({
 
         {error ? <p className="text-[11px] text-danger">{error}</p> : null}
 
-        <div className="flex justify-end gap-2 pt-1">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg border border-border px-4 py-2 text-sm text-fg-muted hover:bg-bg-subtle"
-          >
-            {t.cancel}
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={saving}
-            className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg disabled:opacity-40"
-          >
-            {saving ? t.saving : t.save}
-          </button>
+        <div className="flex items-center gap-2 pt-1">
+          {canCancel ? (
+            <button
+              type="button"
+              onClick={handleCancelTask}
+              disabled={cancelling || saving}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-danger/40 px-4 py-2 text-sm text-danger hover:bg-danger/10 disabled:opacity-40"
+            >
+              {cancelling ? <Loader2 size={14} className="animate-spin" /> : null}
+              {t.newsCancelTask}
+            </button>
+          ) : null}
+          <div className="ml-auto flex gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg border border-border px-4 py-2 text-sm text-fg-muted hover:bg-bg-subtle"
+            >
+              {t.cancel}
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || cancelling}
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg disabled:opacity-40"
+            >
+              {saving ? t.saving : t.save}
+            </button>
+          </div>
         </div>
       </div>
     </Modal>

@@ -174,6 +174,9 @@ const messages = {
     newsDetailDetailed: "详细",
     newsTime: "每日总结时间",
     newsTimeHint: "将总结该时间之前 24 小时内的相关新闻。",
+    newsCancelTask: "取消任务",
+    newsCancelledNotice:
+      "自动总结任务已中断。当前内容将保留至次日总结时间，之后自动清空。如需继续使用，请设置新任务。",
   },
   en: {
     language: "Language",
@@ -336,6 +339,9 @@ const messages = {
     newsDetailDetailed: "Detailed",
     newsTime: "Daily summary time",
     newsTimeHint: "Summarizes relevant news from the 24 hours before this time.",
+    newsCancelTask: "Cancel task",
+    newsCancelledNotice:
+      "The automatic summary has been stopped. The current content stays until tomorrow's summary time, then clears. Set up a new task to resume.",
   },
 } as const;
 
