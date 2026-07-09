@@ -45,10 +45,19 @@ class ImageGenTests(unittest.TestCase):
             os.environ.pop("GEMINI_API_KEY", None)
 
     def test_unavailable_without_key(self) -> None:
-        result = image_gen.generate_image("a bottle", skill=IMAGE_SKILLS["generic"])
+        with mock.patch.object(image_gen, "load_dotenv", return_value=False):
+            result = image_gen.generate_image("a bottle", skill=IMAGE_SKILLS["generic"])
         self.assertTrue(result["unavailable"])
         self.assertFalse(result["ok"])
         self.assertIn("GEMINI_API_KEY", result["message"])
+
+    def test_api_key_falls_back_to_dotenv_loader(self) -> None:
+        def fake_load_dotenv(*args, **kwargs):
+            os.environ["GEMINI_API_KEY"] = "loaded-from-dotenv"
+            return True
+
+        with mock.patch.object(image_gen, "load_dotenv", side_effect=fake_load_dotenv):
+            self.assertEqual(image_gen._api_key(), "loaded-from-dotenv")
 
     def test_success_writes_png(self) -> None:
         os.environ["GEMINI_API_KEY"] = "test-key"

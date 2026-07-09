@@ -444,6 +444,48 @@ class RouteTests(unittest.TestCase):
             res2 = self.client.post("/api/image/process", headers=self.headers, json={"file_id": file_id})
         self.assertIsNone(res2.json()["cutout"])
 
+    def test_image_cutout_on_demand(self) -> None:
+        from server import routes
+
+        file_id = self._upload_png()
+        with mock.patch.object(routes.image_processing, "cutout", return_value=b"\x89PNG\r\n\x1a\n"):
+            res = self.client.post("/api/image/cutout", headers=self.headers, json={"file_id": file_id})
+        self.assertEqual(res.status_code, 200, res.text)
+        body = res.json()
+        self.assertIsNotNone(body["artifact_id"])
+        self.assertEqual(
+            self.client.get(f"/api/artifacts/{body['artifact_id']}/preview", headers=self.headers).status_code,
+            200,
+        )
+
+    def test_image_cutout_unavailable_is_graceful(self) -> None:
+        from server import routes
+
+        file_id = self._upload_png()
+        with mock.patch.object(
+            routes.image_processing, "cutout",
+            side_effect=routes.image_processing.CutoutUnavailable("no rembg"),
+        ):
+            res = self.client.post("/api/image/cutout", headers=self.headers, json={"file_id": file_id})
+        self.assertEqual(res.status_code, 200)
+        self.assertIsNone(res.json()["artifact_id"])
+        self.assertIn("no rembg", res.json()["warning"])
+
+    def test_image_templates_platform_and_style_filter(self) -> None:
+        all_t = self.client.get("/api/image/templates", headers=self.headers).json()["templates"]
+        self.assertTrue(any(t["platform"] == "taobao" for t in all_t))
+        self.assertTrue(all("style" in t for t in all_t))
+        # platform filter
+        taobao = self.client.get(
+            "/api/image/templates", headers=self.headers, params={"platform": "taobao"}
+        ).json()["templates"]
+        self.assertTrue(taobao and all(t["platform"] == "taobao" for t in taobao))
+        # style filter is a distinct axis
+        white = self.client.get(
+            "/api/image/templates", headers=self.headers, params={"style": "white"}
+        ).json()["templates"]
+        self.assertTrue(white and all(t["style"] == "white" for t in white))
+
     def test_image_history_user_isolation(self) -> None:
         from server import routes
 

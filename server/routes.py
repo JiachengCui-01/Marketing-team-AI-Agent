@@ -542,6 +542,52 @@ async def image_process(request: Request, payload: dict = Body(...)) -> dict:
     return response
 
 
+def _save_cutout_artifact(user_id: str, cutout_png: bytes) -> dict:
+    import uuid as _uuid
+    from pathlib import Path
+
+    from marketing_agent.tools.image_gen import ARTIFACTS_DIR
+
+    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+    cut_path = Path(ARTIFACTS_DIR) / f"{_uuid.uuid4().hex}_cutout.png"
+    cut_path.write_bytes(cutout_png)
+    return db.add_artifact(
+        session_id=None,
+        kind="image_cutout",
+        filename="cutout.png",
+        mime="image/png",
+        path=str(cut_path.resolve()),
+        user_id=user_id,
+    )
+
+
+@router.post("/image/cutout")
+async def image_cutout(request: Request, payload: dict = Body(...)) -> dict:
+    """Remove the background from an uploaded image on demand (rembg only, no classify).
+
+    Kept separate from generation so the panel can show the original instantly and only
+    pay the (slower) cutout cost when the user clicks "remove background".
+    """
+    user = auth.require_user(request)
+    file_id = str(payload.get("file_id") or "")
+    rec = db.get_upload(file_id, user["id"])
+    if rec is None:
+        raise HTTPException(404, "Uploaded file not found.")
+    if not str(rec["mime"]).startswith("image/"):
+        raise HTTPException(400, "Only image files can have their background removed.")
+    image_bytes = _read_bytes(rec["path"])
+    try:
+        cutout_png = await asyncio.to_thread(image_processing.cutout, image_bytes)
+    except image_processing.CutoutUnavailable as exc:
+        return {"artifact_id": None, "preview_url": None, "warning": str(exc)}
+    art = _save_cutout_artifact(user["id"], cutout_png)
+    return {
+        "artifact_id": art["id"],
+        "preview_url": f"/api/artifacts/{art['id']}/preview",
+        "warning": None,
+    }
+
+
 def _run_generate(
     user_id: str,
     *,

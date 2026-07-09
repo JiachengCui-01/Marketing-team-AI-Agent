@@ -13,6 +13,8 @@ import os
 import uuid
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from marketing_agent.config import PROJECT_ROOT
 
 from ..agents.image_skills import ImageSkill
@@ -22,6 +24,12 @@ GEMINI_MODEL = "gemini-2.5-flash-image"
 
 
 def _api_key() -> str | None:
+    key = os.environ.get("GEMINI_API_KEY")
+    if key:
+        return key
+    # Be defensive for non-FastAPI entrypoints (tests, scripts, workers) that import
+    # this module without going through ``server.main`` / CLI, where dotenv is loaded.
+    load_dotenv(PROJECT_ROOT / ".env", override=False)
     return os.environ.get("GEMINI_API_KEY")
 
 

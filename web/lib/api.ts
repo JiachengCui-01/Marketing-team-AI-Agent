@@ -457,10 +457,17 @@ export type ImageTemplate = {
   id: string;
   platform: string;
   style_key: string;
+  style: string | null;
   label: string;
   prompt: string;
   aspect_ratio: string | null;
   sort_order: number;
+};
+
+export type ImageCutoutResult = {
+  artifact_id: string | null;
+  preview_url: string | null;
+  warning: string | null;
 };
 
 export type ImageSource =
@@ -476,6 +483,16 @@ export async function getImageSkills(): Promise<ImageSkill[]> {
 
 export async function processImage(fileId: string): Promise<ImageProcessResult> {
   const res = await fetch(`${API_BASE}/api/image/process`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ file_id: fileId }),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return res.json();
+}
+
+export async function cutoutImage(fileId: string): Promise<ImageCutoutResult> {
+  const res = await fetch(`${API_BASE}/api/image/cutout`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ file_id: fileId }),

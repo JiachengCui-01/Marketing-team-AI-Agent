@@ -165,12 +165,13 @@ CREATE TABLE IF NOT EXISTS image_templates (
     id TEXT PRIMARY KEY,
     platform TEXT NOT NULL,
     style_key TEXT NOT NULL,
+    style TEXT,
     label TEXT NOT NULL,
     prompt TEXT NOT NULL,
     aspect_ratio TEXT,
     sort_order INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX IF NOT EXISTS idx_image_templates_platform ON image_templates(platform, style_key);
+CREATE INDEX IF NOT EXISTS idx_image_templates_platform ON image_templates(platform, style);
 """
 
 
@@ -184,6 +185,7 @@ def init() -> None:
             conn.executescript(SCHEMA)
             _migrate_news_config_language(conn)
             _migrate_news_config_cancelled_at(conn)
+            _migrate_image_template_style(conn)
             _seed_image_templates(conn)
         _INITIALIZED = True
 
@@ -208,6 +210,11 @@ def _migrate_news_config_language(conn: sqlite3.Connection) -> None:
 def _migrate_news_config_cancelled_at(conn: sqlite3.Connection) -> None:
     if "cancelled_at" not in _table_columns(conn, "news_configs"):
         conn.execute("ALTER TABLE news_configs ADD COLUMN cancelled_at REAL")
+
+
+def _migrate_image_template_style(conn: sqlite3.Connection) -> None:
+    if "style" not in _table_columns(conn, "image_templates"):
+        conn.execute("ALTER TABLE image_templates ADD COLUMN style TEXT")
 
 
 def _drop_anonymous_tables_if_needed(conn: sqlite3.Connection) -> None:
@@ -793,32 +800,45 @@ def get_latest_news_summary(user_id: str) -> dict | None:
 
 # ---------- image generation ----------
 
-# Global, editorial template catalog (not per-user). Seeded idempotently by id.
+# Global, editorial template catalog (not per-user). ``platform`` is the marketplace/
+# channel, ``style`` is the visual look, and ``style_key`` is the generation skill key
+# (see marketing_agent.agents.image_skills). Reseeded deterministically on init.
+# Columns: (id, platform, style_key, style, label, prompt, aspect_ratio, sort_order)
 _IMAGE_TEMPLATE_SEED = [
-    ("tpl_taobao_white", "taobao", "taobao", "淘宝纯白主图",
+    ("tpl_taobao_white", "taobao", "taobao", "white", "纯白主图",
      "Clean e-commerce main image on a pure white background, product centered and sharp.", "1:1", 10),
-    ("tpl_taobao_scene", "taobao", "taobao", "淘宝场景主图",
+    ("tpl_taobao_scene", "taobao", "taobao", "scene", "场景主图",
      "Product hero shot in a minimal lifestyle scene with soft shadows.", "1:1", 20),
-    ("tpl_xhs_lifestyle", "xiaohongshu", "xiaohongshu", "小红书生活场景",
+    ("tpl_taobao_promo", "taobao", "taobao", "promo", "促销氛围图",
+     "High-energy promotional main image with bold accent color blocks and space for a price tag.", "1:1", 30),
+    ("tpl_xhs_lifestyle", "xiaohongshu", "xiaohongshu", "lifestyle", "生活场景",
      "Warm lifestyle flat-lay with cozy props and space for a caption sticker at the top.", "3:4", 10),
-    ("tpl_xhs_hand", "xiaohongshu", "xiaohongshu", "小红书手持展示",
+    ("tpl_xhs_hand", "xiaohongshu", "xiaohongshu", "handheld", "手持展示",
      "Aspirational hand-held product shot with soft natural light.", "3:4", 20),
-    ("tpl_amazon_main", "amazon", "amazon", "亚马逊合规主图",
+    ("tpl_xhs_flatlay", "xiaohongshu", "xiaohongshu", "flatlay", "平铺构图",
+     "Top-down flat-lay with coordinated props arranged around the product.", "3:4", 30),
+    ("tpl_amazon_white", "amazon", "amazon", "white", "合规白底主图",
      "Marketplace-compliant main image: product only on pure white, straight-on hero angle.", "1:1", 10),
-    ("tpl_ins_editorial", "instagram", "instagram", "Ins 杂志风",
+    ("tpl_amazon_multi", "amazon", "amazon", "multiangle", "多角度展示",
+     "Product shown from multiple angles on white, arranged cleanly for a listing gallery.", "1:1", 20),
+    ("tpl_ins_editorial", "instagram", "instagram", "editorial", "杂志风",
      "Editorial feed image with a cohesive color palette and shallow depth of field.", "4:5", 10),
-    ("tpl_generic_clean", "generic", "generic", "通用干净背景",
+    ("tpl_ins_minimal", "instagram", "instagram", "minimal", "极简风",
+     "Minimalist composition with lots of negative space and one confident focal point.", "4:5", 20),
+    ("tpl_generic_clean", "generic", "generic", "clean", "干净背景",
      "Versatile marketing composition on a simple neutral background.", "1:1", 10),
 ]
 
 
 def _seed_image_templates(conn: sqlite3.Connection) -> None:
-    for tid, platform, style_key, label, prompt, ratio, order in _IMAGE_TEMPLATE_SEED:
+    # Global catalog: replace wholesale so edits to the seed take effect on restart.
+    conn.execute("DELETE FROM image_templates")
+    for tid, platform, style_key, style, label, prompt, ratio, order in _IMAGE_TEMPLATE_SEED:
         conn.execute(
-            "INSERT OR IGNORE INTO image_templates "
-            "(id, platform, style_key, label, prompt, aspect_ratio, sort_order) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (tid, platform, style_key, label, prompt, ratio, order),
+            "INSERT INTO image_templates "
+            "(id, platform, style_key, style, label, prompt, aspect_ratio, sort_order) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (tid, platform, style_key, style, label, prompt, ratio, order),
         )
 
 
@@ -893,21 +913,21 @@ def delete_image_history(history_id: str, user_id: str) -> bool:
         return cur.rowcount > 0
 
 
-def list_image_templates(platform: str | None = None, style_key: str | None = None) -> list[dict]:
+def list_image_templates(platform: str | None = None, style: str | None = None) -> list[dict]:
     _ensure()
     clauses = []
     params: list = []
     if platform and platform != "all":
         clauses.append("platform = ?")
         params.append(platform)
-    if style_key and style_key != "all":
-        clauses.append("style_key = ?")
-        params.append(style_key)
+    if style and style != "all":
+        clauses.append("style = ?")
+        params.append(style)
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT id, platform, style_key, label, prompt, aspect_ratio, sort_order "
-            f"FROM image_templates{where} ORDER BY sort_order ASC, label ASC",
+            "SELECT id, platform, style_key, style, label, prompt, aspect_ratio, sort_order "
+            f"FROM image_templates{where} ORDER BY platform ASC, sort_order ASC, label ASC",
             params,
         ).fetchall()
     return [dict(r) for r in rows]
@@ -917,7 +937,7 @@ def get_image_template(template_id: str) -> dict | None:
     _ensure()
     with _connect() as conn:
         row = conn.execute(
-            "SELECT id, platform, style_key, label, prompt, aspect_ratio, sort_order "
+            "SELECT id, platform, style_key, style, label, prompt, aspect_ratio, sort_order "
             "FROM image_templates WHERE id = ?",
             (template_id,),
         ).fetchone()

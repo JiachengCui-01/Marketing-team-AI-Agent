@@ -10,20 +10,19 @@ import {
   LayoutTemplate,
   Upload,
   Trash2,
+  ChevronDown,
   Check,
   X,
 } from "lucide-react";
 import {
   getImageSkills,
-  processImage,
+  cutoutImage,
   generateImage,
   listImageHistory,
   deleteImageGeneration,
   uploadFile,
-  uploadPreviewUrl,
   artifactPreviewUrl,
   type ImageSkill,
-  type ImageProcessResult,
   type ImageGeneration,
   type ImageHistoryItem,
   type ImageSource,
@@ -33,7 +32,7 @@ import { localizeError, useI18n } from "@/lib/i18n";
 import { Modal } from "@/components/modal";
 import { ImageEditView } from "@/components/image-edit-view";
 import { ImageTemplatesModal } from "@/components/image-templates-modal";
-import { SourceChoice } from "@/components/image-source-choice";
+import { ImageUploadWorkspace } from "@/components/image-source-choice";
 import type { PreviewItem } from "@/components/preview-panel";
 
 export function MarketingImagePanel({
@@ -49,13 +48,14 @@ export function MarketingImagePanel({
   const [activeStyle, setActiveStyle] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [upload, setUpload] = useState<UploadResponse | null>(null);
-  const [processResult, setProcessResult] = useState<ImageProcessResult | null>(null);
-  const [pendingSource, setPendingSource] = useState<ImageSource | null>(null);
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [cutoutArtifactId, setCutoutArtifactId] = useState<string | null>(null);
+  const [choice, setChoice] = useState<"original" | "cutout">("original");
+  const [bgBusy, setBgBusy] = useState(false);
+  const [bgWarning, setBgWarning] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ImageGeneration | null>(null);
 
@@ -68,48 +68,68 @@ export function MarketingImagePanel({
   const showPreview = useCallback(
     (gen: ImageGeneration) => {
       if (gen.artifact_id && gen.mime && gen.filename) {
-        onPreview({
-          source: "artifact",
-          id: gen.artifact_id,
-          filename: gen.filename,
-          mime: gen.mime,
-        });
+        onPreview({ source: "artifact", id: gen.artifact_id, filename: gen.filename, mime: gen.mime });
       }
     },
     [onPreview],
   );
 
+  function resetUpload() {
+    setUpload(null);
+    setCutoutArtifactId(null);
+    setChoice("original");
+    setBgWarning(null);
+  }
+
   async function handleUpload(file: File) {
     setError(null);
-    setPendingSource(null);
-    setProcessResult(null);
-    setProcessing(true);
+    setCutoutArtifactId(null);
+    setChoice("original");
+    setBgWarning(null);
+    setUploading(true);
     try {
       const resp = await uploadFile(file);
       setUpload(resp);
-      const result = await processImage(resp.file_id);
-      setProcessResult(result);
-      setConfirmOpen(true);
     } catch (e) {
       setError(localizeError(e, locale));
     } finally {
-      setProcessing(false);
+      setUploading(false);
     }
   }
 
-  async function runGenerate(source: ImageSource) {
+  async function removeBackground() {
+    if (!upload) return;
+    setBgBusy(true);
+    setBgWarning(null);
+    try {
+      const r = await cutoutImage(upload.file_id);
+      if (r.artifact_id) {
+        setCutoutArtifactId(r.artifact_id);
+        setChoice("cutout");
+      } else {
+        setBgWarning(r.warning || t.imageNoCutout);
+      }
+    } catch (e) {
+      setError(localizeError(e, locale));
+    } finally {
+      setBgBusy(false);
+    }
+  }
+
+  async function handleGenerate() {
     if (!prompt.trim()) {
       setError(t.imagePromptPlaceholder);
       return;
     }
+    const source: ImageSource = upload
+      ? choice === "cutout" && cutoutArtifactId
+        ? { type: "cutout", id: cutoutArtifactId }
+        : { type: "upload", id: upload.file_id }
+      : { type: "none" };
     setBusy(true);
     setError(null);
     try {
-      const gen = await generateImage({
-        prompt: prompt.trim(),
-        style_key: activeStyle,
-        source,
-      });
+      const gen = await generateImage({ prompt: prompt.trim(), style_key: activeStyle, source });
       if (!gen.ok) {
         setError(gen.message || t.imageGenFailed);
         return;
@@ -120,16 +140,6 @@ export function MarketingImagePanel({
       setError(localizeError(e, locale));
     } finally {
       setBusy(false);
-    }
-  }
-
-  function handleGenerateClick() {
-    if (pendingSource) {
-      void runGenerate(pendingSource);
-    } else if (processResult) {
-      setConfirmOpen(true);
-    } else {
-      setError(t.imageUploadHint);
     }
   }
 
@@ -147,6 +157,8 @@ export function MarketingImagePanel({
     );
   }
 
+  const activeSkill = skills.find((s) => s.id === activeStyle);
+
   return (
     <div className="flex-1 flex flex-col min-w-0">
       <header className="border-b border-border bg-bg-elevated/60 backdrop-blur flex items-center gap-2 px-4 py-2.5">
@@ -155,7 +167,7 @@ export function MarketingImagePanel({
           className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-sm text-fg-muted hover:text-fg hover:bg-bg-elevated transition"
         >
           <ArrowLeft size={15} />
-          <span>{t.imageBackToPanel}</span>
+          <span>{t.back}</span>
         </button>
         <div className="flex items-center gap-2 mx-auto text-sm font-medium">
           <ImageIcon size={15} className="text-accent" />
@@ -164,54 +176,76 @@ export function MarketingImagePanel({
         <div className="w-16" />
       </header>
 
+      {/* workspace */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-4 py-6 space-y-4">
-          {/* boards */}
-          <div className="flex gap-2">
-            <button
-              onClick={() => setHistoryOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm text-fg-muted hover:text-fg hover:bg-bg-elevated transition"
-            >
-              <History size={15} className="text-accent" />
-              {t.imageHistory}
-            </button>
-            <button
-              onClick={() => setTemplatesOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm text-fg-muted hover:text-fg hover:bg-bg-elevated transition"
-            >
-              <LayoutTemplate size={15} className="text-accent" />
-              {t.imageTemplates}
-            </button>
-          </div>
+          {error ? <p className="text-sm text-danger">{error}</p> : null}
 
-          {/* skills selector */}
-          <div className="rounded-xl border border-border">
+          {upload ? (
+            <div className="rounded-xl border border-border p-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium">{t.imageUploadedTitle}</p>
+                <button
+                  onClick={resetUpload}
+                  className="inline-flex items-center gap-1 text-xs text-fg-subtle hover:text-danger"
+                >
+                  <X size={13} />
+                  {t.imageRemoveUpload}
+                </button>
+              </div>
+              <ImageUploadWorkspace
+                fileId={upload.file_id}
+                cutoutArtifactId={cutoutArtifactId}
+                choice={choice}
+                onChoice={setChoice}
+                onRemoveBg={removeBackground}
+                bgBusy={bgBusy}
+                warning={bgWarning}
+              />
+            </div>
+          ) : (
+            <div className="rounded-xl border border-dashed border-border py-14 text-center">
+              <ImageIcon size={26} className="mx-auto text-fg-subtle mb-3" />
+              <p className="text-sm text-fg-muted">{t.imageEmptyHint}</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* integrated skills + input + actions */}
+      <div className="border-t border-border bg-bg-elevated/60 backdrop-blur">
+        <div className="max-w-3xl mx-auto px-4 py-3">
+          <div className="rounded-xl border border-border bg-bg-elevated shadow-sm overflow-hidden">
+            {/* skills — collapsible card attached to the top of the input */}
             <button
               onClick={() => setSkillsOpen((v) => !v)}
-              className="w-full flex items-center justify-between px-3.5 py-2.5 text-sm"
+              className="w-full flex items-center justify-between px-3.5 py-2.5 text-sm border-b border-border hover:bg-bg-subtle/50 transition"
             >
               <span className="flex items-center gap-2 font-medium">
                 <Wand2 size={15} className="text-accent" />
                 {t.imageStyles}
               </span>
-              <span className="text-xs text-fg-subtle">
-                {activeStyle
-                  ? skills.find((s) => s.id === activeStyle)?.name ?? activeStyle
-                  : t.imageStylesHint}
+              <span className="flex items-center gap-1.5 text-xs text-fg-subtle">
+                {activeSkill ? activeSkill.name : t.imageStylesHint}
+                <ChevronDown
+                  size={14}
+                  className={`transition-transform ${skillsOpen ? "rotate-180" : ""}`}
+                />
               </span>
             </button>
             {skillsOpen ? (
-              <div className="grid gap-2 px-3.5 pb-3.5 sm:grid-cols-2">
+              <div className="grid gap-2 border-b border-border p-3 sm:grid-cols-2">
                 {skills.map((s) => {
                   const active = activeStyle === s.id;
                   return (
                     <button
                       key={s.id}
-                      onClick={() => setActiveStyle(active ? null : s.id)}
+                      onClick={() => {
+                        setActiveStyle(active ? null : s.id);
+                        setSkillsOpen(false);
+                      }}
                       className={`text-left rounded-lg border px-3 py-2 transition ${
-                        active
-                          ? "border-accent bg-accent/10"
-                          : "border-border hover:bg-bg-elevated"
+                        active ? "border-accent bg-accent/10" : "border-border hover:bg-bg-elevated"
                       }`}
                     >
                       <div className="flex items-center gap-1.5 text-sm font-medium">
@@ -225,92 +259,68 @@ export function MarketingImagePanel({
                 })}
               </div>
             ) : null}
-          </div>
 
-          {error ? <p className="text-sm text-danger">{error}</p> : null}
-
-          {/* uploaded thumbnail */}
-          {upload ? (
-            <div className="flex items-center gap-3 rounded-lg border border-border bg-bg-elevated px-3 py-2">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={uploadPreviewUrl(upload.file_id)}
-                alt={upload.original_name}
-                className="h-12 w-12 rounded object-cover"
+            {/* prompt input */}
+            <div className="flex items-end gap-2 px-2 py-1.5">
+              <textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                rows={1}
+                placeholder={t.imagePromptPlaceholder}
+                disabled={busy}
+                className="flex-1 resize-none bg-transparent px-2 py-2.5 text-sm placeholder:text-fg-subtle focus:outline-none disabled:opacity-50 max-h-40"
+                style={{ minHeight: 44 }}
               />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm">{upload.original_name}</p>
-                <p className="text-[11px] text-fg-subtle">
-                  {processing
-                    ? t.imageProcessing
-                    : processResult?.classification === "object"
-                      ? t.imageClassObject
-                      : processResult
-                        ? t.imageClassScreenshot
-                        : ""}
-                </p>
-              </div>
-              {processResult ? (
-                <button
-                  onClick={() => setConfirmOpen(true)}
-                  className="text-xs text-accent hover:underline"
-                >
-                  {t.imageConfirmTitle}
-                </button>
-              ) : null}
               <button
-                onClick={() => {
-                  setUpload(null);
-                  setProcessResult(null);
-                  setPendingSource(null);
-                }}
-                className="text-fg-subtle hover:text-danger"
-                aria-label={t.imageDelete}
+                onClick={handleGenerate}
+                disabled={busy || uploading}
+                className="m-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent px-3.5 h-9 text-accent-fg text-sm font-medium hover:opacity-90 transition disabled:opacity-40"
               >
-                <X size={15} />
+                {busy ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}
+                <span>{busy ? t.imageGenerating : t.imageGenerate}</span>
               </button>
             </div>
-          ) : null}
-        </div>
-      </div>
 
-      {/* bottom input bar */}
-      <div className="border-t border-border bg-bg-elevated/60 backdrop-blur">
-        <div className="max-w-3xl mx-auto px-4 py-3 space-y-2">
-          <ImageUploadButton onFile={handleUpload} busy={processing} />
-          <div className="flex items-end gap-2 rounded-xl border border-border bg-bg-elevated focus-within:border-accent transition shadow-sm">
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              rows={1}
-              placeholder={t.imagePromptPlaceholder}
-              disabled={busy}
-              className="flex-1 resize-none bg-transparent px-4 py-3 text-sm placeholder:text-fg-subtle focus:outline-none disabled:opacity-50 max-h-48"
-              style={{ minHeight: 48 }}
-            />
-            <button
-              onClick={handleGenerateClick}
-              disabled={busy || processing}
-              className="m-1.5 inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent px-3 h-9 text-accent-fg text-sm hover:opacity-90 transition disabled:opacity-40"
-            >
-              {busy ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}
-              <span>{busy ? t.imageGenerating : t.imageGenerate}</span>
-            </button>
+            {/* action row: upload / history / templates (equal width) */}
+            <div className="grid grid-cols-3 gap-2 border-t border-border p-2">
+              <label
+                className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm cursor-pointer transition ${
+                  upload
+                    ? "border-border text-fg-muted hover:bg-bg-elevated"
+                    : "border-accent/40 bg-accent/10 text-accent hover:bg-accent/15"
+                }`}
+              >
+                {uploading ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
+                <span className="truncate">{t.imageUploadButton}</span>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  disabled={uploading}
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files[0]) handleUpload(e.target.files[0]);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              <button
+                onClick={() => setHistoryOpen(true)}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-fg-muted hover:text-fg hover:bg-bg-elevated transition"
+              >
+                <History size={15} className="text-accent" />
+                <span className="truncate">{t.imageHistory}</span>
+              </button>
+              <button
+                onClick={() => setTemplatesOpen(true)}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-fg-muted hover:text-fg hover:bg-bg-elevated transition"
+              >
+                <LayoutTemplate size={15} className="text-accent" />
+                <span className="truncate">{t.imageTemplates}</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
-
-      {confirmOpen && processResult ? (
-        <ConfirmProcessModal
-          result={processResult}
-          onCancel={() => setConfirmOpen(false)}
-          onConfirm={(source) => {
-            setPendingSource(source);
-            setConfirmOpen(false);
-            void runGenerate(source);
-          }}
-        />
-      ) : null}
 
       {historyOpen ? (
         <HistoryModal
@@ -325,7 +335,6 @@ export function MarketingImagePanel({
 
       {templatesOpen ? (
         <ImageTemplatesModal
-          activeStyle={activeStyle}
           onClose={() => setTemplatesOpen(false)}
           onGenerated={(gen) => {
             setTemplatesOpen(false);
@@ -335,80 +344,6 @@ export function MarketingImagePanel({
         />
       ) : null}
     </div>
-  );
-}
-
-function ImageUploadButton({ onFile, busy }: { onFile: (f: File) => void; busy: boolean }) {
-  const { t } = useI18n();
-  return (
-    <label className="inline-flex items-center gap-2 text-xs text-fg-muted hover:text-fg transition cursor-pointer w-fit">
-      {busy ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-      <span>{t.imageUploadHint}</span>
-      <input
-        type="file"
-        accept="image/png,image/jpeg,image/webp"
-        className="hidden"
-        disabled={busy}
-        onChange={(e) => {
-          if (e.target.files && e.target.files[0]) onFile(e.target.files[0]);
-          e.target.value = "";
-        }}
-      />
-    </label>
-  );
-}
-
-function ConfirmProcessModal({
-  result,
-  onCancel,
-  onConfirm,
-}: {
-  result: ImageProcessResult;
-  onCancel: () => void;
-  onConfirm: (source: ImageSource) => void;
-}) {
-  const { t } = useI18n();
-  const [choice, setChoice] = useState<"original" | "cutout">(result.cutout ? "cutout" : "original");
-
-  return (
-    <Modal title={t.imageConfirmTitle} onClose={onCancel} wide>
-      <div className="space-y-4">
-        <SourceChoice result={result} value={choice} onChange={setChoice} />
-        <div className="flex items-center gap-2 pt-1">
-          <button
-            type="button"
-            disabled
-            title={t.imageComingSoon}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-fg-subtle opacity-60 cursor-not-allowed"
-          >
-            {t.imageManualRefine}
-            <span className="rounded bg-bg-subtle px-1.5 py-0.5 text-[10px]">{t.imageComingSoon}</span>
-          </button>
-          <div className="ml-auto flex gap-2">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="rounded-lg border border-border px-4 py-2 text-sm text-fg-muted hover:bg-bg-subtle"
-            >
-              {t.cancel}
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                onConfirm(
-                  choice === "cutout" && result.cutout
-                    ? { type: "cutout", id: result.cutout.artifact_id }
-                    : { type: "upload", id: result.original.file_id },
-                )
-              }
-              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg"
-            >
-              {t.imageConfirmGenerate}
-            </button>
-          </div>
-        </div>
-      </div>
-    </Modal>
   );
 }
 
@@ -470,10 +405,10 @@ function HistoryModal({
                 className="block w-full"
                 title={it.prompt}
               >
-                {it.preview_url ? (
+                {it.artifact_id ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={it.artifact_id ? artifactPreviewUrl(it.artifact_id) : ""}
+                    src={artifactPreviewUrl(it.artifact_id)}
                     alt={it.prompt}
                     className="h-32 w-full object-cover"
                   />
