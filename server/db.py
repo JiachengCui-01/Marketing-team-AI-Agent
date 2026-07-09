@@ -146,6 +146,31 @@ CREATE TABLE IF NOT EXISTS news_summaries (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_news_summaries_user ON news_summaries(user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS image_history (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    style_key TEXT NOT NULL,
+    artifact_id TEXT,
+    source_upload_id TEXT,
+    params TEXT,
+    created_at REAL NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (artifact_id) REFERENCES artifacts(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_image_history_user ON image_history(user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS image_templates (
+    id TEXT PRIMARY KEY,
+    platform TEXT NOT NULL,
+    style_key TEXT NOT NULL,
+    label TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    aspect_ratio TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_image_templates_platform ON image_templates(platform, style_key);
 """
 
 
@@ -159,6 +184,7 @@ def init() -> None:
             conn.executescript(SCHEMA)
             _migrate_news_config_language(conn)
             _migrate_news_config_cancelled_at(conn)
+            _seed_image_templates(conn)
         _INITIALIZED = True
 
 
@@ -765,6 +791,139 @@ def get_latest_news_summary(user_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+# ---------- image generation ----------
+
+# Global, editorial template catalog (not per-user). Seeded idempotently by id.
+_IMAGE_TEMPLATE_SEED = [
+    ("tpl_taobao_white", "taobao", "taobao", "淘宝纯白主图",
+     "Clean e-commerce main image on a pure white background, product centered and sharp.", "1:1", 10),
+    ("tpl_taobao_scene", "taobao", "taobao", "淘宝场景主图",
+     "Product hero shot in a minimal lifestyle scene with soft shadows.", "1:1", 20),
+    ("tpl_xhs_lifestyle", "xiaohongshu", "xiaohongshu", "小红书生活场景",
+     "Warm lifestyle flat-lay with cozy props and space for a caption sticker at the top.", "3:4", 10),
+    ("tpl_xhs_hand", "xiaohongshu", "xiaohongshu", "小红书手持展示",
+     "Aspirational hand-held product shot with soft natural light.", "3:4", 20),
+    ("tpl_amazon_main", "amazon", "amazon", "亚马逊合规主图",
+     "Marketplace-compliant main image: product only on pure white, straight-on hero angle.", "1:1", 10),
+    ("tpl_ins_editorial", "instagram", "instagram", "Ins 杂志风",
+     "Editorial feed image with a cohesive color palette and shallow depth of field.", "4:5", 10),
+    ("tpl_generic_clean", "generic", "generic", "通用干净背景",
+     "Versatile marketing composition on a simple neutral background.", "1:1", 10),
+]
+
+
+def _seed_image_templates(conn: sqlite3.Connection) -> None:
+    for tid, platform, style_key, label, prompt, ratio, order in _IMAGE_TEMPLATE_SEED:
+        conn.execute(
+            "INSERT OR IGNORE INTO image_templates "
+            "(id, platform, style_key, label, prompt, aspect_ratio, sort_order) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (tid, platform, style_key, label, prompt, ratio, order),
+        )
+
+
+def add_image_history(
+    user_id: str,
+    prompt: str,
+    style_key: str,
+    artifact_id: str | None,
+    source_upload_id: str | None,
+    params: dict | None = None,
+) -> dict:
+    _ensure()
+    hid = uuid.uuid4().hex
+    now = time.time()
+    params_json = json.dumps(params or {})
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO image_history (id, user_id, prompt, style_key, artifact_id, "
+            "source_upload_id, params, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (hid, user_id, prompt, style_key, artifact_id, source_upload_id, params_json, now),
+        )
+    return {
+        "id": hid,
+        "user_id": user_id,
+        "prompt": prompt,
+        "style_key": style_key,
+        "artifact_id": artifact_id,
+        "source_upload_id": source_upload_id,
+        "params": params or {},
+        "created_at": now,
+    }
+
+
+def _row_to_history(row: sqlite3.Row) -> dict:
+    data = dict(row)
+    try:
+        data["params"] = json.loads(data.get("params") or "{}")
+    except (ValueError, TypeError):
+        data["params"] = {}
+    return data
+
+
+def list_image_history(user_id: str, limit: int = 50) -> list[dict]:
+    _ensure()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, user_id, prompt, style_key, artifact_id, source_upload_id, params, created_at "
+            "FROM image_history WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+            (user_id, limit),
+        ).fetchall()
+    return [_row_to_history(r) for r in rows]
+
+
+def get_image_history(history_id: str, user_id: str) -> dict | None:
+    _ensure()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id, user_id, prompt, style_key, artifact_id, source_upload_id, params, created_at "
+            "FROM image_history WHERE id = ? AND user_id = ?",
+            (history_id, user_id),
+        ).fetchone()
+    return _row_to_history(row) if row else None
+
+
+def delete_image_history(history_id: str, user_id: str) -> bool:
+    _ensure()
+    with _connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM image_history WHERE id = ? AND user_id = ?",
+            (history_id, user_id),
+        )
+        return cur.rowcount > 0
+
+
+def list_image_templates(platform: str | None = None, style_key: str | None = None) -> list[dict]:
+    _ensure()
+    clauses = []
+    params: list = []
+    if platform and platform != "all":
+        clauses.append("platform = ?")
+        params.append(platform)
+    if style_key and style_key != "all":
+        clauses.append("style_key = ?")
+        params.append(style_key)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, platform, style_key, label, prompt, aspect_ratio, sort_order "
+            f"FROM image_templates{where} ORDER BY sort_order ASC, label ASC",
+            params,
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_image_template(template_id: str) -> dict | None:
+    _ensure()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id, platform, style_key, label, prompt, aspect_ratio, sort_order "
+            "FROM image_templates WHERE id = ?",
+            (template_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def reset_for_tests() -> None:
     global _INITIALIZED
     with _LOCK:
@@ -777,6 +936,8 @@ def reset_for_tests() -> None:
                     conn.executescript(
                         """
                         DROP TABLE IF EXISTS auth_tokens;
+                        DROP TABLE IF EXISTS image_history;
+                        DROP TABLE IF EXISTS image_templates;
                         DROP TABLE IF EXISTS news_summaries;
                         DROP TABLE IF EXISTS news_configs;
                         DROP TABLE IF EXISTS uploads;

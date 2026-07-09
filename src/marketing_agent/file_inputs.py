@@ -63,8 +63,8 @@ def extract(path: Path) -> dict[str, Any]:
     if ext == ".csv":
         text = _read_csv(path)[:MAX_TEXT_CHARS]
         return {"kind": "text", "name": name, "ext": ext, "text": text}
-    if ext in {".png", ".jpg", ".jpeg"}:
-        media_type = "image/png" if ext == ".png" else "image/jpeg"
+    if ext in {".png", ".jpg", ".jpeg", ".webp"}:
+        media_type = {".png": "image/png", ".webp": "image/webp"}.get(ext, "image/jpeg")
         data_b64 = base64.standard_b64encode(path.read_bytes()).decode("ascii")
         return {"kind": "image", "name": name, "media_type": media_type, "data_b64": data_b64}
     # Fallback: treat as text

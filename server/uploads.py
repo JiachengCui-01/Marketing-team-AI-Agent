@@ -13,7 +13,7 @@ from marketing_agent.config import PROJECT_ROOT
 UPLOAD_DIR = PROJECT_ROOT / "tmp" / "uploads"
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
-ALLOWED_EXT = {".csv", ".xlsx", ".xls", ".json", ".pdf", ".docx", ".png", ".jpg", ".jpeg"}
+ALLOWED_EXT = {".csv", ".xlsx", ".xls", ".json", ".pdf", ".docx", ".png", ".jpg", ".jpeg", ".webp"}
 
 EXT_MIME = {
     ".csv": "text/csv",
@@ -25,6 +25,7 @@ EXT_MIME = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
 }
 
 _SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")

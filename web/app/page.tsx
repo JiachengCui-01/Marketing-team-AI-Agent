@@ -16,6 +16,7 @@ import {
 } from "@/components/preview-panel";
 import { SessionSidebar } from "@/components/session-sidebar";
 import { NewsPanel } from "@/components/news-panel";
+import { MarketingImagePanel } from "@/components/image-panel";
 import { ThemeToggle } from "@/components/theme-toggle";
 import type { ChatMessage, MessageArtifact } from "@/components/message";
 import { deriveStatus } from "@/components/status-chip";
@@ -57,7 +58,7 @@ export default function HomePage() {
   const [collapsed, setCollapsed] = useState(false);
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [switchOpen, setSwitchOpen] = useState(false);
-  const [newsOpen, setNewsOpen] = useState(false);
+  const [view, setView] = useState<"chat" | "news" | "image">("chat");
   const [leftWidth, setLeftWidth] = useState(LEFT_MIN_WIDTH);
   const [rightWidth, setRightWidth] = useState(RIGHT_MIN_WIDTH);
   const closeRef = useRef<(() => void) | null>(null);
@@ -150,6 +151,7 @@ export default function HomePage() {
 
   const loadSession = useCallback(
     async (id: string) => {
+      setView("chat");
       setActiveId(id);
       window.localStorage.setItem(activeKey(), id);
       setTrace([]);
@@ -176,6 +178,7 @@ export default function HomePage() {
       closeRef.current();
       closeRef.current = null;
     }
+    setView("chat");
     setBusy(false);
     setMessages([]);
     setTrace([]);
@@ -470,7 +473,7 @@ export default function HomePage() {
       setAuthToken(token);
       setUser(profile);
       setSwitchOpen(false);
-      setNewsOpen(false);
+      setView("chat");
       setActiveId(null);
       setMessages([]);
       setTrace([]);
@@ -488,6 +491,7 @@ export default function HomePage() {
     }
     await logoutUser().catch(() => undefined);
     setUser(null);
+    setView("chat");
     setActiveId(null);
     setMessages([]);
     setTrace([]);
@@ -552,7 +556,8 @@ export default function HomePage() {
           onCreateGroup={store.createGroup}
           onRenameGroup={store.renameGroup}
           onDeleteGroup={handleDeleteGroup}
-          onOpenNews={() => setNewsOpen(true)}
+          onOpenNews={() => setView("news")}
+          onOpenImage={() => setView("image")}
         />
         {!collapsed ? (
           <ResizeHandle
@@ -560,42 +565,46 @@ export default function HomePage() {
             onMouseDown={(e) => beginResize("left", e.clientX)}
           />
         ) : null}
-        {newsOpen ? (
-          <NewsPanel key={user.id} onBack={() => setNewsOpen(false)} />
+        {view === "news" ? (
+          <NewsPanel key={user.id} onBack={() => setView("chat")} />
+        ) : view === "image" ? (
+          <MarketingImagePanel
+            key={user.id}
+            onBack={() => setView("chat")}
+            onPreview={setPreview}
+          />
         ) : (
-          <>
-            <ChatPanel
-              messages={messages}
-              input={input}
-              setInput={setInput}
-              onSend={handleSend}
-              busy={busy}
-              attached={attached}
-              onAttach={(f) => setAttached((a) => [...a, f])}
-              onRemoveAttached={(id) =>
-                setAttached((a) => a.filter((f) => f.file_id !== id))
-              }
-              onPreviewUpload={onPreviewUpload}
-              onPreviewArtifact={onPreviewArtifact}
-              userAvatar={user.avatar}
-            />
-            {!previewCollapsed ? (
-              <ResizeHandle
-                side="right"
-                onMouseDown={(e) => beginResize("right", e.clientX)}
-              />
-            ) : null}
-            <PreviewPanel
-              events={trace}
-              totals={totals}
-              preview={preview}
-              collapsed={previewCollapsed}
-              width={rightWidth}
-              onToggle={() => setPreviewCollapsed((c) => !c)}
-              defaultTab={preview ? "preview" : "trace"}
-            />
-          </>
+          <ChatPanel
+            messages={messages}
+            input={input}
+            setInput={setInput}
+            onSend={handleSend}
+            busy={busy}
+            attached={attached}
+            onAttach={(f) => setAttached((a) => [...a, f])}
+            onRemoveAttached={(id) =>
+              setAttached((a) => a.filter((f) => f.file_id !== id))
+            }
+            onPreviewUpload={onPreviewUpload}
+            onPreviewArtifact={onPreviewArtifact}
+            userAvatar={user.avatar}
+          />
         )}
+        {!previewCollapsed ? (
+          <ResizeHandle
+            side="right"
+            onMouseDown={(e) => beginResize("right", e.clientX)}
+          />
+        ) : null}
+        <PreviewPanel
+          events={trace}
+          totals={totals}
+          preview={preview}
+          collapsed={previewCollapsed}
+          width={rightWidth}
+          onToggle={() => setPreviewCollapsed((c) => !c)}
+          defaultTab={preview ? "preview" : "trace"}
+        />
       </div>
       <SwitchAccountPanel
         open={switchOpen}

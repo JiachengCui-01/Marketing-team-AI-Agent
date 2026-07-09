@@ -9,7 +9,7 @@ services:
     disk:
       name: marketing-agent-data
       mountPath: /var/data
-      sizeGB: 1
+      sizeGB: 3
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
@@ -17,6 +17,12 @@ services:
         value: /var/data/marketing_agent.db
       - key: ANTHROPIC_API_KEY
         sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      # Cache the rembg u2net weights (~170MB) on the persistent disk so they
+      # survive restarts instead of re-downloading to ephemeral storage.
+      - key: U2NET_HOME
+        value: /var/data/rembg
       - key: CORS_ORIGINS
         sync: false
       - key: CORS_ORIGIN_REGEX

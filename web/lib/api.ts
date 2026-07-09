@@ -410,6 +410,141 @@ export async function refreshNews(language: "zh" | "en"): Promise<NewsSummary> {
   return body.summary;
 }
 
+// ---------- marketing image ----------
+
+export type ImageStyleKey = "xiaohongshu" | "taobao" | "amazon" | "instagram" | "generic";
+
+export type ImageSkill = {
+  id: ImageStyleKey;
+  name: string;
+  description: string;
+  platform: string;
+  aspect_ratio: string;
+};
+
+export type ImageProcessResult = {
+  classification: "object" | "screenshot";
+  original: { file_id: string; preview_url: string };
+  cutout: { artifact_id: string; preview_url: string } | null;
+  warning: string | null;
+};
+
+export type ImageGeneration = {
+  ok: boolean;
+  unavailable?: boolean;
+  message?: string;
+  artifact_id?: string;
+  history_id?: string;
+  filename?: string;
+  mime?: string;
+  style_key?: string;
+  prompt?: string;
+  created_at?: number;
+  preview_url?: string;
+};
+
+export type ImageHistoryItem = {
+  id: string;
+  prompt: string;
+  style_key: string;
+  artifact_id: string | null;
+  created_at: number;
+  params: Record<string, unknown>;
+  preview_url: string | null;
+};
+
+export type ImageTemplate = {
+  id: string;
+  platform: string;
+  style_key: string;
+  label: string;
+  prompt: string;
+  aspect_ratio: string | null;
+  sort_order: number;
+};
+
+export type ImageSource =
+  | { type: "upload"; id: string }
+  | { type: "cutout"; id: string }
+  | { type: "none" };
+
+export async function getImageSkills(): Promise<ImageSkill[]> {
+  const res = await fetch(`${API_BASE}/api/image/skills`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).skills;
+}
+
+export async function processImage(fileId: string): Promise<ImageProcessResult> {
+  const res = await fetch(`${API_BASE}/api/image/process`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ file_id: fileId }),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return res.json();
+}
+
+export async function generateImage(payload: {
+  prompt: string;
+  style_key?: string | null;
+  platform?: string | null;
+  source?: ImageSource;
+  template_id?: string | null;
+  aspect_ratio?: string | null;
+}): Promise<ImageGeneration> {
+  const res = await fetch(`${API_BASE}/api/image/generate`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return res.json();
+}
+
+export async function reeditImage(payload: {
+  history_id: string;
+  prompt: string;
+  style_key?: string | null;
+  aspect_ratio?: string | null;
+}): Promise<ImageGeneration> {
+  const res = await fetch(`${API_BASE}/api/image/re-edit`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return res.json();
+}
+
+export async function listImageHistory(): Promise<ImageHistoryItem[]> {
+  const res = await fetch(`${API_BASE}/api/image/history`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).history;
+}
+
+export async function deleteImageGeneration(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/image/history/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+}
+
+export async function listImageTemplates(filter?: {
+  platform?: string;
+  style?: string;
+}): Promise<ImageTemplate[]> {
+  const params = new URLSearchParams();
+  if (filter?.platform && filter.platform !== "all") params.set("platform", filter.platform);
+  if (filter?.style && filter.style !== "all") params.set("style", filter.style);
+  const qs = params.toString();
+  const res = await fetch(`${API_BASE}/api/image/templates${qs ? `?${qs}` : ""}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).templates;
+}
+
 // ---------- stream ----------
 
 export function streamUrl(

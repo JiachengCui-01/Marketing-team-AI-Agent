@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from fastapi.testclient import TestClient
 
@@ -343,6 +344,148 @@ class RouteTests(unittest.TestCase):
     def test_news_cancel_requires_existing_config(self) -> None:
         response = self.client.post("/api/news/cancel", headers=self.headers)
         self.assertEqual(response.status_code, 400)
+
+    # ---------- marketing image ----------
+
+    def _upload_png(self, headers: dict[str, str] | None = None) -> str:
+        png = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00"
+            b"\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00"
+            b"\x00IEND\xaeB`\x82"
+        )
+        res = self.client.post(
+            "/api/upload",
+            headers=headers or self.headers,
+            files={"file": ("product.png", png, "image/png")},
+        )
+        self.assertEqual(res.status_code, 200, res.text)
+        return res.json()["file_id"]
+
+    def test_upload_accepts_webp(self) -> None:
+        res = self.client.post(
+            "/api/upload",
+            headers=self.headers,
+            files={"file": ("shot.webp", b"RIFF....WEBP", "image/webp")},
+        )
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual(res.json()["mime"], "image/webp")
+
+    def test_image_endpoints_require_auth(self) -> None:
+        self.assertEqual(self.client.get("/api/image/history").status_code, 401)
+        self.assertEqual(self.client.get("/api/image/skills").status_code, 401)
+
+    def test_image_skills_and_templates(self) -> None:
+        skills = self.client.get("/api/image/skills", headers=self.headers).json()["skills"]
+        self.assertTrue(any(s["id"] == "taobao" for s in skills))
+        tpls = self.client.get(
+            "/api/image/templates", headers=self.headers, params={"platform": "taobao"}
+        ).json()["templates"]
+        self.assertTrue(tpls and all(t["platform"] == "taobao" for t in tpls))
+
+    def test_image_generate_persists_and_previews(self) -> None:
+        from server import routes
+
+        file_id = self._upload_png()
+        fake = {
+            "ok": True,
+            "filename": "marketing_taobao.png",
+            "mime": "image/png",
+            "path": str(Path(self.upload_tmp.name) / "gen.png"),
+        }
+        Path(fake["path"]).write_bytes(b"\x89PNG\r\n\x1a\n")
+        with mock.patch.object(routes.image_gen, "generate_image", return_value=fake):
+            res = self.client.post(
+                "/api/image/generate",
+                headers=self.headers,
+                json={"prompt": "nice bottle", "style_key": "taobao",
+                      "source": {"type": "upload", "id": file_id}},
+            )
+        self.assertEqual(res.status_code, 200, res.text)
+        body = res.json()
+        self.assertTrue(body["ok"])
+        aid = body["artifact_id"]
+        self.assertEqual(self.client.get(f"/api/artifacts/{aid}/preview", headers=self.headers).status_code, 200)
+        hist = self.client.get("/api/image/history", headers=self.headers).json()["history"]
+        self.assertEqual(len(hist), 1)
+        self.assertEqual(hist[0]["artifact_id"], aid)
+
+    def test_image_generate_unavailable_returns_graceful_200(self) -> None:
+        from server import routes
+
+        unavailable = {"ok": False, "unavailable": True, "message": "## Image Unavailable\n\nno key"}
+        with mock.patch.object(routes.image_gen, "generate_image", return_value=unavailable):
+            res = self.client.post(
+                "/api/image/generate",
+                headers=self.headers,
+                json={"prompt": "x"},
+            )
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(res.json()["ok"])
+        self.assertTrue(res.json()["unavailable"])
+
+    def test_image_process_object_and_screenshot(self) -> None:
+        from server import routes
+
+        file_id = self._upload_png()
+        obj = {"classification": "object", "original_png": b"x", "cutout_png": b"CUT", "warning": None}
+        with mock.patch.object(routes.image_processing, "process_upload", return_value=obj):
+            res = self.client.post("/api/image/process", headers=self.headers, json={"file_id": file_id})
+        self.assertEqual(res.status_code, 200, res.text)
+        body = res.json()
+        self.assertEqual(body["classification"], "object")
+        self.assertIsNotNone(body["cutout"])
+        self.assertEqual(
+            self.client.get(f"/api/artifacts/{body['cutout']['artifact_id']}/preview", headers=self.headers).status_code,
+            200,
+        )
+
+        shot = {"classification": "screenshot", "original_png": b"x", "cutout_png": None, "warning": None}
+        with mock.patch.object(routes.image_processing, "process_upload", return_value=shot):
+            res2 = self.client.post("/api/image/process", headers=self.headers, json={"file_id": file_id})
+        self.assertIsNone(res2.json()["cutout"])
+
+    def test_image_history_user_isolation(self) -> None:
+        from server import routes
+
+        file_id = self._upload_png()
+        fake = {"ok": True, "filename": "g.png", "mime": "image/png",
+                "path": str(Path(self.upload_tmp.name) / "g.png")}
+        Path(fake["path"]).write_bytes(b"\x89PNG\r\n\x1a\n")
+        with mock.patch.object(routes.image_gen, "generate_image", return_value=fake):
+            hid = self.client.post(
+                "/api/image/generate", headers=self.headers,
+                json={"prompt": "x", "source": {"type": "upload", "id": file_id}},
+            ).json()["history_id"]
+        bob = self._register("13800138000")
+        self.assertEqual(self.client.get("/api/image/history", headers=bob).json()["history"], [])
+        self.assertEqual(self.client.delete(f"/api/image/history/{hid}", headers=bob).status_code, 404)
+        self.assertEqual(self.client.delete(f"/api/image/history/{hid}", headers=self.headers).status_code, 200)
+
+    def test_image_reedit_uses_prior_artifact(self) -> None:
+        from server import routes
+
+        file_id = self._upload_png()
+        gen1 = {"ok": True, "filename": "g1.png", "mime": "image/png",
+                "path": str(Path(self.upload_tmp.name) / "g1.png")}
+        Path(gen1["path"]).write_bytes(b"\x89PNG\r\n\x1a\n")
+        with mock.patch.object(routes.image_gen, "generate_image", return_value=gen1):
+            first = self.client.post(
+                "/api/image/generate", headers=self.headers,
+                json={"prompt": "x", "source": {"type": "upload", "id": file_id}},
+            ).json()
+        gen2 = {"ok": True, "filename": "g2.png", "mime": "image/png",
+                "path": str(Path(self.upload_tmp.name) / "g2.png")}
+        Path(gen2["path"]).write_bytes(b"\x89PNG\r\n\x1a\n")
+        with mock.patch.object(routes.image_gen, "generate_image", return_value=gen2):
+            res = self.client.post(
+                "/api/image/re-edit", headers=self.headers,
+                json={"history_id": first["history_id"], "prompt": "darker background"},
+            )
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertTrue(res.json()["ok"])
+        hist = self.client.get("/api/image/history", headers=self.headers).json()["history"]
+        parents = [h["params"].get("parent_history_id") for h in hist]
+        self.assertIn(first["history_id"], parents)
 
     def test_user_isolation_and_delete_account(self) -> None:
         alice_session = self._create_session(self.headers)

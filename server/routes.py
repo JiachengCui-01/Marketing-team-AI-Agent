@@ -12,10 +12,12 @@ from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from sse_starlette.sse import EventSourceResponse
 
+from marketing_agent.agents.image_skills import IMAGE_SKILLS, select_image_skill
 from marketing_agent.file_inputs import build_prompt_addendum, extract
 from marketing_agent.orchestrator import run_orchestrator
+from marketing_agent.tools import image_gen
 
-from . import auth, db, news, sessions, uploads
+from . import auth, db, image_processing, news, sessions, uploads
 from .streaming import orchestrator_event_stream, to_sse
 
 router = APIRouter(prefix="/api")
@@ -444,6 +446,253 @@ def get_artifact_meta(request: Request, artifact_id: str) -> dict:
         raise HTTPException(404, "Artifact not found.")
     # Don't leak filesystem path
     return {k: v for k, v in rec.items() if k != "path"}
+
+
+# ---------- marketing image generation ----------
+
+def _read_bytes(path_str: str) -> bytes:
+    from pathlib import Path
+
+    return Path(path_str).read_bytes()
+
+
+def _resolve_image_source(user_id: str, source: dict | None) -> tuple[list[tuple[bytes, str]], str | None]:
+    """Resolve a {type,id} source into reference image bytes + the source upload id.
+
+    type 'upload' → an uploaded file (owner-checked); 'cutout' → an image_cutout artifact;
+    'none' → no reference. Raises 404 (HTTPException) on a missing/cross-user id.
+    """
+    if not source or source.get("type") in (None, "none"):
+        return [], None
+    stype = source.get("type")
+    sid = str(source.get("id") or "")
+    if not sid:
+        return [], None
+    if stype == "upload":
+        rec = db.get_upload(sid, user_id)
+        if rec is None:
+            raise HTTPException(404, "Source image not found.")
+        return [(_read_bytes(rec["path"]), rec["mime"])], sid
+    if stype == "cutout":
+        rec = db.get_artifact(sid, user_id)
+        if rec is None:
+            raise HTTPException(404, "Cutout not found.")
+        return [(_read_bytes(rec["path"]), rec["mime"] or "image/png")], None
+    raise HTTPException(400, f"Unknown source type '{stype}'.")
+
+
+@router.get("/image/skills")
+def image_skills(request: Request) -> dict:
+    auth.require_user(request)
+    return {
+        "skills": [
+            {
+                "id": s.key,
+                "name": s.label,
+                "description": s.description,
+                "platform": s.key,
+                "aspect_ratio": s.aspect_ratio,
+            }
+            for s in IMAGE_SKILLS.values()
+        ]
+    }
+
+
+@router.post("/image/process")
+async def image_process(request: Request, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    file_id = str(payload.get("file_id") or "")
+    rec = db.get_upload(file_id, user["id"])
+    if rec is None:
+        raise HTTPException(404, "Uploaded file not found.")
+    if not str(rec["mime"]).startswith("image/"):
+        raise HTTPException(400, "Only image files can be processed.")
+    image_bytes = _read_bytes(rec["path"])
+    client = _client()
+    out = await asyncio.to_thread(
+        image_processing.process_upload, client, image_bytes, rec["mime"]
+    )
+    response: dict = {
+        "classification": out["classification"],
+        "original": {"file_id": file_id, "preview_url": f"/api/uploads/{file_id}/preview"},
+        "cutout": None,
+        "warning": out.get("warning"),
+    }
+    if out.get("cutout_png"):
+        import uuid as _uuid
+        from pathlib import Path
+
+        from marketing_agent.tools.image_gen import ARTIFACTS_DIR
+
+        ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+        cut_path = Path(ARTIFACTS_DIR) / f"{_uuid.uuid4().hex}_cutout.png"
+        cut_path.write_bytes(out["cutout_png"])
+        art = db.add_artifact(
+            session_id=None,
+            kind="image_cutout",
+            filename="cutout.png",
+            mime="image/png",
+            path=str(cut_path.resolve()),
+            user_id=user["id"],
+        )
+        response["cutout"] = {
+            "artifact_id": art["id"],
+            "preview_url": f"/api/artifacts/{art['id']}/preview",
+        }
+    return response
+
+
+def _run_generate(
+    user_id: str,
+    *,
+    prompt: str,
+    style_key: str | None,
+    platform: str | None,
+    reference_images: list[tuple[bytes, str]],
+    source_upload_id: str | None,
+    template_id: str | None,
+    aspect_ratio: str | None,
+    session_id: str | None,
+    parent_history_id: str | None = None,
+) -> dict:
+    skill = select_image_skill(style_key, prompt, platform)
+    effective_prompt = prompt
+    effective_ratio = aspect_ratio
+    if template_id:
+        tpl = db.get_image_template(template_id)
+        if tpl is None:
+            raise HTTPException(404, "Template not found.")
+        effective_prompt = f"{tpl['prompt']}\n\n{prompt}".strip()
+        effective_ratio = aspect_ratio or tpl.get("aspect_ratio")
+
+    result = image_gen.generate_image(
+        effective_prompt,
+        skill=skill,
+        reference_images=reference_images,
+        aspect_ratio=effective_ratio,
+    )
+    if not result.get("ok"):
+        return {"ok": False, "unavailable": True, "message": result.get("message", "")}
+
+    art = db.add_artifact(
+        session_id=session_id,
+        kind="image",
+        filename=result["filename"],
+        mime=result["mime"],
+        path=result["path"],
+        user_id=user_id,
+    )
+    params = {"aspect_ratio": effective_ratio, "template_id": template_id}
+    if parent_history_id:
+        params["parent_history_id"] = parent_history_id
+    hist = db.add_image_history(
+        user_id,
+        prompt=prompt,
+        style_key=skill.key,
+        artifact_id=art["id"],
+        source_upload_id=source_upload_id,
+        params=params,
+    )
+    return {
+        "ok": True,
+        "artifact_id": art["id"],
+        "history_id": hist["id"],
+        "filename": art["filename"],
+        "mime": art["mime"],
+        "style_key": skill.key,
+        "prompt": prompt,
+        "created_at": hist["created_at"],
+        "preview_url": f"/api/artifacts/{art['id']}/preview",
+    }
+
+
+@router.post("/image/generate")
+async def image_generate(request: Request, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    prompt = str(payload.get("prompt") or "").strip()
+    if not prompt:
+        raise HTTPException(400, "描述不能为空。")
+    reference_images, source_upload_id = _resolve_image_source(user["id"], payload.get("source"))
+    return await asyncio.to_thread(
+        _run_generate,
+        user["id"],
+        prompt=prompt,
+        style_key=payload.get("style_key"),
+        platform=payload.get("platform"),
+        reference_images=reference_images,
+        source_upload_id=source_upload_id,
+        template_id=payload.get("template_id"),
+        aspect_ratio=payload.get("aspect_ratio"),
+        session_id=payload.get("session_id"),
+    )
+
+
+@router.post("/image/re-edit")
+async def image_reedit(request: Request, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    history_id = str(payload.get("history_id") or "")
+    prompt = str(payload.get("prompt") or "").strip()
+    if not prompt:
+        raise HTTPException(400, "修改描述不能为空。")
+    prev = db.get_image_history(history_id, user["id"])
+    if prev is None:
+        raise HTTPException(404, "History item not found.")
+    if not prev.get("artifact_id"):
+        raise HTTPException(400, "This history item has no image to edit.")
+    art = db.get_artifact(prev["artifact_id"], user["id"])
+    if art is None:
+        raise HTTPException(404, "Source image not found.")
+    reference_images = [(_read_bytes(art["path"]), art["mime"] or "image/png")]
+    return await asyncio.to_thread(
+        _run_generate,
+        user["id"],
+        prompt=prompt,
+        style_key=payload.get("style_key") or prev.get("style_key"),
+        platform=None,
+        reference_images=reference_images,
+        source_upload_id=prev.get("source_upload_id"),
+        template_id=None,
+        aspect_ratio=payload.get("aspect_ratio"),
+        session_id=payload.get("session_id"),
+        parent_history_id=history_id,
+    )
+
+
+def _history_view(rec: dict) -> dict:
+    view = {
+        "id": rec["id"],
+        "prompt": rec["prompt"],
+        "style_key": rec["style_key"],
+        "artifact_id": rec["artifact_id"],
+        "created_at": rec["created_at"],
+        "params": rec.get("params", {}),
+        "preview_url": None,
+        "filename": None,
+        "mime": None,
+    }
+    if rec.get("artifact_id"):
+        view["preview_url"] = f"/api/artifacts/{rec['artifact_id']}/preview"
+    return view
+
+
+@router.get("/image/history")
+def image_history(request: Request) -> dict:
+    user = auth.require_user(request)
+    return {"history": [_history_view(r) for r in db.list_image_history(user["id"])]}
+
+
+@router.delete("/image/history/{history_id}")
+def image_history_delete(request: Request, history_id: str) -> dict:
+    user = auth.require_user(request)
+    if not db.delete_image_history(history_id, user["id"]):
+        raise HTTPException(404, "History item not found.")
+    return {"deleted": history_id}
+
+
+@router.get("/image/templates")
+def image_templates(request: Request, platform: str | None = None, style: str | None = None) -> dict:
+    auth.require_user(request)
+    return {"templates": db.list_image_templates(platform, style)}
 
 
 def _attached_ids(file_ids: str | list[str] | None, csv_id: str | None = None) -> list[str]:
