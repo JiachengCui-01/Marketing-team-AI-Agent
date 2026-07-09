@@ -274,14 +274,35 @@ export async function deleteGroup(id: string): Promise<void> {
 
 // ---------- uploads ----------
 
-export async function uploadFile(file: File): Promise<UploadResponse> {
+function uploadForm(file: File): FormData {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`${API_BASE}/api/upload`, {
+  return form;
+}
+
+async function uploadTo(url: string, file: File): Promise<Response> {
+  return fetch(url, {
     method: "POST",
     headers: authHeaders(),
-    body: form,
+    body: uploadForm(file),
   });
+}
+
+export async function uploadFile(file: File): Promise<UploadResponse> {
+  let res: Response;
+  try {
+    res = await uploadTo(`${API_BASE}/api/upload`, file);
+  } catch (primaryError) {
+    // Browser-side "Failed to fetch" can happen before the API returns a status
+    // (transient CORS/network/CDN path issues). Retry via the same-origin Next
+    // rewrite so uploads are not blocked by the direct cross-origin path.
+    if (typeof window === "undefined") throw primaryError;
+    try {
+      res = await uploadTo("/api/upload", file);
+    } catch {
+      throw primaryError;
+    }
+  }
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(`upload ${res.status}: ${detail || res.statusText}`);
