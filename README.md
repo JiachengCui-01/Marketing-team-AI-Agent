@@ -10,6 +10,7 @@ The orchestrator routes requests to three specialists:
 3. Market research: current web research with cited sources
 
 Updates：
+
 V1.3: Add automatic summary function for daily industry news
 <img width="1279" height="698" alt="image" src="https://github.com/user-attachments/assets/a090dedc-8c0b-417d-9ec8-2fa25c5fe62a" />
 
