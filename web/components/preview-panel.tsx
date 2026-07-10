@@ -204,7 +204,7 @@ function PreviewBody({ item }: { item: PreviewItem | null }) {
         ) : item.mime.startsWith("image/") ? (
           <div className="w-full h-full flex items-center justify-center overflow-auto p-4">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={previewUrl} alt={item.filename} className="max-w-full max-h-full object-contain" />
+            <img src={previewUrl} alt={item.filename} decoding="async" className="max-w-full max-h-full object-contain" />
           </div>
         ) : item.mime === "text/csv" ? (
           <CsvPreview url={previewUrl} />

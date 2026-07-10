@@ -178,8 +178,12 @@ export function MarketingImagePanel({
 
       {/* workspace */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto px-4 py-6 space-y-4">
-          {error ? <p className="text-sm text-danger">{error}</p> : null}
+        <div
+          className={`mx-auto max-w-3xl px-4 ${
+            upload ? "py-6 space-y-4" : "min-h-full flex flex-col items-center justify-center py-10 text-center"
+          }`}
+        >
+          {error ? <p className="mb-2 text-sm text-danger">{error}</p> : null}
 
           {upload ? (
             <div className="rounded-xl border border-border p-3 space-y-3">
@@ -204,9 +208,24 @@ export function MarketingImagePanel({
               />
             </div>
           ) : (
-            <div className="rounded-xl border border-dashed border-border py-14 text-center">
-              <ImageIcon size={26} className="mx-auto text-fg-subtle mb-3" />
-              <p className="text-sm text-fg-muted">{t.imageEmptyHint}</p>
+            <div className="flex flex-col items-center">
+              <ImageHeroArt />
+              <h1 className="mt-5 text-2xl font-semibold tracking-tight">{t.imageHeroTitle}</h1>
+              <p className="mt-2 max-w-md text-sm text-fg-muted">{t.imageHeroBody}</p>
+              <label className="mt-5 inline-flex cursor-pointer items-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-accent-fg hover:opacity-90 transition">
+                {uploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+                {t.imageUploadButton}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  disabled={uploading}
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files[0]) handleUpload(e.target.files[0]);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
             </div>
           )}
         </div>
@@ -260,29 +279,8 @@ export function MarketingImagePanel({
               </div>
             ) : null}
 
-            {/* prompt input */}
-            <div className="flex items-end gap-2 px-2 py-1.5">
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                rows={1}
-                placeholder={t.imagePromptPlaceholder}
-                disabled={busy}
-                className="flex-1 resize-none bg-transparent px-2 py-2.5 text-sm placeholder:text-fg-subtle focus:outline-none disabled:opacity-50 max-h-40"
-                style={{ minHeight: 44 }}
-              />
-              <button
-                onClick={handleGenerate}
-                disabled={busy || uploading}
-                className="m-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent px-3.5 h-9 text-accent-fg text-sm font-medium hover:opacity-90 transition disabled:opacity-40"
-              >
-                {busy ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}
-                <span>{busy ? t.imageGenerating : t.imageGenerate}</span>
-              </button>
-            </div>
-
             {/* action row: upload / history / templates (equal width) */}
-            <div className="grid grid-cols-3 gap-2 border-t border-border p-2">
+            <div className="grid grid-cols-3 gap-2 border-b border-border p-2">
               <label
                 className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm cursor-pointer transition ${
                   upload
@@ -316,6 +314,27 @@ export function MarketingImagePanel({
               >
                 <LayoutTemplate size={15} className="text-accent" />
                 <span className="truncate">{t.imageTemplates}</span>
+              </button>
+            </div>
+
+            {/* prompt input — at the very bottom */}
+            <div className="flex items-end gap-2 px-2 py-1.5">
+              <textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                rows={1}
+                placeholder={t.imagePromptPlaceholder}
+                disabled={busy}
+                className="flex-1 resize-none bg-transparent px-2 py-2.5 text-sm placeholder:text-fg-subtle focus:outline-none disabled:opacity-50 max-h-40"
+                style={{ minHeight: 44 }}
+              />
+              <button
+                onClick={handleGenerate}
+                disabled={busy || uploading}
+                className="m-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent px-3.5 h-9 text-accent-fg text-sm font-medium hover:opacity-90 transition disabled:opacity-40"
+              >
+                {busy ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}
+                <span>{busy ? t.imageGenerating : t.imageGenerate}</span>
               </button>
             </div>
           </div>
@@ -410,6 +429,8 @@ function HistoryModal({
                   <img
                     src={artifactPreviewUrl(it.artifact_id)}
                     alt={it.prompt}
+                    loading="lazy"
+                    decoding="async"
                     className="h-32 w-full object-cover"
                   />
                 ) : (
@@ -428,5 +449,19 @@ function HistoryModal({
         </div>
       )}
     </Modal>
+  );
+}
+
+/** Decorative marketing-image illustration for the panel's centered empty state. */
+function ImageHeroArt() {
+  return (
+    <div className="flex h-28 w-28 items-center justify-center rounded-2xl bg-accent/10 text-accent">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="8" y="12" width="48" height="40" rx="5" className="fill-accent/10" />
+        <circle cx="22" cy="25" r="4" className="fill-accent/30" stroke="none" />
+        <path d="M12 46l13-14 9 9 7-6 11 11" />
+        <path d="M50 8l1.6 3.6L55 13l-3.4 1.4L50 18l-1.6-3.6L45 13l3.4-1.4z" className="fill-accent" stroke="none" />
+      </svg>
+    </div>
   );
 }

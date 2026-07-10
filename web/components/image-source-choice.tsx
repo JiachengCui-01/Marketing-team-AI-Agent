@@ -48,6 +48,7 @@ export function ImageUploadWorkspace({
           <img
             src={uploadPreviewUrl(fileId)}
             alt="original"
+            decoding="async"
             className="mx-auto h-40 w-full rounded object-contain"
           />
           <span className="mt-1 flex items-center justify-center gap-1 text-xs">
@@ -69,6 +70,7 @@ export function ImageUploadWorkspace({
             <img
               src={artifactPreviewUrl(cutoutArtifactId!)}
               alt="cutout"
+              decoding="async"
               className="mx-auto h-40 w-full rounded object-contain"
               style={{
                 backgroundImage: "repeating-conic-gradient(#e5e7eb 0% 25%, transparent 0% 50%)",

@@ -17,7 +17,7 @@ from marketing_agent.file_inputs import build_prompt_addendum, extract
 from marketing_agent.orchestrator import run_orchestrator
 from marketing_agent.tools import image_gen
 
-from . import auth, db, image_processing, news, sessions, uploads
+from . import auth, db, image_processing, image_serve, news, sessions, uploads
 from .streaming import orchestrator_event_stream, to_sse
 
 router = APIRouter(prefix="/api")
@@ -403,16 +403,18 @@ def download_upload(request: Request, file_id: str):
     )
 
 
+_PREVIEW_CACHE_HEADERS = {"Cache-Control": "private, max-age=86400"}
+
+
 @router.get("/uploads/{file_id}/preview")
 def preview_upload(request: Request, file_id: str):
-    """Inline-serve an uploaded file (e.g. PDF iframe, image tag)."""
+    """Inline-serve an uploaded file (optimized for images; PDFs pass through)."""
     user = auth.require_user(request)
     rec = db.get_upload(file_id, user["id"])
     if rec is None:
         raise HTTPException(404, "File not found.")
-    from pathlib import Path
-    path = Path(rec["path"])
-    return FileResponse(path)
+    path, media_type = image_serve.optimized_preview(rec["path"], f"upload_{file_id}")
+    return FileResponse(path, media_type=media_type, headers=_PREVIEW_CACHE_HEADERS)
 
 
 # ---------- artifacts ----------
@@ -435,7 +437,8 @@ def preview_artifact(request: Request, artifact_id: str):
     rec = db.get_artifact(artifact_id, user["id"])
     if rec is None:
         raise HTTPException(404, "Artifact not found.")
-    return FileResponse(rec["path"], media_type=rec["mime"])
+    path, media_type = image_serve.optimized_preview(rec["path"], f"artifact_{artifact_id}")
+    return FileResponse(path, media_type=media_type, headers=_PREVIEW_CACHE_HEADERS)
 
 
 @router.get("/artifacts/{artifact_id}")
@@ -671,6 +674,59 @@ async def image_generate(request: Request, payload: dict = Body(...)) -> dict:
         aspect_ratio=payload.get("aspect_ratio"),
         session_id=payload.get("session_id"),
     )
+
+
+@router.post("/image/compose-save")
+def image_compose_save(request: Request, payload: dict = Body(...)) -> dict:
+    """Persist a client-composed template image (no AI) as an artifact + history row.
+
+    The frontend renders the template composition on a canvas, uploads the result via
+    /api/upload, and calls this to register it so it shows in preview + history.
+    """
+    user = auth.require_user(request)
+    file_id = str(payload.get("file_id") or "")
+    rec = db.get_upload(file_id, user["id"])
+    if rec is None:
+        raise HTTPException(404, "Composed image not found.")
+
+    import shutil
+    import uuid as _uuid
+    from pathlib import Path
+
+    from marketing_agent.tools.image_gen import ARTIFACTS_DIR
+
+    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+    style_key = str(payload.get("style_key") or "generic")
+    dest = ARTIFACTS_DIR / f"{_uuid.uuid4().hex}_template_{style_key}.png"
+    shutil.copyfile(rec["path"], dest)
+    art = db.add_artifact(
+        session_id=payload.get("session_id"),
+        kind="image",
+        filename=f"template_{style_key}.png",
+        mime="image/png",
+        path=str(dest.resolve()),
+        user_id=user["id"],
+    )
+    prompt = str(payload.get("prompt") or "").strip() or "Template composition"
+    hist = db.add_image_history(
+        user["id"],
+        prompt=prompt,
+        style_key=style_key,
+        artifact_id=art["id"],
+        source_upload_id=file_id,
+        params={"template_id": payload.get("template_id"), "composed": True},
+    )
+    return {
+        "ok": True,
+        "artifact_id": art["id"],
+        "history_id": hist["id"],
+        "filename": art["filename"],
+        "mime": art["mime"],
+        "style_key": style_key,
+        "prompt": prompt,
+        "created_at": hist["created_at"],
+        "preview_url": f"/api/artifacts/{art['id']}/preview",
+    }
 
 
 @router.post("/image/re-edit")

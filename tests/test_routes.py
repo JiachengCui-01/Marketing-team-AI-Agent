@@ -486,6 +486,39 @@ class RouteTests(unittest.TestCase):
         ).json()["templates"]
         self.assertTrue(white and all(t["style"] == "white" for t in white))
 
+    def test_image_compose_save_persists_and_previews(self) -> None:
+        file_id = self._upload_png()  # stands in for the client-composed image
+        res = self.client.post(
+            "/api/image/compose-save",
+            headers=self.headers,
+            json={"file_id": file_id, "template_id": "t_taobao_white", "style_key": "taobao", "prompt": "新品上市"},
+        )
+        self.assertEqual(res.status_code, 200, res.text)
+        body = res.json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(
+            self.client.get(f"/api/artifacts/{body['artifact_id']}/preview", headers=self.headers).status_code,
+            200,
+        )
+        hist = self.client.get("/api/image/history", headers=self.headers).json()["history"]
+        self.assertTrue(any(h["id"] == body["history_id"] and h["params"].get("composed") for h in hist))
+
+    def test_image_compose_save_rejects_cross_user_file(self) -> None:
+        file_id = self._upload_png()
+        bob = self._register("13800138000")
+        res = self.client.post(
+            "/api/image/compose-save",
+            headers=bob,
+            json={"file_id": file_id, "style_key": "taobao"},
+        )
+        self.assertEqual(res.status_code, 404)
+
+    def test_preview_sets_cache_header(self) -> None:
+        file_id = self._upload_png()
+        res = self.client.get(f"/api/uploads/{file_id}/preview", headers=self.headers)
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("max-age", res.headers.get("cache-control", ""))
+
     def test_image_history_user_isolation(self) -> None:
         from server import routes
 

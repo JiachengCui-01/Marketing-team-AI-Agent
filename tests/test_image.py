@@ -4,7 +4,7 @@ import os
 import unittest
 from unittest import mock
 
-from server import db, image_processing
+from server import db, image_processing, image_serve
 from marketing_agent.agents.image_skills import IMAGE_SKILLS, select_image_skill
 from marketing_agent.tools import image_gen
 
@@ -188,6 +188,41 @@ class ImageDbTests(unittest.TestCase):
         with db._connect() as conn:  # type: ignore[attr-defined]
             db._seed_image_templates(conn)  # type: ignore[attr-defined]
         self.assertEqual(len(db.list_image_templates()), before)
+
+
+class OptimizedPreviewTests(unittest.TestCase):
+    def _write(self, name: str, img) -> str:
+        import tempfile
+
+        p = os.path.join(tempfile.mkdtemp(), name)
+        img.save(p)
+        return p
+
+    def test_opaque_image_becomes_jpeg(self) -> None:
+        from PIL import Image
+
+        src = self._write("big.png", Image.new("RGB", (2000, 2000), (10, 120, 200)))
+        out, media = image_serve.optimized_preview(src, "opt_opaque")
+        self.assertEqual(media, "image/jpeg")
+        self.assertTrue(os.path.exists(out))
+        with Image.open(out) as im:  # downscaled to the max-edge cap
+            self.assertLessEqual(max(im.size), image_serve.MAX_EDGE)
+
+    def test_alpha_image_stays_png(self) -> None:
+        from PIL import Image
+
+        src = self._write("cut.png", Image.new("RGBA", (1200, 1200), (0, 0, 0, 0)))
+        out, media = image_serve.optimized_preview(src, "opt_alpha")
+        self.assertEqual(media, "image/png")
+
+    def test_non_image_passes_through(self) -> None:
+        import tempfile
+
+        p = os.path.join(tempfile.mkdtemp(), "doc.pdf")
+        with open(p, "wb") as fh:
+            fh.write(b"%PDF-1.4")
+        out, _ = image_serve.optimized_preview(p, "opt_pdf")
+        self.assertEqual(out, p)
 
 
 if __name__ == "__main__":

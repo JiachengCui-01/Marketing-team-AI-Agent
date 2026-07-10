@@ -539,6 +539,21 @@ export async function generateImage(payload: {
   return res.json();
 }
 
+export async function saveComposedImage(payload: {
+  file_id: string;
+  template_id?: string | null;
+  style_key?: string | null;
+  prompt?: string | null;
+}): Promise<ImageGeneration> {
+  const res = await fetch(`${API_BASE}/api/image/compose-save`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return res.json();
+}
+
 export async function reeditImage(payload: {
   history_id: string;
   prompt: string;
