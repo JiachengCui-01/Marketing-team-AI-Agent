@@ -515,9 +515,9 @@ export default function HomePage() {
   }
 
   return (
-    <main className="h-screen flex flex-col">
-      <header className="relative z-50 border-b border-border bg-bg-elevated/60 backdrop-blur">
-        <div className="px-4 py-3 flex items-center gap-3">
+    <main className="h-screen flex flex-col bg-bg-subtle">
+      <header className="relative z-50 bg-bg-subtle px-1.5 pt-1.5">
+        <div className="h-14 rounded-2xl border border-border bg-bg-elevated/80 px-4 py-3 shadow-sm backdrop-blur flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-accent text-accent-fg flex items-center justify-center">
             <Sparkles size={16} />
           </div>
@@ -541,7 +541,7 @@ export default function HomePage() {
         </div>
       </header>
 
-      <div className="flex flex-1 gap-2 p-2 bg-bg-subtle overflow-hidden">
+      <div className="flex flex-1 gap-1 p-1.5 bg-bg-subtle overflow-hidden">
         <SessionSidebar
           sessions={store.sessions}
           groups={store.groups}
@@ -631,7 +631,7 @@ function ResizeHandle({
       onMouseDown={onMouseDown}
       className={`hidden ${
         side === "left" ? "md:block" : "lg:block"
-      } w-1.5 my-8 shrink-0 cursor-col-resize rounded-full bg-transparent hover:bg-accent/40 focus:bg-accent/40 focus:outline-none transition-colors`}
+      } w-1 my-6 shrink-0 cursor-col-resize rounded-full bg-transparent hover:bg-accent/40 focus:bg-accent/40 focus:outline-none transition-colors`}
     />
   );
 }
