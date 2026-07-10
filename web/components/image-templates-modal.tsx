@@ -292,7 +292,7 @@ export function ImageTemplatesModal({
                 setAppliedPlatform(platform);
                 setAppliedStyle(style);
               }}
-              className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg"
+              className="btn-accent px-3 py-1.5 text-sm"
             >
               {t.imageFilterApply}
             </button>
@@ -303,7 +303,7 @@ export function ImageTemplatesModal({
                 setAppliedPlatform("all");
                 setAppliedStyle("all");
               }}
-              className="rounded-lg border border-border px-3 py-1.5 text-sm text-fg-muted hover:bg-bg-elevated"
+              className="btn-ghost border border-border px-3 py-1.5 text-sm"
             >
               {t.imageFilterReset}
             </button>
@@ -323,7 +323,7 @@ export function ImageTemplatesModal({
                         <button
                           key={tpl.id}
                           onClick={() => (active ? clearTemplate() : selectTemplate(tpl))}
-                          className={`overflow-hidden rounded-lg border text-left transition ${
+                          className={`overflow-hidden rounded-xl border text-left hover-lift ${
                             active ? "border-accent ring-1 ring-accent" : "border-border hover:bg-bg-elevated"
                           }`}
                         >
@@ -404,7 +404,7 @@ export function ImageTemplatesModal({
               <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
                 <button
                   onClick={() => setToolPage((p) => (p - 1 + TOOL_PAGES.length) % TOOL_PAGES.length)}
-                  className="rounded p-1 text-fg-muted hover:bg-bg-elevated"
+                  className="btn-ghost w-7 h-7"
                   aria-label="prev"
                 >
                   <ChevronLeft size={16} />
@@ -412,7 +412,7 @@ export function ImageTemplatesModal({
                 <span className="text-sm font-medium">{TOOL_PAGES[toolPage]}</span>
                 <button
                   onClick={() => setToolPage((p) => (p + 1) % TOOL_PAGES.length)}
-                  className="rounded p-1 text-fg-muted hover:bg-bg-elevated"
+                  className="btn-ghost w-7 h-7"
                   aria-label="next"
                 >
                   <ChevronRight size={16} />
@@ -456,7 +456,7 @@ export function ImageTemplatesModal({
                     <button
                       onClick={toggleBg}
                       disabled={bgBusy || !upload}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-fg hover:opacity-90 disabled:opacity-40"
+                      className="btn-accent px-3 py-2 text-sm"
                     >
                       {bgBusy ? <Loader2 size={14} className="animate-spin" /> : bgRemoved ? <RotateCcw size={14} /> : <Scissors size={14} />}
                       {bgBusy ? t.imageRemovingBg : bgRemoved ? t.imageRestoreBg : t.imageRemoveBg}
@@ -508,7 +508,7 @@ export function ImageTemplatesModal({
           <button
             onClick={confirmGenerate}
             disabled={busy || !selected || !upload}
-            className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg disabled:opacity-40"
+            className="btn-accent w-full px-4 py-2 text-sm"
           >
             {busy ? <Loader2 size={15} className="animate-spin" /> : null}
             {t.imageConfirmGenerate}

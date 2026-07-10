@@ -19,9 +19,13 @@ export function ThemeToggle() {
       onClick={() => setTheme(next)}
       aria-label={t.themeToggle}
       title={t.themeToggle}
-      className="p-2 rounded-md hover:bg-bg-subtle transition text-fg-muted hover:text-fg"
+      className="btn-ghost w-9 h-9"
     >
-      {mounted && active === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+      {mounted && active === "dark" ? (
+        <Sun size={16} className="text-feature-research" />
+      ) : (
+        <Moon size={16} />
+      )}
     </button>
   );
 }

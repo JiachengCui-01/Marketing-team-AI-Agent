@@ -60,12 +60,12 @@ export function FileUploader({
           type="button"
           onClick={() => inputRef.current?.click()}
           disabled={busy}
-          className="inline-flex items-center gap-2 text-xs text-fg-muted hover:text-fg transition disabled:opacity-50"
+          className="btn-ghost border border-border px-2.5 py-1.5 text-xs disabled:opacity-50"
         >
           {busy ? (
             <Loader2 size={14} className="animate-spin" />
           ) : (
-            <Paperclip size={14} />
+            <Paperclip size={14} className="text-feature-content" />
           )}
           <span>{busy ? t.uploading : t.attachFiles}</span>
         </button>

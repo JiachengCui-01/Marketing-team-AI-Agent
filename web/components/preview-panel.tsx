@@ -28,6 +28,7 @@ import {
   uploadPreviewUrl,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Modal } from "@/components/modal";
 
 export type TraceEvent = StreamEvent & { ts: number };
@@ -87,10 +88,10 @@ export function PreviewPanel({
 
   if (collapsed) {
     return (
-      <aside className="hidden lg:flex flex-col items-center w-12 shrink-0 border-l border-border bg-bg-subtle/40 py-2">
+      <aside className="hidden lg:flex flex-col items-center w-12 shrink-0 py-2 panel-card">
         <button
           onClick={onToggle}
-          className="w-9 h-9 inline-flex items-center justify-center rounded-md hover:bg-bg-elevated text-fg-muted"
+          className="btn-ghost w-9 h-9"
           aria-label={t.expandPreview}
           title={t.expandPreview}
         >
@@ -102,10 +103,10 @@ export function PreviewPanel({
 
   return (
     <aside
-      className="hidden lg:flex flex-col shrink-0 border-l border-border bg-bg-subtle/40"
+      className="hidden lg:flex flex-col shrink-0 panel-card"
       style={{ width: width ?? 384 }}
     >
-      <header className="px-2 py-2 border-b border-border flex items-center gap-1">
+      <header className="col-header !gap-1">
         <TabButton active={tab === "preview"} onClick={() => setTab("preview")} icon={Eye} label={t.preview} />
         <TabButton active={tab === "trace"} onClick={() => setTab("trace")} icon={Activity} label={t.trace} />
         <span className="ml-auto text-[10px] text-fg-subtle pr-2">
@@ -113,7 +114,7 @@ export function PreviewPanel({
         </span>
         <button
           onClick={onToggle}
-          className="w-8 h-8 inline-flex items-center justify-center rounded-md hover:bg-bg-elevated text-fg-muted"
+          className="btn-ghost w-8 h-8"
           aria-label={t.collapsePreview}
           title={t.collapsePreview}
         >
@@ -191,7 +192,7 @@ function PreviewBody({ item }: { item: PreviewItem | null }) {
         <a
           href={downloadUrl}
           download={item.filename}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-accent text-accent-fg text-xs font-medium hover:opacity-90 transition"
+          className="btn-accent px-2.5 py-1 text-xs"
           title={t.download}
         >
           <Download size={12} />
@@ -202,10 +203,7 @@ function PreviewBody({ item }: { item: PreviewItem | null }) {
         {item.mime === "application/pdf" ? (
           <iframe src={previewUrl} title={item.filename} className="w-full h-full border-0" />
         ) : item.mime.startsWith("image/") ? (
-          <div className="w-full h-full flex items-center justify-center overflow-auto p-4">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={previewUrl} alt={item.filename} decoding="async" className="max-w-full max-h-full object-contain" />
-          </div>
+          <PreviewImage src={previewUrl} alt={item.filename} />
         ) : item.mime === "text/csv" ? (
           <CsvPreview url={previewUrl} />
         ) : (
@@ -216,6 +214,25 @@ function PreviewBody({ item }: { item: PreviewItem | null }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function PreviewImage({ src, alt }: { src: string; alt: string }) {
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <div className="relative w-full h-full flex items-center justify-center overflow-auto p-4">
+      {!loaded ? <Skeleton className="absolute inset-4 rounded-xl" /> : null}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={alt}
+        decoding="async"
+        onLoad={() => setLoaded(true)}
+        className={`max-w-full max-h-full object-contain rounded-lg transition-opacity duration-200 ${
+          loaded ? "opacity-100" : "opacity-0"
+        }`}
+      />
     </div>
   );
 }
@@ -245,7 +262,14 @@ function CsvPreview({ url }: { url: string }) {
   }, [url]);
 
   if (err) return <p className="p-4 text-xs text-danger">{err}</p>;
-  if (!rows) return <p className="p-4 text-xs text-fg-subtle">{t.csvLoading}</p>;
+  if (!rows)
+    return (
+      <div className="space-y-1.5 p-3">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <Skeleton key={i} className="h-5 w-full" />
+        ))}
+      </div>
+    );
 
   const [header, ...body] = rows;
   return (
@@ -297,7 +321,7 @@ function TraceBody({
               key={i}
               type="button"
               onClick={() => setExpanded(e)}
-              className="block w-full text-left cursor-pointer transition hover:opacity-90"
+              className="block w-full text-left cursor-pointer rounded-xl hover-lift"
               title={t.traceDetailHint}
             >
               <TraceItem event={e} />

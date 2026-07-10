@@ -15,6 +15,12 @@
   --success: 22 163 74;
   --warn: 202 138 4;
   --danger: 220 38 38;
+  /* Feature-identity hues (restrained, light) */
+  --feature-news: 37 99 235;        /* blue-600 */
+  --feature-image: 124 58 237;      /* violet-600 */
+  --feature-content: 79 70 229;     /* indigo-600 (matches accent) */
+  --feature-analytics: 13 148 136;  /* teal-600 */
+  --feature-research: 217 119 6;    /* amber-600 */
 }
 
 .dark {
@@ -30,6 +36,12 @@
   --success: 74 222 128;
   --warn: 250 204 21;
   --danger: 248 113 113;
+  /* Feature-identity hues (restrained, dark — lighter for contrast) */
+  --feature-news: 96 165 250;       /* blue-400 */
+  --feature-image: 167 139 250;     /* violet-400 */
+  --feature-content: 129 140 248;   /* indigo-400 (matches accent) */
+  --feature-analytics: 45 212 191;  /* teal-300 */
+  --feature-research: 251 191 36;   /* amber-400 */
 }
 
 html, body {
@@ -37,6 +49,45 @@ html, body {
   color: rgb(var(--fg));
   font-family: theme('fontFamily.sans');
   -webkit-font-smoothing: antialiased;
+}
+
+/* Keyboard focus ring only (avoids ring on mouse click). */
+*:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(var(--bg-elevated)), 0 0 0 4px rgb(var(--accent) / 0.45);
+  border-radius: 8px;
+}
+
+@layer components {
+  /* Floating column panel (macOS grouped-card look). */
+  .panel-card {
+    @apply rounded-2xl border border-border bg-bg-elevated shadow-sm overflow-hidden;
+  }
+  /* Unified column header — same height + baseline across all three columns. */
+  .col-header {
+    @apply h-12 shrink-0 flex items-center gap-2 px-3 border-b border-border bg-bg-elevated/60 backdrop-blur;
+  }
+  /* Ghost icon/label button: bg + color shift on hover, subtle press. */
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg text-fg-muted transition-all duration-150 ease-macos hover:bg-bg-elevated hover:text-fg active:scale-[0.97];
+  }
+  /* Primary accent button. */
+  .btn-accent {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent text-accent-fg font-medium transition-all duration-150 ease-macos hover:opacity-90 active:scale-[0.97] disabled:opacity-40 disabled:active:scale-100;
+  }
+  /* Card that lifts slightly on hover. */
+  .hover-lift {
+    @apply transition-all duration-150 ease-macos hover:-translate-y-px hover:shadow-md;
+  }
+  /* Shimmer skeleton block. */
+  .skeleton {
+    @apply relative overflow-hidden bg-bg-subtle;
+  }
+  .skeleton::after {
+    content: "";
+    @apply absolute inset-0 -translate-x-full animate-shimmer;
+    background: linear-gradient(90deg, transparent, rgb(var(--fg) / 0.06), transparent);
+  }
 }
 
 /* Markdown polish inside chat bubbles */

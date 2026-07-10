@@ -18,13 +18,17 @@ export function Modal({
   if (typeof document === "undefined") return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-fade-in">
       <section
-        className={`w-full ${wide ? "max-w-3xl" : "max-w-2xl"} max-h-[calc(100vh-2rem)] overflow-y-auto rounded-xl border border-border bg-bg-elevated p-5 shadow-xl`}
+        className={`w-full ${wide ? "max-w-3xl" : "max-w-2xl"} max-h-[calc(100vh-2rem)] overflow-y-auto rounded-2xl border border-border bg-bg-elevated p-5 shadow-xl animate-scale-in`}
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-semibold">{title}</h2>
-          <button type="button" onClick={onClose} className="text-sm text-fg-subtle hover:text-fg">
+          <button
+            type="button"
+            onClick={onClose}
+            className="btn-ghost px-2 py-1 text-sm text-fg-subtle"
+          >
             {t.close}
           </button>
         </div>

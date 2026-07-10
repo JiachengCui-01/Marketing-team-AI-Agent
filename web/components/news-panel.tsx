@@ -15,6 +15,7 @@ import {
 } from "@/lib/api";
 import { localizeError, useI18n } from "@/lib/i18n";
 import { Modal } from "@/components/modal";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export function NewsPanel({ onBack }: { onBack: () => void }) {
   const { locale, t } = useI18n();
@@ -59,22 +60,19 @@ export function NewsPanel({ onBack }: { onBack: () => void }) {
   }
 
   return (
-    <div className="flex-1 flex flex-col min-w-0">
-      <header className="border-b border-border bg-bg-elevated/60 backdrop-blur flex items-center gap-2 px-4 py-2.5">
-        <button
-          onClick={onBack}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-sm text-fg-muted hover:text-fg hover:bg-bg-elevated transition"
-        >
+    <div className="flex-1 flex flex-col min-w-0 panel-card">
+      <header className="col-header">
+        <button onClick={onBack} className="btn-ghost px-2.5 py-1.5 text-sm">
           <ArrowLeft size={15} />
           <span>{t.back}</span>
         </button>
         <div className="flex items-center gap-2 mx-auto text-sm font-medium">
-          <Newspaper size={15} className="text-accent" />
+          <Newspaper size={15} className="text-feature-news" />
           <span>{t.industryNews}</span>
         </div>
         <button
           onClick={() => setSettingsOpen(true)}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-sm text-fg-muted hover:text-fg hover:bg-bg-elevated transition"
+          className="btn-ghost px-2.5 py-1.5 text-sm"
           title={t.newsSettings}
         >
           <Settings size={15} />
@@ -85,7 +83,7 @@ export function NewsPanel({ onBack }: { onBack: () => void }) {
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-4 py-6">
           {cancelled ? (
-            <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3.5 py-3 text-sm text-amber-700 dark:text-amber-300">
+            <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-warn/40 bg-warn/10 px-3.5 py-3 text-sm text-warn">
               <AlertTriangle size={16} className="mt-0.5 shrink-0" />
               <p>{t.newsCancelledNotice}</p>
             </div>
@@ -100,7 +98,7 @@ export function NewsPanel({ onBack }: { onBack: () => void }) {
             <button
               onClick={handleRefresh}
               disabled={refreshing || !config || cancelled}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-accent-fg text-xs font-medium hover:opacity-90 transition disabled:opacity-40"
+              className="btn-accent px-3 py-1.5 text-xs"
             >
               {refreshing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
               <span>{refreshing ? t.newsRefreshing : t.newsRefreshNow}</span>
@@ -110,7 +108,13 @@ export function NewsPanel({ onBack }: { onBack: () => void }) {
           {error ? <p className="mb-4 text-sm text-danger">{error}</p> : null}
 
           {loading ? (
-            <p className="text-sm text-fg-subtle">{t.csvLoading}</p>
+            <div className="space-y-2.5">
+              <Skeleton className="h-6 w-2/3" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-5/6" />
+              <Skeleton className="h-4 w-3/4" />
+            </div>
           ) : !config ? (
             <div className="text-center py-16">
               <Newspaper size={28} className="mx-auto text-fg-subtle mb-3" />
@@ -278,8 +282,9 @@ function NewsSettingsDialog({
               type="button"
               onClick={handleSave}
               disabled={saving || cancelling}
-              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg disabled:opacity-40"
+              className="btn-accent px-4 py-2 text-sm"
             >
+              {saving ? <Loader2 size={14} className="animate-spin" /> : null}
               {saving ? t.saving : t.save}
             </button>
           </div>

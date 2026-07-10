@@ -88,7 +88,7 @@ export function ImageUploadWorkspace({
               type="button"
               onClick={onRemoveBg}
               disabled={bgBusy}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-fg hover:opacity-90 transition disabled:opacity-40"
+              className="btn-accent px-3 py-2 text-sm"
             >
               {bgBusy ? <Loader2 size={14} className="animate-spin" /> : <Scissors size={14} />}
               {bgBusy ? t.imageRemovingBg : t.imageRemoveBg}

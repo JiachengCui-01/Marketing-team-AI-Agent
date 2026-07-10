@@ -17,6 +17,7 @@ import {
 import { SessionSidebar } from "@/components/session-sidebar";
 import { NewsPanel } from "@/components/news-panel";
 import { MarketingImagePanel } from "@/components/image-panel";
+import { Spinner } from "@/components/ui/spinner";
 import { ThemeToggle } from "@/components/theme-toggle";
 import type { ChatMessage, MessageArtifact } from "@/components/message";
 import { deriveStatus } from "@/components/status-chip";
@@ -503,8 +504,8 @@ export default function HomePage() {
 
   if (authLoading) {
     return (
-      <main className="h-screen flex items-center justify-center bg-bg text-fg-muted">
-        {t.loadingAccount}
+      <main className="h-screen flex items-center justify-center bg-bg">
+        <Spinner size={22} label={t.loadingAccount} />
       </main>
     );
   }
@@ -540,7 +541,7 @@ export default function HomePage() {
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 gap-2 p-2 bg-bg-subtle overflow-hidden">
         <SessionSidebar
           sessions={store.sessions}
           groups={store.groups}
@@ -630,7 +631,7 @@ function ResizeHandle({
       onMouseDown={onMouseDown}
       className={`hidden ${
         side === "left" ? "md:block" : "lg:block"
-      } w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-accent/30 focus:bg-accent/30 focus:outline-none transition`}
+      } w-1.5 my-8 shrink-0 cursor-col-resize rounded-full bg-transparent hover:bg-accent/40 focus:bg-accent/40 focus:outline-none transition-colors`}
     />
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { Send, Loader2 } from "lucide-react";
+import { Send, Loader2, MessageSquare } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { MessageBubble, type ChatMessage, type MessageArtifact } from "./message";
 import { FileUploader } from "./file-uploader";
@@ -44,7 +44,13 @@ export function ChatPanel({
   const empty = messages.length === 0;
 
   return (
-    <div className="flex-1 flex flex-col min-w-0">
+    <div className="flex-1 flex flex-col min-w-0 panel-card">
+      <header className="col-header">
+        <div className="flex items-center gap-2 mx-auto text-sm font-medium">
+          <MessageSquare size={15} className="text-feature-content" />
+          <span>{t.chatHeader}</span>
+        </div>
+      </header>
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
         {empty ? (
           <div className="h-full flex flex-col items-center justify-center px-6 py-12">
@@ -79,7 +85,7 @@ export function ChatPanel({
             onRemove={onRemoveAttached}
             onPreview={onPreviewUpload}
           />
-          <div className="flex items-end gap-2 rounded-xl border border-border bg-bg-elevated focus-within:border-accent transition shadow-sm">
+          <div className="flex items-end gap-2 rounded-xl border border-border bg-bg-elevated focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20 transition shadow-sm">
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -98,7 +104,7 @@ export function ChatPanel({
             <button
               onClick={onSend}
               disabled={busy || !input.trim()}
-              className="m-1.5 inline-flex items-center justify-center w-9 h-9 rounded-lg bg-accent text-accent-fg hover:opacity-90 transition disabled:opacity-40 disabled:cursor-not-allowed"
+              className="btn-accent m-1.5 w-9 h-9 disabled:cursor-not-allowed"
               aria-label={t.send}
             >
               {busy ? (

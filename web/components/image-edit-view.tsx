@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { reeditImage, artifactPreviewUrl, type ImageGeneration } from "@/lib/api";
 import { localizeError, useI18n } from "@/lib/i18n";
+import { Spinner } from "@/components/ui/spinner";
 
 const ADJUST_DEFAULT = { brightness: 100, contrast: 100, saturation: 100 };
 const TRANSFORM_DEFAULT = { rotate: 0, flipH: false, flipV: false };
@@ -149,17 +150,14 @@ export function ImageEditView({
   ];
 
   return (
-    <div className="flex-1 flex flex-col min-w-0">
-      <header className="border-b border-border bg-bg-elevated/60 backdrop-blur flex items-center gap-2 px-4 py-2.5">
-        <button
-          onClick={onExit}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-sm text-fg-muted hover:text-fg hover:bg-bg-elevated transition"
-        >
+    <div className="flex-1 flex flex-col min-w-0 panel-card">
+      <header className="col-header">
+        <button onClick={onExit} className="btn-ghost px-2.5 py-1.5 text-sm">
           <ArrowLeft size={15} />
           <span>{t.imageBackToPanel}</span>
         </button>
         <div className="flex items-center gap-2 mx-auto text-sm font-medium">
-          <Wand2 size={15} className="text-accent" />
+          <Wand2 size={15} className="text-feature-image" />
           <span>{t.imageEditTitle}</span>
         </div>
         <div className="w-16" />
@@ -168,7 +166,7 @@ export function ImageEditView({
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-4 py-6 space-y-4">
           {/* image frame */}
-          <div className="flex justify-center rounded-xl border border-border bg-bg-subtle p-4">
+          <div className="relative flex justify-center rounded-xl border border-border bg-bg-subtle p-4">
             {src ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -179,21 +177,20 @@ export function ImageEditView({
                 className="max-h-[44vh] w-auto rounded"
               />
             ) : null}
+            {busy ? (
+              <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-bg/60 backdrop-blur-sm animate-fade-in">
+                <Spinner size={22} label={t.imageReedecting} />
+              </div>
+            ) : null}
           </div>
 
           {/* global actions (outside the categories) */}
           <div className="flex items-center justify-end gap-2">
-            <button
-              onClick={resetAll}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-fg-muted hover:bg-bg-elevated"
-            >
+            <button onClick={resetAll} className="btn-ghost border border-border px-3 py-2 text-sm">
               <RefreshCw size={14} />
               {t.imageResetAll}
             </button>
-            <button
-              onClick={download}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-fg hover:opacity-90"
-            >
+            <button onClick={download} className="btn-accent px-3 py-2 text-sm">
               <Download size={14} />
               {t.imageSaveVersion}
             </button>

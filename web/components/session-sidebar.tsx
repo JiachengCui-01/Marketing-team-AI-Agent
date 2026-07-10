@@ -77,10 +77,10 @@ export function SessionSidebar({
 
   if (collapsed) {
     return (
-      <aside className="hidden md:flex flex-col items-center w-12 shrink-0 border-r border-border bg-bg-subtle/40 py-2 gap-1">
+      <aside className="hidden md:flex flex-col items-center w-12 shrink-0 py-2 gap-1 panel-card">
         <button
           onClick={onToggle}
-          className="w-9 h-9 inline-flex items-center justify-center rounded-md hover:bg-bg-elevated text-fg-muted"
+          className="btn-ghost w-9 h-9"
           aria-label={t.expandSidebar}
           title={t.expandSidebar}
         >
@@ -88,7 +88,7 @@ export function SessionSidebar({
         </button>
         <button
           onClick={onNewChat}
-          className="w-9 h-9 inline-flex items-center justify-center rounded-md bg-accent text-accent-fg hover:opacity-90"
+          className="btn-accent w-9 h-9"
           aria-label={t.newChat}
           title={t.newChat}
         >
@@ -96,19 +96,19 @@ export function SessionSidebar({
         </button>
         <button
           onClick={onOpenNews}
-          className="w-9 h-9 inline-flex items-center justify-center rounded-md hover:bg-bg-elevated text-fg-muted"
+          className="btn-ghost w-9 h-9"
           aria-label={t.industryNews}
           title={t.industryNews}
         >
-          <Newspaper size={16} />
+          <Newspaper size={16} className="text-feature-news" />
         </button>
         <button
           onClick={onOpenImage}
-          className="w-9 h-9 inline-flex items-center justify-center rounded-md hover:bg-bg-elevated text-fg-muted"
+          className="btn-ghost w-9 h-9"
           aria-label={t.marketingImage}
           title={t.marketingImage}
         >
-          <ImageIcon size={16} />
+          <ImageIcon size={16} className="text-feature-image" />
         </button>
       </aside>
     );
@@ -207,13 +207,13 @@ export function SessionSidebar({
 
   return (
     <aside
-      className="hidden md:flex flex-col shrink-0 border-r border-border bg-bg-subtle/40"
+      className="hidden md:flex flex-col shrink-0 panel-card"
       style={{ width: width ?? 256 }}
     >
-      <div className="p-2 border-b border-border flex items-center gap-1">
+      <div className="col-header">
         <button
           onClick={onNewChat}
-          className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md bg-accent text-accent-fg text-sm font-medium hover:opacity-90 transition"
+          className="btn-accent flex-1 h-8 px-3 text-sm"
         >
           <Plus size={14} />
           <span>{t.newChat}</span>
@@ -223,7 +223,7 @@ export function SessionSidebar({
             const name = window.prompt(t.groupNamePrompt);
             if (name && name.trim()) await onCreateGroup(name.trim());
           }}
-          className="w-9 h-9 inline-flex items-center justify-center rounded-md border border-border hover:bg-bg-elevated text-fg-muted"
+          className="btn-ghost w-8 h-8 border border-border"
           title={t.newGroup}
           aria-label={t.newGroup}
         >
@@ -231,7 +231,7 @@ export function SessionSidebar({
         </button>
         <button
           onClick={onToggle}
-          className="w-9 h-9 inline-flex items-center justify-center rounded-md hover:bg-bg-elevated text-fg-muted"
+          className="btn-ghost w-8 h-8"
           title={t.collapseSidebar}
           aria-label={t.collapseSidebar}
         >
@@ -242,16 +242,16 @@ export function SessionSidebar({
       <div className="px-1.5 pt-2 space-y-0.5">
         <button
           onClick={onOpenNews}
-          className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-bg-elevated text-fg-muted hover:text-fg text-sm font-medium transition"
+          className="btn-ghost w-full justify-start px-2.5 py-2 text-sm font-medium"
         >
-          <Newspaper size={15} className="text-accent shrink-0" />
+          <Newspaper size={15} className="text-feature-news shrink-0" />
           <span className="truncate">{t.industryNews}</span>
         </button>
         <button
           onClick={onOpenImage}
-          className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-bg-elevated text-fg-muted hover:text-fg text-sm font-medium transition"
+          className="btn-ghost w-full justify-start px-2.5 py-2 text-sm font-medium"
         >
-          <ImageIcon size={15} className="text-accent shrink-0" />
+          <ImageIcon size={15} className="text-feature-image shrink-0" />
           <span className="truncate">{t.marketingImage}</span>
         </button>
       </div>
@@ -345,14 +345,14 @@ function SessionRow({
     <button
       onClick={() => onSelect(session.id)}
       onContextMenu={(e) => onContext(e, session.id)}
-      className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-sm transition ${
+      className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-sm transition-all duration-150 ease-macos active:scale-[0.99] ${
         active
           ? "bg-accent/15 text-fg"
           : "text-fg-muted hover:bg-bg-elevated hover:text-fg"
       }`}
       title={session.name}
     >
-      <MessageSquare size={13} className="shrink-0 opacity-70" />
+      <MessageSquare size={13} className={`shrink-0 ${active ? "text-accent" : "opacity-70"}`} />
       <span className="truncate flex-1">{session.name}</span>
     </button>
   );

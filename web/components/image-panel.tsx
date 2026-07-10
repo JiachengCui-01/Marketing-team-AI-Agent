@@ -33,6 +33,8 @@ import { Modal } from "@/components/modal";
 import { ImageEditView } from "@/components/image-edit-view";
 import { ImageTemplatesModal } from "@/components/image-templates-modal";
 import { ImageUploadWorkspace } from "@/components/image-source-choice";
+import { Spinner } from "@/components/ui/spinner";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { PreviewItem } from "@/components/preview-panel";
 
 export function MarketingImagePanel({
@@ -160,24 +162,21 @@ export function MarketingImagePanel({
   const activeSkill = skills.find((s) => s.id === activeStyle);
 
   return (
-    <div className="flex-1 flex flex-col min-w-0">
-      <header className="border-b border-border bg-bg-elevated/60 backdrop-blur flex items-center gap-2 px-4 py-2.5">
-        <button
-          onClick={onBack}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-sm text-fg-muted hover:text-fg hover:bg-bg-elevated transition"
-        >
+    <div className="flex-1 flex flex-col min-w-0 panel-card">
+      <header className="col-header">
+        <button onClick={onBack} className="btn-ghost px-2.5 py-1.5 text-sm">
           <ArrowLeft size={15} />
           <span>{t.back}</span>
         </button>
         <div className="flex items-center gap-2 mx-auto text-sm font-medium">
-          <ImageIcon size={15} className="text-accent" />
+          <ImageIcon size={15} className="text-feature-image" />
           <span>{t.marketingImage}</span>
         </div>
         <div className="w-16" />
       </header>
 
       {/* workspace */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="relative flex-1 overflow-y-auto">
         <div
           className={`mx-auto max-w-3xl px-4 ${
             upload ? "py-6 space-y-4" : "min-h-full flex flex-col items-center justify-center py-10 text-center"
@@ -212,7 +211,7 @@ export function MarketingImagePanel({
               <ImageHeroArt />
               <h1 className="mt-5 text-2xl font-semibold tracking-tight">{t.imageHeroTitle}</h1>
               <p className="mt-2 max-w-md text-sm text-fg-muted">{t.imageHeroBody}</p>
-              <label className="mt-5 inline-flex cursor-pointer items-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-accent-fg hover:opacity-90 transition">
+              <label className="btn-accent mt-5 cursor-pointer px-4 py-2.5 text-sm">
                 {uploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
                 {t.imageUploadButton}
                 <input
@@ -229,6 +228,11 @@ export function MarketingImagePanel({
             </div>
           )}
         </div>
+        {busy ? (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-bg/60 backdrop-blur-sm animate-fade-in">
+            <Spinner size={22} label={t.imageGenerating} />
+          </div>
+        ) : null}
       </div>
 
       {/* integrated skills + input + actions */}
@@ -263,8 +267,8 @@ export function MarketingImagePanel({
                         setActiveStyle(active ? null : s.id);
                         setSkillsOpen(false);
                       }}
-                      className={`text-left rounded-lg border px-3 py-2 transition ${
-                        active ? "border-accent bg-accent/10" : "border-border hover:bg-bg-elevated"
+                      className={`text-left rounded-lg border px-3 py-2 hover-lift ${
+                        active ? "border-accent bg-accent/10 ring-1 ring-accent" : "border-border hover:bg-bg-elevated"
                       }`}
                     >
                       <div className="flex items-center gap-1.5 text-sm font-medium">
@@ -303,16 +307,16 @@ export function MarketingImagePanel({
               </label>
               <button
                 onClick={() => setHistoryOpen(true)}
-                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-fg-muted hover:text-fg hover:bg-bg-elevated transition"
+                className="btn-ghost border border-border px-3 py-2 text-sm"
               >
-                <History size={15} className="text-accent" />
+                <History size={15} className="text-feature-content" />
                 <span className="truncate">{t.imageHistory}</span>
               </button>
               <button
                 onClick={() => setTemplatesOpen(true)}
-                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-fg-muted hover:text-fg hover:bg-bg-elevated transition"
+                className="btn-ghost border border-border px-3 py-2 text-sm"
               >
-                <LayoutTemplate size={15} className="text-accent" />
+                <LayoutTemplate size={15} className="text-feature-research" />
                 <span className="truncate">{t.imageTemplates}</span>
               </button>
             </div>
@@ -331,7 +335,7 @@ export function MarketingImagePanel({
               <button
                 onClick={handleGenerate}
                 disabled={busy || uploading}
-                className="m-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent px-3.5 h-9 text-accent-fg text-sm font-medium hover:opacity-90 transition disabled:opacity-40"
+                className="btn-accent m-1 px-3.5 h-9 text-sm"
               >
                 {busy ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}
                 <span>{busy ? t.imageGenerating : t.imageGenerate}</span>
@@ -401,7 +405,11 @@ function HistoryModal({
     <Modal title={t.imageHistoryTitle} onClose={onClose} wide>
       {error ? <p className="mb-3 text-sm text-danger">{error}</p> : null}
       {items === null ? (
-        <p className="text-sm text-fg-subtle">{t.csvLoading}</p>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-32 w-full rounded-xl" />
+          ))}
+        </div>
       ) : items.length === 0 ? (
         <p className="py-8 text-center text-sm text-fg-muted">{t.imageHistoryEmpty}</p>
       ) : (
