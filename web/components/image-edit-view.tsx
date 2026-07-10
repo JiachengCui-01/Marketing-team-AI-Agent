@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowLeft, Loader2, RotateCw, Download, Wand2 } from "lucide-react";
 import {
   reeditImage,
@@ -33,7 +33,6 @@ export function ImageEditView({
   const [instruction, setInstruction] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const imgRef = useRef<HTMLImageElement | null>(null);
 
   const src = generation.artifact_id ? artifactPreviewUrl(generation.artifact_id) : "";
   const filter = `brightness(${adj.brightness}%) contrast(${adj.contrast}%) saturate(${adj.saturation}%)`;
@@ -43,26 +42,41 @@ export function ImageEditView({
   }, [generation.artifact_id]);
 
   async function download() {
-    const image = imgRef.current;
-    if (!image) return;
+    if (!src) return;
     try {
-      const canvas = document.createElement("canvas");
-      const rotated = adj.rotate % 180 !== 0;
-      const w = image.naturalWidth;
-      const h = image.naturalHeight;
-      canvas.width = rotated ? h : w;
-      canvas.height = rotated ? w : h;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      ctx.filter = filter;
-      ctx.translate(canvas.width / 2, canvas.height / 2);
-      ctx.rotate((adj.rotate * Math.PI) / 180);
-      ctx.drawImage(image, -w / 2, -h / 2);
-      const url = canvas.toDataURL("image/png");
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = generation.filename || "marketing.png";
-      a.click();
+      // Fetch the artifact as a blob (auth token is in the query) and draw from an
+      // object URL — a same-origin source, so the canvas stays untainted and we avoid
+      // the crossOrigin cache pitfall that breaks the <img> display.
+      const res = await fetch(src);
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      try {
+        const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const im = new Image();
+          im.onload = () => resolve(im);
+          im.onerror = reject;
+          im.src = objectUrl;
+        });
+        const canvas = document.createElement("canvas");
+        const rotated = adj.rotate % 180 !== 0;
+        const w = image.naturalWidth;
+        const h = image.naturalHeight;
+        canvas.width = rotated ? h : w;
+        canvas.height = rotated ? w : h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.filter = filter;
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate((adj.rotate * Math.PI) / 180);
+        ctx.drawImage(image, -w / 2, -h / 2);
+        const url = canvas.toDataURL("image/png");
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = generation.filename || "marketing.png";
+        a.click();
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
     } catch (e) {
       setError(localizeError(e, locale));
     }
@@ -113,10 +127,9 @@ export function ImageEditView({
             {src ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                ref={imgRef}
                 src={src}
-                crossOrigin="anonymous"
                 alt={generation.prompt || "generated"}
+                decoding="async"
                 style={{ filter, transform: `rotate(${adj.rotate}deg)` }}
                 className="max-h-[46vh] w-auto rounded"
               />

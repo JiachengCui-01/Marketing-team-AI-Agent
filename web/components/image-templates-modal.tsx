@@ -167,6 +167,14 @@ export function ImageTemplatesModal({
     setToolPage(0);
   }
 
+  function clearTemplate() {
+    // Click an applied template again to un-apply it.
+    setSelected(null);
+    setTexts([]);
+    setScale(1);
+    setOffset({ x: 0, y: 0 });
+  }
+
   async function handleUpload(file: File) {
     setError(null);
     setBgRemoved(false);
@@ -314,7 +322,7 @@ export function ImageTemplatesModal({
                       return (
                         <button
                           key={tpl.id}
-                          onClick={() => selectTemplate(tpl)}
+                          onClick={() => (active ? clearTemplate() : selectTemplate(tpl))}
                           className={`overflow-hidden rounded-lg border text-left transition ${
                             active ? "border-accent ring-1 ring-accent" : "border-border hover:bg-bg-elevated"
                           }`}
@@ -380,6 +388,7 @@ export function ImageTemplatesModal({
               <img
                 src={bgRemoved && cutoutArtifactId ? artifactPreviewUrl(cutoutArtifactId) : uploadPreviewUrl(upload.file_id)}
                 alt="uploaded"
+                crossOrigin="anonymous"
                 decoding="async"
                 className="max-h-[40vh] w-auto rounded object-contain"
               />
@@ -390,9 +399,8 @@ export function ImageTemplatesModal({
             )}
           </div>
 
-          {/* tool tabs with arrow navigation */}
-          {upload ? (
-            <div className="rounded-lg border border-border">
+          {/* tool tabs with arrow navigation — always visible (剪映-style) */}
+          <div className="rounded-lg border border-border">
               <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
                 <button
                   onClick={() => setToolPage((p) => (p - 1 + TOOL_PAGES.length) % TOOL_PAGES.length)}
@@ -442,24 +450,36 @@ export function ImageTemplatesModal({
 
                 {toolPage === 1 ? (
                   <div className="space-y-2">
+                    {!upload ? (
+                      <p className="text-xs text-fg-subtle">{t.imageUploadFirst}</p>
+                    ) : null}
                     <button
                       onClick={toggleBg}
-                      disabled={bgBusy}
+                      disabled={bgBusy || !upload}
                       className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-fg hover:opacity-90 disabled:opacity-40"
                     >
                       {bgBusy ? <Loader2 size={14} className="animate-spin" /> : bgRemoved ? <RotateCcw size={14} /> : <Scissors size={14} />}
                       {bgBusy ? t.imageRemovingBg : bgRemoved ? t.imageRestoreBg : t.imageRemoveBg}
                     </button>
-                    <p className="text-[11px] text-fg-subtle">{t.imageRemoveBgHint}</p>
                     {bgWarning ? <p className="text-[11px] text-danger">{bgWarning}</p> : null}
                   </div>
                 ) : null}
 
                 {toolPage === 2 ? (
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    <Slider label={t.imageBrightness} value={adjust.brightness} onChange={(v) => setAdjust((a) => ({ ...a, brightness: v }))} />
-                    <Slider label={t.imageContrast} value={adjust.contrast} onChange={(v) => setAdjust((a) => ({ ...a, contrast: v }))} />
-                    <Slider label={t.imageSaturation} value={adjust.saturation} onChange={(v) => setAdjust((a) => ({ ...a, saturation: v }))} />
+                  <div className="space-y-2">
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <Slider label={t.imageBrightness} value={adjust.brightness} onChange={(v) => setAdjust((a) => ({ ...a, brightness: v }))} />
+                      <Slider label={t.imageContrast} value={adjust.contrast} onChange={(v) => setAdjust((a) => ({ ...a, contrast: v }))} />
+                      <Slider label={t.imageSaturation} value={adjust.saturation} onChange={(v) => setAdjust((a) => ({ ...a, saturation: v }))} />
+                    </div>
+                    <div className="flex justify-end">
+                      <button
+                        onClick={() => setAdjust({ brightness: 100, contrast: 100, saturation: 100 })}
+                        className="rounded border border-border px-2 py-1 text-xs text-fg-muted hover:bg-bg-elevated"
+                      >
+                        {t.imageReset}
+                      </button>
+                    </div>
                   </div>
                 ) : null}
 
@@ -482,7 +502,6 @@ export function ImageTemplatesModal({
                 ) : null}
               </div>
             </div>
-          ) : null}
 
           {error ? <p className="text-sm text-danger">{error}</p> : null}
 

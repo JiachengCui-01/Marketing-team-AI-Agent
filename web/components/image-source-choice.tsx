@@ -93,7 +93,6 @@ export function ImageUploadWorkspace({
               {bgBusy ? <Loader2 size={14} className="animate-spin" /> : <Scissors size={14} />}
               {bgBusy ? t.imageRemovingBg : t.imageRemoveBg}
             </button>
-            <span className="text-[11px] text-fg-subtle leading-snug">{t.imageRemoveBgHint}</span>
           </div>
         )}
       </div>
