@@ -59,13 +59,40 @@ html, body {
 }
 
 @layer components {
-  /* Floating column panel (macOS grouped-card look). */
+  /* Floating column panel — frosted glass with a restrained accent halo (Codex-like). */
   .panel-card {
-    @apply rounded-2xl border border-border bg-bg-elevated shadow-sm overflow-hidden;
+    @apply rounded-2xl border border-border overflow-hidden;
+    background: rgb(var(--bg-elevated) / 0.72);
+    backdrop-filter: blur(14px) saturate(1.35);
+    -webkit-backdrop-filter: blur(14px) saturate(1.35);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.05),
+      0 10px 30px -20px rgb(0 0 0 / 0.45),
+      0 0 40px -22px rgb(var(--accent) / 0.30);
   }
-  /* Unified column header — same height + baseline across all three columns. */
+  /* Unified column header — frosted bar, same height + baseline across all columns. */
   .col-header {
-    @apply h-12 shrink-0 flex items-center gap-2 px-3 border-b border-border bg-bg-elevated/60 backdrop-blur;
+    @apply h-12 shrink-0 flex items-center gap-2 px-3 border-b border-border;
+    background: rgb(var(--bg-elevated) / 0.55);
+    backdrop-filter: blur(14px) saturate(1.35);
+    -webkit-backdrop-filter: blur(14px) saturate(1.35);
+  }
+  /* Frosted top nav / other chrome bars (no halo, just glass). */
+  .frost-bar {
+    background: rgb(var(--bg-elevated) / 0.55);
+    backdrop-filter: blur(14px) saturate(1.35);
+    -webkit-backdrop-filter: blur(14px) saturate(1.35);
+    box-shadow: 0 6px 24px -20px rgb(var(--accent) / 0.30);
+  }
+  /* Modal / floating dialog — stronger frost + soft accent glow. */
+  .frost-panel {
+    background: rgb(var(--bg-elevated) / 0.82);
+    backdrop-filter: blur(22px) saturate(1.5);
+    -webkit-backdrop-filter: blur(22px) saturate(1.5);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.07),
+      0 24px 60px -28px rgb(0 0 0 / 0.55),
+      0 0 60px -26px rgb(var(--accent) / 0.35);
   }
   /* Ghost icon/label button: bg + color shift on hover, subtle press. */
   .btn-ghost {

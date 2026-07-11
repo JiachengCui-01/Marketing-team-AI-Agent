@@ -565,6 +565,15 @@ export function useI18n() {
 
 export function localizeError(error: unknown, locale: Locale): string {
   const raw = error instanceof Error ? error.message : String(error);
+
+  // Network-level failures (server down / unreachable) surface as "Failed to fetch"
+  // or "Load failed" — turn that into a clear, actionable message.
+  if (/failed to fetch|load failed|networkerror|fetch failed/i.test(raw)) {
+    return locale === "zh"
+      ? "无法连接服务器，请确认后端服务已启动后重试。"
+      : "Cannot reach the server. Make sure the backend is running, then retry.";
+  }
+
   if (locale === "zh") return raw;
 
   const exact: Record<string, string> = {
