@@ -294,7 +294,7 @@ export function ImageEditView({
       {/* AI re-edit — pinned at the bottom like the chat input */}
       <div className="border-t border-border bg-bg-elevated/60 backdrop-blur">
         <div className="max-w-3xl mx-auto px-4 py-3">
-          <div className="flex items-end gap-2 rounded-xl border border-border bg-bg-elevated focus-within:border-accent transition shadow-sm">
+          <div className="input-shell flex items-end gap-2">
             <div className="flex items-center gap-1.5 pl-3 text-xs text-fg-subtle">
               <Wand2 size={14} className="text-accent" />
             </div>

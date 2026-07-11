@@ -85,7 +85,7 @@ export function ChatPanel({
             onRemove={onRemoveAttached}
             onPreview={onPreviewUpload}
           />
-          <div className="flex items-end gap-2 rounded-xl border border-border bg-bg-elevated focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20 transition shadow-sm">
+          <div className="input-shell flex items-end gap-2">
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}

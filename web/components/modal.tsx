@@ -92,7 +92,7 @@ export function Modal({
     >
       <section
         ref={panelRef}
-        className={`frost-panel w-full ${wide ? "max-w-3xl" : "max-w-2xl"} max-h-[calc(100vh-2rem)] overflow-y-auto rounded-2xl border border-border p-5`}
+        className={`w-full ${wide ? "max-w-3xl" : "max-w-2xl"} max-h-[calc(100vh-2rem)] overflow-y-auto rounded-2xl border border-border bg-bg-elevated p-5 shadow-xl`}
         style={{
           transformOrigin: origin,
           transform: reduce ? undefined : shown ? "scale(1)" : "scale(0.72)",

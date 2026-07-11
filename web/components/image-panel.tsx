@@ -238,7 +238,7 @@ export function MarketingImagePanel({
       {/* integrated skills + input + actions */}
       <div className="border-t border-border bg-bg-elevated/60 backdrop-blur">
         <div className="max-w-3xl mx-auto px-4 py-3">
-          <div className="rounded-xl border border-border bg-bg-elevated shadow-sm overflow-hidden">
+          <div className="input-shell overflow-hidden">
             {/* skills — collapsible card attached to the top of the input */}
             <button
               onClick={() => setSkillsOpen((v) => !v)}
