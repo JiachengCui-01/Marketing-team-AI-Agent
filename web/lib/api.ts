@@ -1,5 +1,24 @@
-export const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
+// In production the frontend should prefer the same-origin `/api` rewrite unless
+// NEXT_PUBLIC_API_BASE is explicitly configured. Falling back to 127.0.0.1 in a
+// browser points at the user's own machine and causes template/refine requests to
+// fail with "Failed to fetch".
+const CONFIGURED_API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
+
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+}
+
+function shouldForceSameOriginApi(configured: string): boolean {
+  if (!configured || typeof window === "undefined") return false;
+  try {
+    const host = new URL(configured).hostname;
+    return isLoopbackHost(host) && !isLoopbackHost(window.location.hostname);
+  } catch {
+    return false;
+  }
+}
+
+export const API_BASE = shouldForceSameOriginApi(CONFIGURED_API_BASE) ? "" : CONFIGURED_API_BASE;
 
 const TOKEN_KEY = "marketing-agent-auth-token";
 
@@ -22,9 +41,14 @@ function authHeaders(extra: HeadersInit = {}): HeadersInit {
 function withToken(url: string): string {
   const token = getAuthToken();
   if (!token) return url;
-  const next = new URL(url);
+  const next = new URL(url, urlBase());
   next.searchParams.set("token", token);
   return next.toString();
+}
+
+function urlBase(): string {
+  if (typeof window !== "undefined") return window.location.origin;
+  return "http://127.0.0.1:8000";
 }
 
 async function parseJsonError(res: Response): Promise<string> {
@@ -163,7 +187,7 @@ export async function deleteMe(confirmation: string): Promise<void> {
 }
 
 export async function lookupAvatar(account: string): Promise<{ exists: boolean; avatar: string | null; username: string | null }> {
-  const url = new URL(`${API_BASE}/api/auth/avatar`);
+  const url = new URL(`${API_BASE}/api/auth/avatar`, urlBase());
   url.searchParams.set("account", account);
   const res = await fetch(url);
   if (!res.ok) throw new Error(await parseJsonError(res));
@@ -616,7 +640,7 @@ export function streamUrl(
   prompt: string,
   fileIds: string[] = [],
 ): string {
-  const url = new URL(`${API_BASE}/api/sessions/${sessionId}/stream`);
+  const url = new URL(`${API_BASE}/api/sessions/${sessionId}/stream`, urlBase());
   url.searchParams.set("prompt", prompt);
   if (fileIds.length > 0) {
     url.searchParams.set("file_ids", fileIds.join(","));

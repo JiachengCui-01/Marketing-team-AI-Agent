@@ -222,7 +222,18 @@ export function ImageTemplatesModal({
   const opts: ComposeOpts = { productImg, productScale: scale, productOffset: offset, adjust, texts };
 
   async function confirmGenerate() {
-    if (!selected || !upload) return;
+    if (!selected) {
+      setError(t.imageSelectTemplateFirst);
+      return;
+    }
+    if (!upload) {
+      setError(t.imageUploadFirst);
+      return;
+    }
+    if (!productImg) {
+      setError(t.loadingPreview);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -507,7 +518,7 @@ export function ImageTemplatesModal({
 
           <button
             onClick={confirmGenerate}
-            disabled={busy || !selected || !upload}
+            disabled={busy || !selected || !upload || !productImg}
             className="btn-accent w-full px-4 py-2 text-sm"
           >
             {busy ? <Loader2 size={15} className="animate-spin text-feature-image" /> : null}
