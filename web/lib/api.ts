@@ -545,11 +545,22 @@ export async function saveComposedImage(payload: {
   style_key?: string | null;
   prompt?: string | null;
 }): Promise<ImageGeneration> {
-  const res = await fetch(`${API_BASE}/api/image/compose-save`, {
+  const requestInit: RequestInit = {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
-  });
+  };
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/api/image/compose-save`, requestInit);
+  } catch (primaryError) {
+    if (typeof window === "undefined") throw primaryError;
+    try {
+      res = await fetch("/api/image/compose-save", requestInit);
+    } catch {
+      throw primaryError;
+    }
+  }
   if (!res.ok) throw new Error(await parseJsonError(res));
   return res.json();
 }

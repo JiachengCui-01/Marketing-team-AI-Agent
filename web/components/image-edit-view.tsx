@@ -14,7 +14,13 @@ import {
   Crop,
   RefreshCw,
 } from "lucide-react";
-import { reeditImage, artifactPreviewUrl, type ImageGeneration } from "@/lib/api";
+import {
+  reeditImage,
+  artifactPreviewUrl,
+  saveComposedImage,
+  uploadFile,
+  type ImageGeneration,
+} from "@/lib/api";
 import { localizeError, useI18n } from "@/lib/i18n";
 import { LoadingCard } from "@/components/ui/spinner";
 
@@ -61,13 +67,69 @@ export function ImageEditView({
 
   const [instruction, setInstruction] = useState("");
   const [busy, setBusy] = useState(false);
+  const [savingVersion, setSavingVersion] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [displaySrc, setDisplaySrc] = useState("");
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const src = generation.artifact_id ? artifactPreviewUrl(generation.artifact_id) : "";
   const presetFragment = FILTER_PRESETS.find((p) => p.key === preset)?.fragment ?? "";
   const filter =
     `brightness(${adjust.brightness}%) contrast(${adjust.contrast}%) saturate(${adjust.saturation}%) ${presetFragment}`.trim();
   const cssTransform = `rotate(${transform.rotate}deg) scaleX(${transform.flipH ? -1 : 1}) scaleY(${transform.flipV ? -1 : 1})`;
+
+  useEffect(() => {
+    if (!src) {
+      setDisplaySrc("");
+      setPreviewLoading(false);
+      return;
+    }
+    let cancelled = false;
+    let pendingObjectUrl: string | null = null;
+    setDisplaySrc("");
+    setPreviewLoading(true);
+    setError(null);
+
+    async function loadDecodedPreview() {
+      try {
+        const res = await fetch(src, { cache: "force-cache" });
+        if (!res.ok) throw new Error(`preview ${res.status}`);
+        const blob = await res.blob();
+        pendingObjectUrl = URL.createObjectURL(blob);
+        const image = new Image();
+        image.decoding = "sync";
+        image.src = pendingObjectUrl;
+        if (image.decode) {
+          await image.decode();
+        } else {
+          await new Promise<void>((resolve, reject) => {
+            image.onload = () => resolve();
+            image.onerror = () => reject(new Error("image load failed"));
+          });
+        }
+        if (cancelled) return;
+        setDisplaySrc(pendingObjectUrl);
+        pendingObjectUrl = null;
+      } catch (e) {
+        if (!cancelled) {
+          setDisplaySrc(src);
+          setError(localizeError(e, locale));
+        }
+      } finally {
+        if (!cancelled) setPreviewLoading(false);
+      }
+    }
+
+    loadDecodedPreview();
+    return () => {
+      cancelled = true;
+      if (pendingObjectUrl) URL.revokeObjectURL(pendingObjectUrl);
+      setDisplaySrc((current) => {
+        if (current.startsWith("blob:")) URL.revokeObjectURL(current);
+        return "";
+      });
+    };
+  }, [src, locale]);
 
   // A new underlying image (e.g. AI re-edit result) starts from clean edits.
   useEffect(() => {
@@ -84,8 +146,10 @@ export function ImageEditView({
     if (generation.artifact_id !== baseGen.artifact_id) onReplace(baseGen);
   }
 
-  async function download() {
+  async function saveVersion() {
     if (!src) return;
+    setSavingVersion(true);
+    setError(null);
     try {
       // Fetch as a blob (token in query) → object URL: same-origin, untainted canvas.
       const res = await fetch(src);
@@ -111,16 +175,31 @@ export function ImageEditView({
         ctx.rotate((transform.rotate * Math.PI) / 180);
         ctx.scale(transform.flipH ? -1 : 1, transform.flipV ? -1 : 1);
         ctx.drawImage(image, -w / 2, -h / 2);
-        const url = canvas.toDataURL("image/png");
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = generation.filename || "marketing.png";
-        a.click();
+        const editedBlob = await new Promise<Blob | null>((resolve) =>
+          canvas.toBlob(resolve, "image/png")
+        );
+        if (!editedBlob) throw new Error("canvas export failed");
+        const file = new File([editedBlob], generation.filename || "refined_marketing.png", {
+          type: "image/png",
+        });
+        const upload = await uploadFile(file);
+        const gen = await saveComposedImage({
+          file_id: upload.file_id,
+          style_key: generation.style_key || "generic",
+          prompt: generation.prompt || "Refined image version",
+        });
+        if (!gen.ok) {
+          setError(gen.message || t.imageGenFailed);
+          return;
+        }
+        onReplace(gen);
       } finally {
         URL.revokeObjectURL(objectUrl);
       }
     } catch (e) {
       setError(localizeError(e, locale));
+    } finally {
+      setSavingVersion(false);
     }
   }
 
@@ -167,19 +246,24 @@ export function ImageEditView({
         <div className="max-w-3xl mx-auto px-4 py-6 space-y-4">
           {/* image frame */}
           <div className="relative flex justify-center rounded-xl border border-border bg-bg-subtle p-4">
-            {src ? (
+            {displaySrc ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={src}
+                src={displaySrc}
                 alt={generation.prompt || "generated"}
-                decoding="async"
+                decoding="sync"
                 style={{ filter, transform: cssTransform }}
                 className="max-h-[44vh] w-auto rounded"
               />
             ) : null}
-            {busy ? (
+            {previewLoading ? (
               <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-bg/60 backdrop-blur-sm animate-fade-in">
-                <LoadingCard label={t.imageReedecting} variant="image" />
+                <LoadingCard label={t.loadingPreview} variant="image" />
+              </div>
+            ) : null}
+            {busy || savingVersion ? (
+              <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-bg/60 backdrop-blur-sm animate-fade-in">
+                <LoadingCard label={savingVersion ? t.saving : t.imageReedecting} variant="image" />
               </div>
             ) : null}
           </div>
@@ -190,9 +274,13 @@ export function ImageEditView({
               <RefreshCw size={14} />
               {t.imageResetAll}
             </button>
-            <button onClick={download} className="btn-accent px-3 py-2 text-sm">
-              <Download size={14} />
-              {t.imageSaveVersion}
+            <button
+              onClick={saveVersion}
+              disabled={savingVersion || previewLoading || !displaySrc}
+              className="btn-accent px-3 py-2 text-sm disabled:opacity-50"
+            >
+              {savingVersion ? <Loader2 size={14} className="animate-spin text-feature-image" /> : <Download size={14} />}
+              {savingVersion ? t.saving : t.imageSaveVersion}
             </button>
           </div>
 
@@ -303,13 +391,13 @@ export function ImageEditView({
               onChange={(e) => setInstruction(e.target.value)}
               rows={1}
               placeholder={t.imageAiReeditPlaceholder}
-              disabled={busy}
+              disabled={busy || savingVersion}
               className="flex-1 resize-none bg-transparent px-1 py-3 text-sm placeholder:text-fg-subtle focus:outline-none disabled:opacity-50 max-h-40"
               style={{ minHeight: 48 }}
             />
             <button
               onClick={aiReedit}
-              disabled={busy || !instruction.trim()}
+              disabled={busy || savingVersion || !instruction.trim()}
               className="m-1.5 inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent px-3.5 h-9 text-accent-fg text-sm font-medium hover:opacity-90 transition disabled:opacity-40"
             >
               {busy ? <Loader2 size={15} className="animate-spin text-feature-image" /> : <Wand2 size={15} />}

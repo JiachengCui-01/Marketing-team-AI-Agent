@@ -35,9 +35,7 @@ def optimized_preview(src_path: str, cache_key: str) -> tuple[str, str]:
 
         with Image.open(src) as im:
             im.load()
-            has_alpha = im.mode in ("RGBA", "LA", "P") and (
-                im.mode != "P" or "transparency" in im.info
-            )
+            has_alpha = _has_visible_alpha(im)
             if max(im.size) > MAX_EDGE:
                 im.thumbnail((MAX_EDGE, MAX_EDGE), Image.LANCZOS)
 
@@ -65,3 +63,14 @@ def _mime_for(suffix: str) -> str:
         ".jpeg": "image/jpeg",
         ".webp": "image/webp",
     }.get(suffix, "application/octet-stream")
+
+
+def _has_visible_alpha(im) -> bool:
+    """Return true only when the image contains at least one transparent pixel."""
+    if im.mode in {"RGBA", "LA"}:
+        alpha = im.getchannel("A")
+        return alpha.getextrema()[0] < 255
+    if im.mode == "P" and "transparency" in im.info:
+        alpha = im.convert("RGBA").getchannel("A")
+        return alpha.getextrema()[0] < 255
+    return False
