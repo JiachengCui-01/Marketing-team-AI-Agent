@@ -3,6 +3,7 @@
 // browser points at the user's own machine and causes template/refine requests to
 // fail with "Failed to fetch".
 const CONFIGURED_API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
+const DEFAULT_REMOTE_API_BASE = "https://marketing-agent-api-ufgx.onrender.com";
 
 function isLoopbackHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
@@ -49,6 +50,15 @@ function withToken(url: string): string {
 function urlBase(): string {
   if (typeof window !== "undefined") return window.location.origin;
   return "http://127.0.0.1:8000";
+}
+
+function apiCandidates(path: string): string[] {
+  const bases =
+    typeof window === "undefined"
+      ? [API_BASE || "http://127.0.0.1:8000"]
+      : [API_BASE, "", DEFAULT_REMOTE_API_BASE];
+  const urls = bases.map((base) => (base ? `${base}${path}` : path));
+  return Array.from(new Set(urls));
 }
 
 async function parseJsonError(res: Response): Promise<string> {
@@ -313,25 +323,18 @@ async function uploadTo(url: string, file: File): Promise<Response> {
 }
 
 export async function uploadFile(file: File): Promise<UploadResponse> {
-  let res: Response;
-  try {
-    res = await uploadTo(`${API_BASE}/api/upload`, file);
-  } catch (primaryError) {
-    // Browser-side "Failed to fetch" can happen before the API returns a status
-    // (transient CORS/network/CDN path issues). Retry via the same-origin Next
-    // rewrite so uploads are not blocked by the direct cross-origin path.
-    if (typeof window === "undefined") throw primaryError;
+  let lastError: unknown = null;
+  for (const url of apiCandidates("/api/upload")) {
     try {
-      res = await uploadTo("/api/upload", file);
-    } catch {
-      throw primaryError;
+      const res = await uploadTo(url, file);
+      if (res.ok) return res.json();
+      const detail = await res.text().catch(() => "");
+      lastError = new Error(`upload ${res.status}: ${detail || res.statusText}`);
+    } catch (error) {
+      lastError = error;
     }
   }
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`upload ${res.status}: ${detail || res.statusText}`);
-  }
-  return res.json();
+  throw lastError instanceof Error ? lastError : new Error("upload failed");
 }
 
 export function uploadPreviewUrl(fileId: string): string {
@@ -574,19 +577,17 @@ export async function saveComposedImage(payload: {
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
   };
-  let res: Response;
-  try {
-    res = await fetch(`${API_BASE}/api/image/compose-save`, requestInit);
-  } catch (primaryError) {
-    if (typeof window === "undefined") throw primaryError;
+  let lastError: unknown = null;
+  for (const url of apiCandidates("/api/image/compose-save")) {
     try {
-      res = await fetch("/api/image/compose-save", requestInit);
-    } catch {
-      throw primaryError;
+      const res = await fetch(url, requestInit);
+      if (res.ok) return res.json();
+      lastError = new Error(await parseJsonError(res));
+    } catch (error) {
+      lastError = error;
     }
   }
-  if (!res.ok) throw new Error(await parseJsonError(res));
-  return res.json();
+  throw lastError instanceof Error ? lastError : new Error("compose save failed");
 }
 
 export async function reeditImage(payload: {
