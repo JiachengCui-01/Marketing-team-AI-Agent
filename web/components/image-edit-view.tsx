@@ -147,55 +147,51 @@ export function ImageEditView({
   }
 
   async function saveVersion() {
-    if (!src) return;
+    const imageSource = displaySrc || src;
+    if (!imageSource) return;
     setSavingVersion(true);
     setError(null);
     try {
-      // Fetch as a blob (token in query) → object URL: same-origin, untainted canvas.
-      const res = await fetch(src);
-      const blob = await res.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      try {
-        const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-          const im = new Image();
-          im.onload = () => resolve(im);
-          im.onerror = reject;
-          im.src = objectUrl;
-        });
-        const canvas = document.createElement("canvas");
-        const rotated = transform.rotate % 180 !== 0;
-        const w = image.naturalWidth;
-        const h = image.naturalHeight;
-        canvas.width = rotated ? h : w;
-        canvas.height = rotated ? w : h;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-        ctx.filter = filter;
-        ctx.translate(canvas.width / 2, canvas.height / 2);
-        ctx.rotate((transform.rotate * Math.PI) / 180);
-        ctx.scale(transform.flipH ? -1 : 1, transform.flipV ? -1 : 1);
-        ctx.drawImage(image, -w / 2, -h / 2);
-        const editedBlob = await new Promise<Blob | null>((resolve) =>
-          canvas.toBlob(resolve, "image/png")
-        );
-        if (!editedBlob) throw new Error("canvas export failed");
-        const file = new File([editedBlob], generation.filename || "refined_marketing.png", {
-          type: "image/png",
-        });
-        const upload = await uploadFile(file);
-        const gen = await saveComposedImage({
-          file_id: upload.file_id,
-          style_key: generation.style_key || "generic",
-          prompt: generation.prompt || "Refined image version",
-        });
-        if (!gen.ok) {
-          setError(gen.message || t.imageGenFailed);
-          return;
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const im = new Image();
+        im.onload = () => resolve(im);
+        im.onerror = reject;
+        if (!imageSource.startsWith("blob:") && !imageSource.startsWith("data:")) {
+          im.crossOrigin = "anonymous";
         }
-        onReplace(gen);
-      } finally {
-        URL.revokeObjectURL(objectUrl);
+        im.src = imageSource;
+      });
+      const canvas = document.createElement("canvas");
+      const rotated = transform.rotate % 180 !== 0;
+      const w = image.naturalWidth;
+      const h = image.naturalHeight;
+      canvas.width = rotated ? h : w;
+      canvas.height = rotated ? w : h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.filter = filter;
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate((transform.rotate * Math.PI) / 180);
+      ctx.scale(transform.flipH ? -1 : 1, transform.flipV ? -1 : 1);
+      ctx.drawImage(image, -w / 2, -h / 2);
+      const editedBlob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob(resolve, "image/png")
+      );
+      if (!editedBlob) throw new Error("canvas export failed");
+      const file = new File([editedBlob], generation.filename || "refined_marketing.png", {
+        type: "image/png",
+      });
+      const upload = await uploadFile(file);
+      const gen = await saveComposedImage({
+        file_id: upload.file_id,
+        style_key: generation.style_key || "generic",
+        prompt: generation.prompt || "Refined image version",
+      });
+      if (!gen.ok) {
+        setError(gen.message || t.imageGenFailed);
+        return;
       }
+      onReplace(gen);
     } catch (e) {
       setError(localizeError(e, locale));
     } finally {
