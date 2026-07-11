@@ -566,6 +566,12 @@ export function useI18n() {
 }
 
 export function localizeError(error: unknown, locale: Locale): string {
+  if (typeof Event !== "undefined" && error instanceof Event) {
+    return locale === "zh"
+      ? "图片加载失败，请刷新后重试。"
+      : "Image loading failed. Please refresh and try again.";
+  }
+
   const raw = error instanceof Error ? error.message : String(error);
 
   // Network-level failures (server down / unreachable) surface as "Failed to fetch"

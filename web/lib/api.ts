@@ -9,17 +9,18 @@ function isLoopbackHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
 
-function shouldForceSameOriginApi(configured: string): boolean {
+function shouldUseSameOriginApi(configured: string): boolean {
   if (!configured || typeof window === "undefined") return false;
+  if (isLoopbackHost(window.location.hostname)) return false;
   try {
-    const host = new URL(configured).hostname;
-    return isLoopbackHost(host) && !isLoopbackHost(window.location.hostname);
+    const configuredUrl = new URL(configured);
+    return configuredUrl.origin !== window.location.origin;
   } catch {
     return false;
   }
 }
 
-export const API_BASE = shouldForceSameOriginApi(CONFIGURED_API_BASE) ? "" : CONFIGURED_API_BASE;
+export const API_BASE = shouldUseSameOriginApi(CONFIGURED_API_BASE) ? "" : CONFIGURED_API_BASE;
 
 const TOKEN_KEY = "marketing-agent-auth-token";
 
