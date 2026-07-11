@@ -222,7 +222,7 @@ function PreviewImage({ src, alt }: { src: string; alt: string }) {
   const [loaded, setLoaded] = useState(false);
   return (
     <div className="relative w-full h-full flex items-center justify-center overflow-auto p-4">
-      {!loaded ? <Skeleton className="absolute inset-4 rounded-xl" /> : null}
+      {!loaded ? <Skeleton variant="preview" className="absolute inset-4 rounded-xl" /> : null}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={src}
@@ -266,7 +266,7 @@ function CsvPreview({ url }: { url: string }) {
     return (
       <div className="space-y-1.5 p-3">
         {Array.from({ length: 8 }).map((_, i) => (
-          <Skeleton key={i} className="h-5 w-full" />
+          <Skeleton key={i} variant="preview" className="h-5 w-full" />
         ))}
       </div>
     );

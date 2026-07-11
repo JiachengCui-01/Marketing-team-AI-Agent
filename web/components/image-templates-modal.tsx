@@ -356,7 +356,7 @@ export function ImageTemplatesModal({
                 : "border-accent/40 bg-accent/10 text-accent hover:bg-accent/15"
             }`}
           >
-            {uploading ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
+            {uploading ? <Loader2 size={15} className="animate-spin text-feature-analytics" /> : <Upload size={15} />}
             <span>{t.imageUploadButton}</span>
             <input
               type="file"
@@ -458,7 +458,7 @@ export function ImageTemplatesModal({
                       disabled={bgBusy || !upload}
                       className="btn-accent px-3 py-2 text-sm"
                     >
-                      {bgBusy ? <Loader2 size={14} className="animate-spin" /> : bgRemoved ? <RotateCcw size={14} /> : <Scissors size={14} />}
+                      {bgBusy ? <Loader2 size={14} className="animate-spin text-feature-image" /> : bgRemoved ? <RotateCcw size={14} /> : <Scissors size={14} />}
                       {bgBusy ? t.imageRemovingBg : bgRemoved ? t.imageRestoreBg : t.imageRemoveBg}
                     </button>
                     {bgWarning ? <p className="text-[11px] text-danger">{bgWarning}</p> : null}
@@ -510,7 +510,7 @@ export function ImageTemplatesModal({
             disabled={busy || !selected || !upload}
             className="btn-accent w-full px-4 py-2 text-sm"
           >
-            {busy ? <Loader2 size={15} className="animate-spin" /> : null}
+            {busy ? <Loader2 size={15} className="animate-spin text-feature-image" /> : null}
             {t.imageConfirmGenerate}
           </button>
         </div>

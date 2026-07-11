@@ -88,6 +88,77 @@ html, body {
     @apply absolute inset-0 -translate-x-full animate-shimmer;
     background: linear-gradient(90deg, transparent, rgb(var(--fg) / 0.06), transparent);
   }
+  .skeleton-news {
+    background: linear-gradient(90deg, rgb(var(--feature-news) / 0.08), rgb(var(--bg-subtle)), rgb(var(--feature-news) / 0.05));
+  }
+  .skeleton-image {
+    background: radial-gradient(circle at 18% 50%, rgb(var(--feature-image) / 0.10), transparent 28%), rgb(var(--bg-subtle));
+  }
+  .skeleton-preview {
+    background: linear-gradient(135deg, rgb(var(--feature-research) / 0.08), rgb(var(--bg-subtle)));
+  }
+  .loading-orb {
+    @apply relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl;
+  }
+  .loading-orb::before {
+    content: "";
+    @apply absolute inset-0 rounded-xl opacity-70;
+    background: radial-gradient(circle, rgb(var(--accent) / 0.18), transparent 68%);
+  }
+  .loading-orb-default::before,
+  .loading-orb-account::before,
+  .loading-orb-chat::before {
+    background: radial-gradient(circle, rgb(var(--feature-content) / 0.18), transparent 68%);
+  }
+  .loading-orb-upload::before {
+    background: linear-gradient(180deg, rgb(var(--feature-analytics) / 0.20), transparent 72%);
+  }
+  .loading-orb-news::before {
+    background: radial-gradient(circle, rgb(var(--feature-news) / 0.18), transparent 70%);
+  }
+  .loading-orb-image::before {
+    background: radial-gradient(circle at 35% 35%, rgb(var(--feature-image) / 0.24), transparent 70%);
+  }
+  .loading-orb-preview::before {
+    background: linear-gradient(135deg, rgb(var(--feature-research) / 0.18), transparent 70%);
+  }
+  .loading-card {
+    @apply relative flex min-w-[220px] flex-col items-center gap-3 overflow-hidden rounded-2xl border border-border bg-bg-elevated/80 px-5 py-4 shadow-sm backdrop-blur;
+  }
+  .loading-card::before {
+    content: "";
+    @apply absolute inset-0 opacity-60;
+    background: radial-gradient(circle at 50% 0%, rgb(var(--accent) / 0.10), transparent 60%);
+  }
+  .loading-card-news::before {
+    background: linear-gradient(120deg, rgb(var(--feature-news) / 0.12), transparent 55%);
+  }
+  .loading-card-image::before {
+    background: radial-gradient(circle at 50% 20%, rgb(var(--feature-image) / 0.16), transparent 62%);
+  }
+  .loading-card-upload::before {
+    background: linear-gradient(180deg, rgb(var(--feature-analytics) / 0.13), transparent 62%);
+  }
+  .loading-card > * {
+    @apply relative z-10;
+  }
+  .loading-rail {
+    @apply relative h-1 w-36 overflow-hidden rounded-full bg-bg-subtle;
+  }
+  .loading-rail::after {
+    content: "";
+    @apply absolute inset-y-0 left-0 w-1/2 animate-rail-sweep rounded-full;
+    background: linear-gradient(90deg, transparent, rgb(var(--accent) / 0.65), transparent);
+  }
+  .loading-card-news .loading-rail::after {
+    background: linear-gradient(90deg, transparent, rgb(var(--feature-news) / 0.70), transparent);
+  }
+  .loading-card-image .loading-rail::after {
+    background: linear-gradient(90deg, transparent, rgb(var(--feature-image) / 0.70), transparent);
+  }
+  .loading-card-upload .loading-rail::after {
+    background: linear-gradient(90deg, transparent, rgb(var(--feature-analytics) / 0.70), transparent);
+  }
 }
 
 /* Markdown polish inside chat bubbles */

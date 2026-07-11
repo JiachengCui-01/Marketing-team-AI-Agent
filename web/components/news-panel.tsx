@@ -100,7 +100,7 @@ export function NewsPanel({ onBack }: { onBack: () => void }) {
               disabled={refreshing || !config || cancelled}
               className="btn-accent px-3 py-1.5 text-xs"
             >
-              {refreshing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+              {refreshing ? <Loader2 size={13} className="animate-spin text-feature-news" /> : <RefreshCw size={13} />}
               <span>{refreshing ? t.newsRefreshing : t.newsRefreshNow}</span>
             </button>
           </div>
@@ -109,11 +109,11 @@ export function NewsPanel({ onBack }: { onBack: () => void }) {
 
           {loading ? (
             <div className="space-y-2.5">
-              <Skeleton className="h-6 w-2/3" />
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-5/6" />
-              <Skeleton className="h-4 w-3/4" />
+              <Skeleton variant="news" className="h-6 w-2/3" />
+              <Skeleton variant="news" className="h-4 w-full" />
+              <Skeleton variant="news" className="h-4 w-full" />
+              <Skeleton variant="news" className="h-4 w-5/6" />
+              <Skeleton variant="news" className="h-4 w-3/4" />
             </div>
           ) : !config ? (
             <div className="text-center py-16">
@@ -266,7 +266,7 @@ function NewsSettingsDialog({
               disabled={cancelling || saving}
               className="inline-flex items-center gap-1.5 rounded-lg border border-danger/40 px-4 py-2 text-sm text-danger hover:bg-danger/10 disabled:opacity-40"
             >
-              {cancelling ? <Loader2 size={14} className="animate-spin" /> : null}
+              {cancelling ? <Loader2 size={14} className="animate-spin text-danger" /> : null}
               {t.newsCancelTask}
             </button>
           ) : null}
@@ -284,7 +284,7 @@ function NewsSettingsDialog({
               disabled={saving || cancelling}
               className="btn-accent px-4 py-2 text-sm"
             >
-              {saving ? <Loader2 size={14} className="animate-spin" /> : null}
+              {saving ? <Loader2 size={14} className="animate-spin text-feature-news" /> : null}
               {saving ? t.saving : t.save}
             </button>
           </div>

@@ -33,7 +33,7 @@ import { Modal } from "@/components/modal";
 import { ImageEditView } from "@/components/image-edit-view";
 import { ImageTemplatesModal } from "@/components/image-templates-modal";
 import { ImageUploadWorkspace } from "@/components/image-source-choice";
-import { Spinner } from "@/components/ui/spinner";
+import { LoadingCard } from "@/components/ui/spinner";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { PreviewItem } from "@/components/preview-panel";
 
@@ -212,7 +212,7 @@ export function MarketingImagePanel({
               <h1 className="mt-5 text-2xl font-semibold tracking-tight">{t.imageHeroTitle}</h1>
               <p className="mt-2 max-w-md text-sm text-fg-muted">{t.imageHeroBody}</p>
               <label className="btn-accent mt-5 cursor-pointer px-4 py-2.5 text-sm">
-                {uploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+                {uploading ? <Loader2 size={16} className="animate-spin text-feature-analytics" /> : <Upload size={16} />}
                 {t.imageUploadButton}
                 <input
                   type="file"
@@ -230,7 +230,7 @@ export function MarketingImagePanel({
         </div>
         {busy ? (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-bg/60 backdrop-blur-sm animate-fade-in">
-            <Spinner size={22} label={t.imageGenerating} />
+            <LoadingCard label={t.imageGenerating} variant="image" />
           </div>
         ) : null}
       </div>
@@ -292,7 +292,7 @@ export function MarketingImagePanel({
                     : "border-accent/40 bg-accent/10 text-accent hover:bg-accent/15"
                 }`}
               >
-                {uploading ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
+                {uploading ? <Loader2 size={15} className="animate-spin text-feature-analytics" /> : <Upload size={15} />}
                 <span className="truncate">{t.imageUploadButton}</span>
                 <input
                   type="file"
@@ -337,7 +337,7 @@ export function MarketingImagePanel({
                 disabled={busy || uploading}
                 className="btn-accent m-1 px-3.5 h-9 text-sm"
               >
-                {busy ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}
+                {busy ? <Loader2 size={15} className="animate-spin text-feature-image" /> : <Wand2 size={15} />}
                 <span>{busy ? t.imageGenerating : t.imageGenerate}</span>
               </button>
             </div>
@@ -407,7 +407,7 @@ function HistoryModal({
       {items === null ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-32 w-full rounded-xl" />
+            <Skeleton key={i} variant="image" className="h-32 w-full rounded-xl" />
           ))}
         </div>
       ) : items.length === 0 ? (

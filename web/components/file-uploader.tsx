@@ -63,7 +63,7 @@ export function FileUploader({
           className="btn-ghost border border-border px-2.5 py-1.5 text-xs disabled:opacity-50"
         >
           {busy ? (
-            <Loader2 size={14} className="animate-spin" />
+            <Loader2 size={14} className="animate-spin text-feature-analytics" />
           ) : (
             <Paperclip size={14} className="text-feature-content" />
           )}

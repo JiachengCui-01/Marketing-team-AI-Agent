@@ -90,7 +90,7 @@ export function ImageUploadWorkspace({
               disabled={bgBusy}
               className="btn-accent px-3 py-2 text-sm"
             >
-              {bgBusy ? <Loader2 size={14} className="animate-spin" /> : <Scissors size={14} />}
+              {bgBusy ? <Loader2 size={14} className="animate-spin text-feature-image" /> : <Scissors size={14} />}
               {bgBusy ? t.imageRemovingBg : t.imageRemoveBg}
             </button>
           </div>

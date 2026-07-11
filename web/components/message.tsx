@@ -138,16 +138,16 @@ function ArtifactChip({
 
 function TypingDots() {
   return (
-    <span className="inline-flex items-center gap-1 py-1">
+    <span className="inline-flex items-center gap-1.5 py-1" aria-label="thinking">
       <span
-        className="w-1.5 h-1.5 rounded-full bg-fg-muted animate-dot-pulse"
+        className="w-1.5 h-1.5 rounded-full bg-feature-content animate-dot-drift"
         style={{ animationDelay: "-0.32s" }}
       />
       <span
-        className="w-1.5 h-1.5 rounded-full bg-fg-muted animate-dot-pulse"
+        className="w-1.5 h-1.5 rounded-full bg-feature-content animate-dot-drift"
         style={{ animationDelay: "-0.16s" }}
       />
-      <span className="w-1.5 h-1.5 rounded-full bg-fg-muted animate-dot-pulse" />
+      <span className="w-1.5 h-1.5 rounded-full bg-feature-content animate-dot-drift" />
     </span>
   );
 }

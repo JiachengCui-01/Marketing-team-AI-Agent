@@ -505,7 +505,7 @@ export default function HomePage() {
   if (authLoading) {
     return (
       <main className="h-screen flex items-center justify-center bg-bg">
-        <Spinner size={22} label={t.loadingAccount} />
+        <Spinner size={22} label={t.loadingAccount} variant="account" />
       </main>
     );
   }

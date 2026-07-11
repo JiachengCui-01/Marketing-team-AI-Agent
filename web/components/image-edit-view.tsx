@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { reeditImage, artifactPreviewUrl, type ImageGeneration } from "@/lib/api";
 import { localizeError, useI18n } from "@/lib/i18n";
-import { Spinner } from "@/components/ui/spinner";
+import { LoadingCard } from "@/components/ui/spinner";
 
 const ADJUST_DEFAULT = { brightness: 100, contrast: 100, saturation: 100 };
 const TRANSFORM_DEFAULT = { rotate: 0, flipH: false, flipV: false };
@@ -179,7 +179,7 @@ export function ImageEditView({
             ) : null}
             {busy ? (
               <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-bg/60 backdrop-blur-sm animate-fade-in">
-                <Spinner size={22} label={t.imageReedecting} />
+                <LoadingCard label={t.imageReedecting} variant="image" />
               </div>
             ) : null}
           </div>
@@ -312,7 +312,7 @@ export function ImageEditView({
               disabled={busy || !instruction.trim()}
               className="m-1.5 inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent px-3.5 h-9 text-accent-fg text-sm font-medium hover:opacity-90 transition disabled:opacity-40"
             >
-              {busy ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}
+              {busy ? <Loader2 size={15} className="animate-spin text-feature-image" /> : <Wand2 size={15} />}
               <span>{busy ? t.imageReedecting : t.imageApply}</span>
             </button>
           </div>

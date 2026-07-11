@@ -108,7 +108,7 @@ export function ChatPanel({
               aria-label={t.send}
             >
               {busy ? (
-                <Loader2 size={16} className="animate-spin" />
+                <Loader2 size={16} className="animate-spin text-feature-content" />
               ) : (
                 <Send size={16} />
               )}
