@@ -18,11 +18,13 @@ export function Modal({
   children,
   onClose,
   wide,
+  size = "default",
 }: {
   title: string;
   children: React.ReactNode;
   onClose: () => void;
   wide?: boolean;
+  size?: "default" | "wide" | "settings";
 }) {
   const { t } = useI18n();
   const panelRef = useRef<HTMLElement | null>(null);
@@ -76,6 +78,7 @@ export function Modal({
   if (typeof document === "undefined") return null;
 
   const reduce = prefersReducedMotion();
+  const widthClass = size === "settings" ? "max-w-5xl" : wide || size === "wide" ? "max-w-3xl" : "max-w-2xl";
 
   return createPortal(
     <div
@@ -92,7 +95,7 @@ export function Modal({
     >
       <section
         ref={panelRef}
-        className={`w-full ${wide ? "max-w-3xl" : "max-w-2xl"} max-h-[calc(100vh-2rem)] overflow-y-auto rounded-2xl border border-border bg-bg-elevated p-5 shadow-xl`}
+        className={`w-full ${widthClass} max-h-[calc(100vh-2rem)] overflow-y-auto rounded-2xl border border-border bg-bg-elevated p-5 shadow-xl`}
         style={{
           transformOrigin: origin,
           transform: reduce ? undefined : shown ? "scale(1)" : "scale(0.72)",

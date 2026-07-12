@@ -3,10 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Modal } from "@/components/modal";
 import {
+  Check,
   ChevronDown,
   HelpCircle,
+  Languages,
   LogOut,
   Minus,
+  Palette,
   Settings,
   ShieldAlert,
   Sparkles,
@@ -26,6 +29,7 @@ import {
 } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { LanguageToggle, localizeError, useI18n } from "@/lib/i18n";
+import { useTheme } from "next-themes";
 
 const REMEMBERED_KEY = "marketing-agent-remembered-accounts";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -601,28 +605,136 @@ function RememberedList({
 
 function SettingsDialog({ onClose }: { onClose: () => void }) {
   const { locale, setLocale, t } = useI18n();
+  const { theme, setTheme, resolvedTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  const languageRef = useRef<HTMLDivElement>(null);
+  const themeRef = useRef<HTMLDivElement>(null);
+  const activeTheme = mounted ? (theme === "system" ? resolvedTheme : theme) ?? "light" : "light";
+  const labels =
+    locale === "zh"
+      ? {
+          languageGroup: "语言与地区",
+          languageBody: "选择界面显示语言。",
+          themeGroup: "主题外观",
+          themeBody: "选择工作台视觉主题。",
+          light: "明亮",
+          dark: "暗色",
+          aurora: "极光",
+          crystal: "晴空",
+        }
+      : {
+          languageGroup: "Language",
+          languageBody: "Choose the interface language.",
+          themeGroup: "Appearance",
+          themeBody: "Choose the workspace visual theme.",
+          light: "Light",
+          dark: "Dark",
+          aurora: "Aurora",
+          crystal: "Crystal",
+        };
+  const navItems = [
+    { label: labels.languageGroup, icon: Languages, target: languageRef },
+    { label: labels.themeGroup, icon: Palette, target: themeRef },
+  ];
+  const themes = [
+    { id: "light", label: labels.light, preview: "theme-preview-light" },
+    { id: "dark", label: labels.dark, preview: "theme-preview-dark" },
+    { id: "aurora", label: labels.aurora, preview: "theme-preview-aurora" },
+    { id: "crystal", label: labels.crystal, preview: "theme-preview-crystal" },
+  ] as const;
+
+  useEffect(() => setMounted(true), []);
+
+  function scrollTo(ref: React.RefObject<HTMLDivElement>) {
+    ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   return (
-    <Modal title={t.settings} onClose={onClose}>
-      <div className="flex items-center justify-between rounded-lg border border-border bg-bg p-3">
-        <div>
-          <p className="text-sm font-medium">{t.language}</p>
-          <p className="text-xs text-fg-subtle">{locale === "zh" ? t.chinese : t.english}</p>
-        </div>
-        <div className="inline-flex rounded-lg border border-border bg-bg-elevated p-1">
-          <button
-            type="button"
-            onClick={() => setLocale("zh")}
-            className={cn("rounded-md px-3 py-1.5 text-xs", locale === "zh" ? "bg-accent text-accent-fg" : "text-fg-muted")}
-          >
-            {t.chinese}
-          </button>
-          <button
-            type="button"
-            onClick={() => setLocale("en")}
-            className={cn("rounded-md px-3 py-1.5 text-xs", locale === "en" ? "bg-accent text-accent-fg" : "text-fg-muted")}
-          >
-            {t.english}
-          </button>
+    <Modal title={t.settings} onClose={onClose} size="settings">
+      <div className="grid min-h-[520px] gap-5 md:grid-cols-[190px_minmax(0,1fr)]">
+        <nav className="rounded-xl border border-border bg-bg/70 p-2">
+          <div className="space-y-1">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => scrollTo(item.target)}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-fg-muted transition hover:bg-bg-elevated hover:text-fg"
+                >
+                  <Icon size={15} />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </nav>
+
+        <div className="max-h-[64vh] space-y-4 overflow-y-auto pr-1">
+          <section ref={languageRef} className="rounded-xl border border-border bg-bg/70 p-4 scroll-mt-2">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold">{labels.languageGroup}</p>
+                <p className="mt-1 text-xs text-fg-subtle">{labels.languageBody}</p>
+              </div>
+              <div className="inline-flex rounded-lg border border-border bg-bg-elevated p-1">
+                <button
+                  type="button"
+                  onClick={() => setLocale("zh")}
+                  className={cn("rounded-md px-3 py-1.5 text-xs transition", locale === "zh" ? "bg-accent text-accent-fg shadow-sm" : "text-fg-muted hover:bg-bg-subtle hover:text-fg")}
+                >
+                  {t.chinese}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLocale("en")}
+                  className={cn("rounded-md px-3 py-1.5 text-xs transition", locale === "en" ? "bg-accent text-accent-fg shadow-sm" : "text-fg-muted hover:bg-bg-subtle hover:text-fg")}
+                >
+                  {t.english}
+                </button>
+              </div>
+            </div>
+            <div className="rounded-lg border border-border/70 bg-bg-subtle/60 px-3 py-2 text-xs text-fg-muted">
+              {locale === "zh" ? t.chinese : t.english}
+            </div>
+          </section>
+
+          <section ref={themeRef} className="rounded-xl border border-border bg-bg/70 p-4 scroll-mt-2">
+            <div className="mb-4">
+              <p className="text-sm font-semibold">{labels.themeGroup}</p>
+              <p className="mt-1 text-xs text-fg-subtle">{labels.themeBody}</p>
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {themes.map((item) => {
+                const active = mounted && activeTheme === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setTheme(item.id)}
+                    className={cn(
+                      "overflow-hidden rounded-xl border text-left hover-lift",
+                      active ? "border-accent ring-1 ring-accent" : "border-border hover:bg-bg-elevated",
+                    )}
+                  >
+                    <div className={cn("theme-preview h-28 w-full bg-bg-subtle", item.preview)}>
+                      <div className="theme-preview-top" />
+                      <div className="theme-preview-body">
+                        <span />
+                        <span />
+                        <span />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 px-2 py-2">
+                      {active ? <Check size={13} className="text-accent" /> : null}
+                      <span className="text-xs font-medium">{item.label}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
         </div>
       </div>
     </Modal>

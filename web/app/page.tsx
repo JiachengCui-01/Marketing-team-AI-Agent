@@ -18,7 +18,6 @@ import { SessionSidebar } from "@/components/session-sidebar";
 import { NewsPanel } from "@/components/news-panel";
 import { MarketingImagePanel } from "@/components/image-panel";
 import { Spinner } from "@/components/ui/spinner";
-import { ThemeToggle } from "@/components/theme-toggle";
 import type { ChatMessage, MessageArtifact } from "@/components/message";
 import { deriveStatus } from "@/components/status-chip";
 import { useI18n } from "@/lib/i18n";
@@ -535,7 +534,6 @@ export default function HomePage() {
             </p>
           </div>
           <div className="ml-auto flex items-center gap-1">
-            <ThemeToggle />
             <UserMenu
               user={user}
               onUserChange={setUser}
