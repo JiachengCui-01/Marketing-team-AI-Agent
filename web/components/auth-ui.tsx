@@ -30,6 +30,7 @@ import {
 import { cn } from "@/lib/cn";
 import { LanguageToggle, localizeError, useI18n } from "@/lib/i18n";
 import { useTheme } from "next-themes";
+import { saveUserLocale, saveUserTheme, type UserTheme } from "@/lib/user-settings";
 
 const REMEMBERED_KEY = "marketing-agent-remembered-accounts";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -424,13 +425,13 @@ export function UserMenu({
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="inline-flex items-center gap-2 rounded-full border border-border bg-bg-elevated px-1.5 py-1 hover:bg-bg-subtle"
+          className="user-menu-trigger inline-flex items-center gap-2 rounded-full border border-border bg-bg-elevated px-1.5 py-1 hover:bg-bg-subtle"
         >
           <AvatarImage avatar={user.avatar} className="h-8 w-8" label={user.username} />
           <ChevronDown size={14} className="text-fg-muted" />
         </button>
         {open ? (
-          <div className="absolute right-0 top-11 z-[60] w-52 rounded-xl border border-border bg-bg-elevated p-1.5 shadow-lg">
+          <div className="user-menu-popover absolute right-0 top-11 z-[60] w-52 rounded-xl border border-border bg-bg-elevated p-1.5 shadow-lg">
             <div className="px-3 py-2">
               <p className="truncate text-sm font-medium">{user.username}</p>
               <p className="truncate text-xs text-fg-subtle">{user.account}</p>
@@ -459,7 +460,7 @@ export function UserMenu({
           </div>
         ) : null}
       </div>
-      {settingsOpen ? <SettingsDialog onClose={() => setSettingsOpen(false)} /> : null}
+      {settingsOpen ? <SettingsDialog userAccount={user.account} onClose={() => setSettingsOpen(false)} /> : null}
       {profileOpen ? (
         <ProfileDialog
           user={user}
@@ -603,7 +604,7 @@ function RememberedList({
   );
 }
 
-function SettingsDialog({ onClose }: { onClose: () => void }) {
+function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose: () => void }) {
   const { locale, setLocale, t } = useI18n();
   const { theme, setTheme, resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
@@ -649,6 +650,16 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
     ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  function chooseLocale(next: "zh" | "en") {
+    saveUserLocale(userAccount, next);
+    setLocale(next);
+  }
+
+  function chooseTheme(next: UserTheme) {
+    saveUserTheme(userAccount, next);
+    setTheme(next);
+  }
+
   return (
     <Modal title={t.settings} onClose={onClose} size="settings">
       <div className="grid min-h-[520px] gap-5 md:grid-cols-[190px_minmax(0,1fr)]">
@@ -681,14 +692,14 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
               <div className="inline-flex rounded-lg border border-border bg-bg-elevated p-1">
                 <button
                   type="button"
-                  onClick={() => setLocale("zh")}
+                  onClick={() => chooseLocale("zh")}
                   className={cn("rounded-md px-3 py-1.5 text-xs transition", locale === "zh" ? "bg-accent text-accent-fg shadow-sm" : "text-fg-muted hover:bg-bg-subtle hover:text-fg")}
                 >
                   {t.chinese}
                 </button>
                 <button
                   type="button"
-                  onClick={() => setLocale("en")}
+                  onClick={() => chooseLocale("en")}
                   className={cn("rounded-md px-3 py-1.5 text-xs transition", locale === "en" ? "bg-accent text-accent-fg shadow-sm" : "text-fg-muted hover:bg-bg-subtle hover:text-fg")}
                 >
                   {t.english}
@@ -712,7 +723,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => setTheme(item.id)}
+                    onClick={() => chooseTheme(item.id)}
                     className={cn(
                       "overflow-hidden rounded-xl border text-left hover-lift",
                       active ? "border-accent ring-1 ring-accent" : "border-border hover:bg-bg-elevated",

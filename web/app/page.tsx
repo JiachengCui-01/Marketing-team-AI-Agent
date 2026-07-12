@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
+import { useTheme } from "next-themes";
 import {
   AuthScreen,
   SwitchAccountPanel,
@@ -21,6 +22,7 @@ import { Spinner } from "@/components/ui/spinner";
 import type { ChatMessage, MessageArtifact } from "@/components/message";
 import { deriveStatus } from "@/components/status-chip";
 import { useI18n } from "@/lib/i18n";
+import { getUserLocale, getUserTheme } from "@/lib/user-settings";
 import { useSessionsStore } from "@/lib/sessions-store";
 import {
   API_BASE,
@@ -44,7 +46,8 @@ function newId() {
 }
 
 export default function HomePage() {
-  const { t } = useI18n();
+  const { t, setLocale } = useI18n();
+  const { setTheme } = useTheme();
   const store = useSessionsStore();
   const [user, setUser] = useState<UserProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -62,6 +65,14 @@ export default function HomePage() {
   const [leftWidth, setLeftWidth] = useState(LEFT_MIN_WIDTH);
   const [rightWidth, setRightWidth] = useState(RIGHT_MIN_WIDTH);
   const closeRef = useRef<(() => void) | null>(null);
+
+  const applyUserSettings = useCallback(
+    (profile: UserProfile) => {
+      setLocale(getUserLocale(profile.account));
+      setTheme(getUserTheme(profile.account));
+    },
+    [setLocale, setTheme],
+  );
 
   const activeKey = useCallback(
     (profile: UserProfile | null = user) =>
@@ -138,6 +149,7 @@ export default function HomePage() {
   useEffect(() => {
     getMe()
       .then((profile) => {
+        applyUserSettings(profile);
         setUser(profile);
         void store.refresh();
       })
@@ -147,7 +159,7 @@ export default function HomePage() {
       })
       .finally(() => setAuthLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [applyUserSettings]);
 
   const loadSession = useCallback(
     async (id: string) => {
@@ -471,6 +483,7 @@ export default function HomePage() {
   const handleAuthenticated = useCallback(
     (token: string, profile: UserProfile) => {
       setAuthToken(token);
+      applyUserSettings(profile);
       setUser(profile);
       setSwitchOpen(false);
       setView("chat");
@@ -481,7 +494,7 @@ export default function HomePage() {
       setAttached([]);
       void store.refresh();
     },
-    [store],
+    [applyUserSettings, store],
   );
 
   const handleLogout = useCallback(async () => {
@@ -503,12 +516,9 @@ export default function HomePage() {
 
   if (authLoading) {
     return (
-      <main className="h-screen flex items-center justify-center bg-gradient-to-br from-bg via-bg-subtle to-bg">
-        <div className="flex flex-col items-center gap-4 animate-fade-in">
-          <Spinner size={24} label={t.loadingAccount} variant="account" />
-          <div className="w-32 h-1 rounded-full bg-bg-elevated overflow-hidden">
-            <div className="h-full w-1/2 rounded-full bg-gradient-to-r from-accent/0 via-accent to-accent/0 animate-pulse" />
-          </div>
+      <main className="auth-loading-screen h-screen flex items-center justify-center bg-bg-subtle">
+        <div className="flex flex-col items-center justify-center gap-4 animate-fade-in">
+          <Spinner size={44} label={t.loadingAccount} variant="account" className="auth-loading-mark flex-col gap-3" />
         </div>
       </main>
     );
