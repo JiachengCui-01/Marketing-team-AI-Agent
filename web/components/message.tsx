@@ -43,14 +43,14 @@ export function MessageBubble({
   return (
     <div
       className={cn(
-        "flex gap-3 animate-fade-in",
+        "flex gap-3 animate-fade-in transition-all duration-300",
         isUser ? "flex-row-reverse" : "flex-row",
       )}
     >
       <div
         className={cn(
-          "shrink-0 w-8 h-8 rounded-full flex items-center justify-center",
-          isUser ? "bg-accent text-accent-fg" : "bg-bg-subtle text-fg-muted",
+          "shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-all duration-200",
+          isUser ? "bg-accent text-accent-fg shadow-md shadow-accent/30" : "bg-bg-subtle text-fg-muted",
         )}
         aria-hidden
       >
@@ -61,16 +61,16 @@ export function MessageBubble({
             <User size={16} />
           )
         ) : (
-          <Sparkles size={16} />
+          <Sparkles size={16} className="animate-float-soft" />
         )}
       </div>
 
       <div
         className={cn(
-          "max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm",
+          "max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-relaxed transition-all duration-300",
           isUser
-            ? "bg-accent text-accent-fg rounded-tr-sm"
-            : "bg-bg-elevated text-fg border border-border rounded-tl-sm",
+            ? "bg-accent text-accent-fg rounded-tr-sm shadow-lg shadow-accent/25 hover:shadow-xl hover:shadow-accent/35"
+            : "bg-bg-elevated text-fg border border-border rounded-tl-sm shadow-sm hover:shadow-md hover:border-accent/30",
         )}
       >
         {showStatus ? (
@@ -140,14 +140,14 @@ function TypingDots() {
   return (
     <span className="inline-flex items-center gap-1.5 py-1" aria-label="thinking">
       <span
-        className="w-1.5 h-1.5 rounded-full bg-feature-content animate-dot-drift"
-        style={{ animationDelay: "-0.32s" }}
+        className="w-2 h-2 rounded-full bg-feature-content animate-dot-drift shadow-sm"
+        style={{ animationDelay: "-0.36s" }}
       />
       <span
-        className="w-1.5 h-1.5 rounded-full bg-feature-content animate-dot-drift"
-        style={{ animationDelay: "-0.16s" }}
+        className="w-2 h-2 rounded-full bg-feature-content animate-dot-drift shadow-sm"
+        style={{ animationDelay: "-0.18s" }}
       />
-      <span className="w-1.5 h-1.5 rounded-full bg-feature-content animate-dot-drift" />
+      <span className="w-2 h-2 rounded-full bg-feature-content animate-dot-drift shadow-sm" />
     </span>
   );
 }

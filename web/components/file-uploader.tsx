@@ -60,14 +60,14 @@ export function FileUploader({
           type="button"
           onClick={() => inputRef.current?.click()}
           disabled={busy}
-          className="btn-ghost border border-border px-2.5 py-1.5 text-xs disabled:opacity-50"
+          className="btn-ghost border border-border px-2.5 py-1.5 text-xs disabled:opacity-50 transition-all duration-150 hover:border-accent/50 hover:shadow-sm"
         >
           {busy ? (
             <Loader2 size={14} className="animate-spin text-feature-analytics" />
           ) : (
-            <Paperclip size={14} className="text-feature-content" />
+            <Paperclip size={14} className="text-feature-content transition-transform duration-200" />
           )}
-          <span>{busy ? t.uploading : t.attachFiles}</span>
+          <span className="transition-colors duration-150">{busy ? t.uploading : t.attachFiles}</span>
         </button>
         <span className="text-[10px] text-fg-subtle">
           {t.fileTypes}
@@ -92,22 +92,22 @@ export function FileUploader({
             return (
               <div
                 key={f.file_id}
-                className="flex items-center gap-2 rounded-lg border border-border bg-bg-elevated px-2.5 py-1.5 text-xs"
+                className="flex items-center gap-2 rounded-lg border border-border bg-bg-elevated px-2.5 py-1.5 text-xs animate-scale-in transition-all duration-200 hover:bg-bg-elevated/60 hover:shadow-sm hover:border-accent/30"
               >
-                <Icon size={13} className="text-accent shrink-0" />
+                <Icon size={13} className="text-accent shrink-0 transition-transform duration-200" />
                 <button
                   onClick={() => onPreview?.(f)}
-                  className="truncate max-w-[18ch] hover:underline"
+                  className="truncate max-w-[18ch] hover:underline transition-colors duration-150"
                   title={f.original_name}
                 >
                   {f.original_name}
                 </button>
-                <span className="text-fg-subtle">
+                <span className="text-fg-subtle text-[10px]">
                   {(f.size / 1024).toFixed(0)} KB
                 </span>
                 <button
                   onClick={() => onRemove(f.file_id)}
-                  className="ml-0.5 text-fg-subtle hover:text-danger transition"
+                  className="ml-0.5 text-fg-subtle hover:text-danger hover:bg-danger/10 transition-all duration-150 rounded p-0.5"
                   aria-label={t.removeFile}
                 >
                   <X size={13} />

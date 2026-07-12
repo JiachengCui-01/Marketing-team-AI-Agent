@@ -30,10 +30,10 @@ export function Spinner({
   const accent = variantMeta[variant].accent;
   return (
     <span className={`inline-flex items-center gap-2 text-fg-subtle ${className}`}>
-      <span className={`loading-orb loading-orb-${variant}`} aria-hidden>
-        <Icon size={size} className={`${accent} ${variant === "default" ? "animate-spin" : "animate-float-soft"}`} />
+      <span className={`loading-orb loading-orb-${variant} animate-pulse-ring`} aria-hidden>
+        <Icon size={size} className={`${accent} ${variant === "default" ? "animate-spin" : "animate-float-soft"} transition-all duration-300`} />
       </span>
-      {label ? <span className="text-sm">{label}</span> : null}
+      {label ? <span className="text-sm font-medium">{label}</span> : null}
     </span>
   );
 }
@@ -63,8 +63,8 @@ export function LoadingCard({
   className?: string;
 }) {
   return (
-    <div className={`loading-card loading-card-${variant} ${className}`}>
-      <Spinner size={22} label={label} variant={variant} />
+    <div className={`loading-card loading-card-${variant} animate-bounce-in ${className}`}>
+      <Spinner size={24} label={label} variant={variant} />
       <span className="loading-rail" aria-hidden />
     </div>
   );

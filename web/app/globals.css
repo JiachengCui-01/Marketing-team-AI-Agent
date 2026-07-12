@@ -68,7 +68,7 @@ html, body {
   /* Floating column panel — frosted glass with a subtle, elegant halo and a soft
      top sheen for a dimensional feel. Kept opaque enough that text stays crisp. */
   .panel-card {
-    @apply rounded-2xl border border-border overflow-hidden;
+    @apply rounded-2xl border border-border overflow-hidden transition-all duration-300 ease-out;
     background:
       linear-gradient(180deg, rgb(var(--fg) / 0.02), transparent 42%),
       rgb(var(--bg-elevated) / 0.88);
@@ -100,7 +100,7 @@ html, body {
   /* Prominent input container — solid, clearly bordered (esp. in dark, where
      --border == --bg-elevated), with an accent focus ring. */
   .input-shell {
-    @apply rounded-xl border transition-all duration-150 ease-macos;
+    @apply rounded-xl border transition-all duration-200 ease-macos;
     background:
       linear-gradient(180deg, rgb(var(--fg) / 0.025), transparent 55%),
       rgb(var(--field-bg) / 0.88);
@@ -112,28 +112,40 @@ html, body {
   }
   .input-shell:focus-within {
     border-color: rgb(var(--accent));
-    box-shadow: 0 0 0 3px rgb(var(--accent) / 0.18);
+    box-shadow: 
+      inset 0 1px 0 rgb(255 255 255 / 0.045),
+      0 0 0 3px rgb(var(--accent) / 0.2),
+      0 8px 24px -12px rgb(var(--accent) / 0.32);
   }
   /* Ghost icon/label button: bg + color shift on hover, subtle press. */
   .btn-ghost {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-lg text-fg-muted transition-all duration-150 ease-macos hover:bg-bg-elevated hover:text-fg active:scale-[0.97];
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg text-fg-muted transition-all duration-150 ease-macos hover:bg-bg-elevated hover:text-fg active:scale-95 active:opacity-80;
   }
   /* Primary accent button. */
   .btn-accent {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent text-accent-fg font-medium transition-all duration-150 ease-macos hover:opacity-90 active:scale-[0.97] disabled:opacity-40 disabled:active:scale-100;
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent text-accent-fg font-medium transition-all duration-150 ease-macos hover:shadow-lg hover:shadow-accent/30 hover:-translate-y-px active:scale-95 active:shadow-sm disabled:opacity-40 disabled:active:scale-100 disabled:hover:shadow-none disabled:hover:translate-y-0;
   }
   /* Card that lifts slightly on hover. */
   .hover-lift {
-    @apply transition-all duration-150 ease-macos hover:-translate-y-px hover:shadow-md;
+    @apply transition-all duration-200 ease-macos hover:-translate-y-1 hover:shadow-lg hover:shadow-accent/15;
+  }
+  /* Smooth focus state for interactive elements */
+  @supports (outline-offset: 0) {
+    button:not(:disabled):not(.btn-ghost):hover {
+      transform: translateY(-1px);
+    }
+    button:not(:disabled):active {
+      transform: scale(0.98);
+    }
   }
   /* Shimmer skeleton block. */
   .skeleton {
-    @apply relative overflow-hidden bg-bg-subtle;
+    @apply relative overflow-hidden bg-bg-subtle rounded-lg;
   }
   .skeleton::after {
     content: "";
     @apply absolute inset-0 -translate-x-full animate-shimmer;
-    background: linear-gradient(90deg, transparent, rgb(var(--fg) / 0.06), transparent);
+    background: linear-gradient(90deg, transparent, rgb(var(--fg) / 0.08), transparent);
   }
   .skeleton-news {
     background: linear-gradient(90deg, rgb(var(--feature-news) / 0.08), rgb(var(--bg-subtle)), rgb(var(--feature-news) / 0.05));
@@ -170,12 +182,12 @@ html, body {
     background: linear-gradient(135deg, rgb(var(--feature-research) / 0.18), transparent 70%);
   }
   .loading-card {
-    @apply relative flex min-w-[220px] flex-col items-center gap-3 overflow-hidden rounded-2xl border border-border bg-bg-elevated/80 px-5 py-4 shadow-sm backdrop-blur;
+    @apply relative flex min-w-[220px] flex-col items-center gap-3 overflow-hidden rounded-2xl border border-border bg-bg-elevated/90 px-5 py-5 shadow-md backdrop-blur transition-all duration-300;
   }
   .loading-card::before {
     content: "";
-    @apply absolute inset-0 opacity-60;
-    background: radial-gradient(circle at 50% 0%, rgb(var(--accent) / 0.10), transparent 60%);
+    @apply absolute inset-0 opacity-50;
+    background: radial-gradient(circle at 50% 0%, rgb(var(--accent) / 0.12), transparent 55%);
   }
   .loading-card-news::before {
     background: linear-gradient(120deg, rgb(var(--feature-news) / 0.12), transparent 55%);
@@ -190,12 +202,13 @@ html, body {
     @apply relative z-10;
   }
   .loading-rail {
-    @apply relative h-1 w-36 overflow-hidden rounded-full bg-bg-subtle;
+    @apply relative h-1.5 w-40 overflow-hidden rounded-full bg-bg-subtle shadow-sm;
   }
   .loading-rail::after {
     content: "";
     @apply absolute inset-y-0 left-0 w-1/2 animate-rail-sweep rounded-full;
-    background: linear-gradient(90deg, transparent, rgb(var(--accent) / 0.65), transparent);
+    background: linear-gradient(90deg, transparent, rgb(var(--accent) / 0.72), transparent);
+    box-shadow: 0 0 12px rgb(var(--accent) / 0.4);
   }
   .loading-card-news .loading-rail::after {
     background: linear-gradient(90deg, transparent, rgb(var(--feature-news) / 0.70), transparent);

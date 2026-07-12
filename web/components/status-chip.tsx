@@ -88,14 +88,14 @@ export function StatusChip({ status }: { status: StatusInfo }) {
   const Icon = status.icon;
   const toneCls =
     status.tone === "error"
-      ? "text-danger border-danger/30 bg-danger/10"
+      ? "text-danger border-danger/40 bg-danger/10 shadow-sm shadow-danger/20"
       : status.tone === "ok"
-        ? "text-success border-success/30 bg-success/5"
-        : "text-accent border-accent/30 bg-accent/5";
+        ? "text-success border-success/40 bg-success/10 shadow-sm shadow-success/15"
+        : "text-accent border-accent/40 bg-accent/10 shadow-sm shadow-accent/20";
   const spin = status.tone === "working";
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium ${toneCls}`}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-medium transition-all duration-200 ${toneCls}`}
     >
       <Icon size={12} className={spin ? "animate-spin" : ""} />
       <span>{status.label}</span>

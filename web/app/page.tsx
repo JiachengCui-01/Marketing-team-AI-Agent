@@ -504,8 +504,13 @@ export default function HomePage() {
 
   if (authLoading) {
     return (
-      <main className="h-screen flex items-center justify-center bg-bg">
-        <Spinner size={22} label={t.loadingAccount} variant="account" />
+      <main className="h-screen flex items-center justify-center bg-gradient-to-br from-bg via-bg-subtle to-bg">
+        <div className="flex flex-col items-center gap-4 animate-fade-in">
+          <Spinner size={24} label={t.loadingAccount} variant="account" />
+          <div className="w-32 h-1 rounded-full bg-bg-elevated overflow-hidden">
+            <div className="h-full w-1/2 rounded-full bg-gradient-to-r from-accent/0 via-accent to-accent/0 animate-pulse" />
+          </div>
+        </div>
       </main>
     );
   }

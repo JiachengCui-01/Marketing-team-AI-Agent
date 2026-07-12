@@ -50,7 +50,7 @@ const config: Config = {
       },
       keyframes: {
         "fade-in": {
-          from: { opacity: "0", transform: "translateY(4px)" },
+          from: { opacity: "0", transform: "translateY(6px)" },
           to: { opacity: "1", transform: "translateY(0)" },
         },
         "dot-pulse": {
@@ -58,15 +58,15 @@ const config: Config = {
           "40%": { opacity: "1" },
         },
         "dot-drift": {
-          "0%, 100%": { opacity: "0.35", transform: "translateY(0) scale(0.92)" },
-          "50%": { opacity: "1", transform: "translateY(-2px) scale(1.08)" },
+          "0%, 100%": { opacity: "0.35", transform: "translateY(0) scale(0.88)" },
+          "50%": { opacity: "1", transform: "translateY(-3px) scale(1.1)" },
         },
         "float-soft": {
-          "0%, 100%": { transform: "translateY(0) rotate(0deg)" },
-          "50%": { transform: "translateY(-1px) rotate(3deg)" },
+          "0%, 100%": { transform: "translateY(0) rotate(0deg)", opacity: "0.8" },
+          "50%": { transform: "translateY(-2px) rotate(2deg)", opacity: "1" },
         },
         "scale-in": {
-          from: { opacity: "0", transform: "scale(0.97)" },
+          from: { opacity: "0", transform: "scale(0.92)" },
           to: { opacity: "1", transform: "scale(1)" },
         },
         shimmer: {
@@ -74,19 +74,31 @@ const config: Config = {
         },
         "rail-sweep": {
           "0%": { transform: "translateX(-120%)", opacity: "0" },
-          "20%": { opacity: "1" },
-          "80%": { opacity: "1" },
+          "15%": { opacity: "1" },
+          "85%": { opacity: "1" },
           "100%": { transform: "translateX(120%)", opacity: "0" },
+        },
+        "pulse-ring": {
+          "0%": { boxShadow: "0 0 0 0px rgb(var(--accent) / 0.4)" },
+          "70%": { boxShadow: "0 0 0 10px rgb(var(--accent) / 0)" },
+          "100%": { boxShadow: "0 0 0 0px rgb(var(--accent) / 0)" },
+        },
+        "bounce-in": {
+          "0%": { opacity: "0", transform: "scale(0.95) translateY(2px)" },
+          "50%": { opacity: "1", transform: "scale(1.05)" },
+          "100%": { opacity: "1", transform: "scale(1) translateY(0)" },
         },
       },
       animation: {
-        "fade-in": "fade-in 220ms ease-out",
+        "fade-in": "fade-in 280ms cubic-bezier(.32,.72,0,1)",
         "dot-pulse": "dot-pulse 1.4s infinite ease-in-out",
-        "dot-drift": "dot-drift 1.15s infinite ease-in-out",
-        "float-soft": "float-soft 1.8s infinite ease-in-out",
-        "scale-in": "scale-in 160ms cubic-bezier(.32,.72,0,1)",
-        shimmer: "shimmer 1.5s infinite",
-        "rail-sweep": "rail-sweep 1.6s infinite ease-in-out",
+        "dot-drift": "dot-drift 1.2s infinite ease-in-out",
+        "float-soft": "float-soft 2s infinite ease-in-out",
+        "scale-in": "scale-in 200ms cubic-bezier(.32,.72,0,1)",
+        shimmer: "shimmer 1.8s infinite",
+        "rail-sweep": "rail-sweep 1.8s infinite ease-in-out",
+        "pulse-ring": "pulse-ring 1.5s infinite",
+        "bounce-in": "bounce-in 400ms cubic-bezier(.34,.69,.78,.92)",
       },
     },
   },
