@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Plus,
   MessageSquare,
@@ -23,6 +23,9 @@ type MenuState =
   | { kind: "session"; id: string; x: number; y: number }
   | { kind: "group"; id: string; x: number; y: number }
   | null;
+
+const CONTEXT_MENU_WIDTH = 200;
+const CONTEXT_MENU_EDGE_GAP = 12;
 
 export function SessionSidebar({
   sessions,
@@ -60,6 +63,7 @@ export function SessionSidebar({
   onOpenImage: () => void;
 }) {
   const { t } = useI18n();
+  const sidebarRef = useRef<HTMLElement | null>(null);
   const [menu, setMenu] = useState<MenuState>(null);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
@@ -114,13 +118,28 @@ export function SessionSidebar({
     );
   }
 
+  function contextMenuPoint(e: React.MouseEvent): { x: number; y: number } {
+    const rect = sidebarRef.current?.getBoundingClientRect();
+    if (!rect) return { x: e.clientX, y: e.clientY };
+
+    const minLeft = rect.left + CONTEXT_MENU_EDGE_GAP;
+    const maxLeft = Math.max(
+      minLeft,
+      rect.right - CONTEXT_MENU_WIDTH - CONTEXT_MENU_EDGE_GAP,
+    );
+    return {
+      x: Math.min(Math.max(e.clientX, minLeft), maxLeft),
+      y: e.clientY,
+    };
+  }
+
   function openSessionMenu(e: React.MouseEvent, id: string) {
     e.preventDefault();
-    setMenu({ kind: "session", id, x: e.clientX, y: e.clientY });
+    setMenu({ kind: "session", id, ...contextMenuPoint(e) });
   }
   function openGroupMenu(e: React.MouseEvent, id: string) {
     e.preventDefault();
-    setMenu({ kind: "group", id, x: e.clientX, y: e.clientY });
+    setMenu({ kind: "group", id, ...contextMenuPoint(e) });
   }
 
   function buildSessionMenu(id: string): MenuItem[] {
@@ -207,6 +226,7 @@ export function SessionSidebar({
 
   return (
     <aside
+      ref={sidebarRef}
       className="hidden md:flex flex-col shrink-0 panel-card"
       style={{ width: width ?? 256 }}
     >
