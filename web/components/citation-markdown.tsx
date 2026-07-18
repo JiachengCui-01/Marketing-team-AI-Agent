@@ -335,6 +335,11 @@ function splitCitationSegments(content: string): Segment[] {
       markdownBuffer.push(line);
       continue;
     }
+
+    // News summaries sometimes wrap one list item across two Markdown lines:
+    // "- headline" followed by the supporting sentence and its citation. Keep
+    // that citation in the same list item instead of creating a second block.
+    attachPrecedingListItem(markdownBuffer, parsed);
     flush();
     segments.push(parsed);
   }
@@ -342,7 +347,28 @@ function splitCitationSegments(content: string): Segment[] {
   return segments;
 }
 
-function parseCitationLine(line: string): Segment | null {
+function attachPrecedingListItem(
+  markdownBuffer: string[],
+  segment: Extract<Segment, { kind: "citation" }>,
+) {
+  if (segment.listPrefix) return;
+
+  let previousLineIndex = markdownBuffer.length - 1;
+  while (previousLineIndex >= 0 && !markdownBuffer[previousLineIndex].trim()) {
+    previousLineIndex -= 1;
+  }
+  if (previousLineIndex < 0) return;
+
+  const previousLine = markdownBuffer[previousLineIndex];
+  const listMatch = previousLine.match(/^(\s*(?:[-*+]|\d+[.)])\s+)(.*)$/);
+  if (!listMatch || !listMatch[2].trim()) return;
+
+  markdownBuffer.splice(previousLineIndex, 1);
+  segment.listPrefix = listMatch[1].trim();
+  segment.body = `${listMatch[2].trim()} ${segment.body}`.trim();
+}
+
+function parseCitationLine(line: string): Extract<Segment, { kind: "citation" }> | null {
   if (!line.trim() || /^#{1,6}\s/.test(line) || /^\s*>/.test(line)) return null;
   const trailingCitation = trailingCitationText(line);
   if (!trailingCitation) return null;
