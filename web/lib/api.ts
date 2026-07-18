@@ -417,6 +417,8 @@ export type NewsSource = {
   score: number;
   reason: string;
   is_weak_signal: boolean;
+  title?: string | null;
+  display_text?: string | null;
 };
 
 export async function getNewsConfig(): Promise<NewsConfig | null> {

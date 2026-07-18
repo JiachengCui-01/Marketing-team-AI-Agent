@@ -36,7 +36,8 @@ class NewsTests(unittest.TestCase):
         from types import SimpleNamespace
 
         self.assertIn("Tier 1", research_agent.SYSTEM)
-        self.assertIn("Do not move all citations only to the final Sources section", research_agent.SYSTEM)
+        self.assertIn("Do not move citations into a standalone Sources section", research_agent.SYSTEM)
+        self.assertIn("Do not add a final raw URL list", research_agent.SYSTEM)
         fake_response = SimpleNamespace(
             content=[
                 SimpleNamespace(
@@ -61,6 +62,7 @@ class NewsTests(unittest.TestCase):
         )
 
         self.assertIn("## Source Credibility", result)
+        self.assertNotIn("## Sources", result)
         self.assertLess(result.find("reuters.com"), result.find("reddit.com"))
         self.assertIn("Tier 4", result)
 
@@ -123,6 +125,7 @@ class NewsTests(unittest.TestCase):
             record = news.generate_summary(self.config, client=mock.Mock())
 
         self.assertIn("## 来源可信度", record["summary"])
+        self.assertNotIn("## Sources", record["summary"])
         self.assertEqual(record["sources"][0]["domain"], "sec.gov")
         self.assertEqual(record["sources"][0]["tier"], 1)
         self.assertEqual(record["strong_source_count"], 1)

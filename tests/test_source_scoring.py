@@ -54,6 +54,11 @@ class SourceScoringTests(unittest.TestCase):
             ],
         )
 
+    def test_extracts_bare_url_before_chinese_punctuation(self) -> None:
+        urls = source_scoring.extract_urls("参考：https://www.news.cn/tech/2026.htm）。")
+
+        self.assertEqual(urls, ["https://www.news.cn/tech/2026.htm"])
+
     def test_extract_source_references_uses_markdown_title(self) -> None:
         refs = source_scoring.extract_source_references(
             "See [Reuters AI update](https://www.reuters.com/technology/ai-news)."
@@ -85,6 +90,29 @@ class SourceScoringTests(unittest.TestCase):
         self.assertIn("## Source Credibility", annotated)
         self.assertIn("weak signals", annotated)
         self.assertIn("Tier 4", annotated)
+
+    def test_annotation_strips_raw_source_sections_after_scoring(self) -> None:
+        annotated = source_scoring.annotate_markdown_with_source_tiers(
+            "## Summary\nFresh news.\n\n## Sources\n1. https://www.reuters.com/technology/",
+            language="en",
+        )
+
+        self.assertIn("## Source Credibility", annotated)
+        self.assertNotIn("## Sources", annotated)
+        self.assertIn("[reuters.com](https://www.reuters.com/technology/)", annotated)
+
+    def test_strip_raw_source_sections_preserves_credibility_section(self) -> None:
+        text = (
+            "## Summary\nFresh news.\n\n"
+            "## 来源\n1. https://www.news.cn/tech/\n\n"
+            "## 来源可信度\n本摘要优先基于 Tier 1/Tier 2 来源。"
+        )
+
+        stripped = source_scoring.strip_raw_source_sections(text)
+
+        self.assertNotIn("## 来源\n", stripped)
+        self.assertNotIn("https://www.news.cn/tech/", stripped)
+        self.assertIn("## 来源可信度", stripped)
 
 
 if __name__ == "__main__":

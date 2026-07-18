@@ -148,7 +148,16 @@ OFFICIAL_PATH_HINTS = (
 
 _MARKDOWN_LINK_RE = re.compile(r"\[[^\]]+\]\((https?://[^)\s]+)\)", re.IGNORECASE)
 _BARE_URL_RE = re.compile(r"https?://[^\s<>()\]]+", re.IGNORECASE)
-_TRAILING_PUNCT = ".,;:!?)]}\"'"
+_TRAILING_PUNCT = ".,;:!?)]}\"'。！？，；：、）】》」』"
+_RAW_SOURCE_SECTION_HEADINGS = {
+    "sources",
+    "source",
+    "references",
+    "information sources",
+    "information source",
+    "信息来源",
+    "来源",
+}
 
 
 def extract_urls(text: str) -> list[str]:
@@ -248,7 +257,9 @@ def annotate_markdown_with_source_tiers(text: str, *, language: str | None = Non
 
     marker = "## Source Credibility"
     zh_marker = "## 来源可信度"
-    base = _strip_existing_credibility_section(text, marker, zh_marker).rstrip()
+    base = strip_raw_source_sections(
+        _strip_existing_credibility_section(text, marker, zh_marker)
+    ).rstrip()
     zh = language == "zh" or ("## 摘要" in text and language != "en")
     weak = any(source.is_weak_signal for source in sources)
     strong = any(source.tier <= 2 for source in sources)
@@ -279,6 +290,30 @@ def annotate_markdown_with_source_tiers(text: str, *, language: str | None = Non
             f"[{source.domain}]({source.url})"
         )
     return base + "\n".join(lines)
+
+
+def strip_raw_source_sections(text: str) -> str:
+    """Remove model-authored raw source/reference sections from visible markdown."""
+    lines = text.splitlines()
+    kept: list[str] = []
+    skipping = False
+    skip_level = 0
+
+    for line in lines:
+        heading = re.match(r"^(#{1,6})\s+(.+?)\s*$", line)
+        if heading:
+            level = len(heading.group(1))
+            title = heading.group(2).strip().rstrip(":：").lower()
+            if skipping and level <= skip_level:
+                skipping = False
+            if not skipping and title in _RAW_SOURCE_SECTION_HEADINGS:
+                skipping = True
+                skip_level = level
+                continue
+        if not skipping:
+            kept.append(line)
+
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
 
 
 def _normalize_url(raw: str) -> str:

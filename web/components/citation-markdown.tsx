@@ -22,7 +22,23 @@ type Segment =
 
 const MARKDOWN_LINK_RE = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/gi;
 const BARE_URL_RE = /https?:\/\/[^\s<>()\]]+/gi;
-const TRAILING_LINK_RE = /(?:\s*(?:[-–—,;:，；、]?\s*)?(?:\[[^\]]+\]\(https?:\/\/[^)\s]+\)|https?:\/\/[^\s<>()\]]+)[.)\]]*)+$/i;
+const LINK_OR_URL = String.raw`(?:\[[^\]]+\]\(https?:\/\/[^)\s]+\)|https?:\/\/[^\s<>()\]]+)`;
+const DATE_OR_STATUS = String.raw`(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}|更新|updated?|更新版)`;
+const TRAILING_LINK_RE = new RegExp(
+  String.raw`(?:\s*(?:[-–—,;:，；、]?\s*)?${LINK_OR_URL}(?:\s*(?:[,;，；、]\s*)?${DATE_OR_STATUS})?[.)\]）]*)+$`,
+  "i",
+);
+
+const RAW_SOURCE_SECTION_HEADINGS = new Set([
+  "sources",
+  "source",
+  "references",
+  "information sources",
+  "information source",
+  "信息来源",
+  "来源",
+]);
+const CREDIBILITY_SECTION_HEADINGS = new Set(["source credibility", "来源可信度"]);
 
 const OFFICIAL_DOMAINS = new Set([
   "sec.gov",
@@ -97,8 +113,20 @@ const COMMUNITY_DOMAINS = new Set([
   "tieba.baidu.com",
 ]);
 
-export function CitationMarkdown({ content }: { content: string }) {
-  const segments = useMemo(() => splitCitationSegments(content), [content]);
+export function CitationMarkdown({
+  content,
+  stripSourceSections = false,
+  stripCredibilitySections = false,
+}: {
+  content: string;
+  stripSourceSections?: boolean;
+  stripCredibilitySections?: boolean;
+}) {
+  const normalizedContent = useMemo(
+    () => stripMarkdownSections(content, { stripSourceSections, stripCredibilitySections }),
+    [content, stripCredibilitySections, stripSourceSections],
+  );
+  const segments = useMemo(() => splitCitationSegments(normalizedContent), [normalizedContent]);
 
   return (
     <div className="prose-chat">
@@ -131,9 +159,11 @@ function CitationLine({ segment }: { segment: Extract<Segment, { kind: "citation
   );
 }
 
-function CitationCapsules({ sources }: { sources: CitationSource[] }) {
+export function CitationCapsules({ sources }: { sources: CitationSource[] }) {
   const [open, setOpen] = useState(false);
   const visibleSources = sources.slice(0, 2);
+  if (sources.length === 0) return null;
+
   return (
     <span className="relative ml-2 inline-flex align-middle">
       <button
@@ -228,12 +258,11 @@ function splitCitationSegments(content: string): Segment[] {
 
 function parseCitationLine(line: string): Segment | null {
   if (!line.trim() || /^#{1,6}\s/.test(line) || /^\s*>/.test(line)) return null;
-  const match = line.match(TRAILING_LINK_RE);
-  if (!match || match.index == null) return null;
-  const citationText = match[0];
-  const sources = citationSources(citationText);
+  const trailingCitation = trailingCitationText(line);
+  if (!trailingCitation) return null;
+  const sources = citationSources(trailingCitation.text);
   if (sources.length === 0) return null;
-  const rawBody = line.slice(0, match.index).trimEnd().replace(/\s*[-–—,;:，；、]\s*$/, "");
+  const rawBody = line.slice(0, trailingCitation.start).trimEnd().replace(/\s*[-–—,;:，；、]\s*$/, "");
   if (!rawBody) return null;
 
   const listMatch = rawBody.match(/^(\s*(?:[-*+]|\d+[.)])\s+)(.*)$/);
@@ -246,6 +275,35 @@ function parseCitationLine(line: string): Segment | null {
     };
   }
   return { kind: "citation", body: rawBody.trim(), sources };
+}
+
+function trailingCitationText(line: string): { start: number; text: string } | null {
+  const effectiveLine = line.replace(/\s+$/g, "");
+  const parenthesizedStart = trailingParenthesizedCitationStart(effectiveLine);
+  if (parenthesizedStart != null) {
+    return { start: parenthesizedStart, text: effectiveLine.slice(parenthesizedStart) };
+  }
+
+  const match = effectiveLine.match(TRAILING_LINK_RE);
+  if (!match || match.index == null) return null;
+  return { start: match.index, text: match[0] };
+}
+
+function trailingParenthesizedCitationStart(line: string): number | null {
+  if (!/[)）][.!?。！？]*$/.test(line) || !/https?:\/\//i.test(line)) return null;
+
+  for (let index = line.length - 1; index >= 0; index -= 1) {
+    const char = line[index];
+    if (char !== "(" && char !== "（") continue;
+    if (line[index - 1] === "]") continue;
+    const tail = line.slice(index);
+    const urlIndex = tail.search(/https?:\/\//i);
+    if (urlIndex < 0) continue;
+    if (/[)）]/.test(tail.slice(1, urlIndex))) continue;
+    if (citationSources(tail).length === 0) continue;
+    return index;
+  }
+  return null;
 }
 
 function citationSources(text: string): CitationSource[] {
@@ -273,12 +331,12 @@ function addSource(sources: CitationSource[], seen: Set<string>, rawUrl: string,
     domain,
     ...scored,
     displayText: cleanTitle(title) || displayFromUrl(url, domain),
-    faviconUrl: `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`,
+    faviconUrl: faviconUrl(domain),
   });
 }
 
 function normalizeUrl(raw: string): string | null {
-  const url = raw.trim().replace(/[.,;:!?)]*$/g, "");
+  const url = raw.trim().replace(/[.,;:!?\])。！？，；：、）】》」』]*$/g, "");
   try {
     const parsed = new URL(url);
     return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.toString() : null;
@@ -328,4 +386,42 @@ function sourceName(domain: string): string {
   if (parts.length <= 2) return domain;
   if (domain.endsWith(".com.cn") || domain.endsWith(".gov.cn")) return parts.slice(-3).join(".");
   return parts.slice(-2).join(".");
+}
+
+export function faviconUrl(domain: string): string {
+  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`;
+}
+
+function stripMarkdownSections(
+  content: string,
+  options: { stripSourceSections: boolean; stripCredibilitySections: boolean },
+): string {
+  if (!options.stripSourceSections && !options.stripCredibilitySections) return content;
+
+  const lines = content.split("\n");
+  const kept: string[] = [];
+  let skipping = false;
+  let skipLevel = 0;
+
+  for (const line of lines) {
+    const heading = line.match(/^(#{1,6})\s+(.+?)\s*$/);
+    if (heading) {
+      const level = heading[1].length;
+      const title = heading[2].trim().replace(/[:：]+$/, "").toLowerCase();
+      if (skipping && level <= skipLevel) {
+        skipping = false;
+      }
+      const shouldSkip =
+        (options.stripSourceSections && RAW_SOURCE_SECTION_HEADINGS.has(title)) ||
+        (options.stripCredibilitySections && CREDIBILITY_SECTION_HEADINGS.has(title));
+      if (!skipping && shouldSkip) {
+        skipping = true;
+        skipLevel = level;
+        continue;
+      }
+    }
+    if (!skipping) kept.push(line);
+  }
+
+  return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }

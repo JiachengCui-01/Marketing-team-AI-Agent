@@ -31,13 +31,16 @@ Rules:
 - Cite every claim with a URL and (where visible) publication date.
 - For each key fact, trend, or competitor move in the body, keep 1-3 citation
   links at the end of that sentence or bullet, similar to academic inline
-  references. Do not move all citations only to the final Sources section.
+  references. Do not move citations into a standalone Sources section.
 - Distinguish observed facts from inferences — label inferences as such.
 - Prefer recent material (≤ 6 months) for "what's happening" questions; older sources are fine
   for background/context.
 - If sources disagree, surface the disagreement.
-- In the Sources section, preserve every URL used so the system can score and label
-  source tiers after generation.
+- Do not add a final raw URL list. The system will extract inline citation URLs,
+  score source tiers, and append the Source Credibility section.
+- Include a natural source-risk note whenever Tier 3/Tier 4 sources appear:
+  they are weak market-signal context and cannot independently support factual
+  claims.
 
 Output format (markdown):
 
@@ -52,8 +55,9 @@ Output format (markdown):
 ## Implications for Marketing
 2-3 bullets on what this means for our team's positioning, messaging, or roadmap.
 
-## Sources
-Numbered list of all URLs used.
+## Source Notes
+Only include this section when needed to explain source disagreement, missing
+strong sources, or Tier 3/Tier 4 uncertainty. Do not list raw URLs here.
 """
 
 # The basic search tool is more predictable for time-windowed news retrieval than

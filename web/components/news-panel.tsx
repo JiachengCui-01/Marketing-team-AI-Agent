@@ -16,7 +16,7 @@ import { localizeError, useI18n } from "@/lib/i18n";
 import { Modal } from "@/components/modal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LoadingCard, Spinner } from "@/components/ui/spinner";
-import { CitationMarkdown } from "@/components/citation-markdown";
+import { CitationCapsules, CitationMarkdown, faviconUrl, type CitationSource } from "@/components/citation-markdown";
 
 export function NewsPanel({ onBack }: { onBack: () => void }) {
   const { locale, t } = useI18n();
@@ -136,7 +136,11 @@ export function NewsPanel({ onBack }: { onBack: () => void }) {
             </div>
           ) : summary ? (
             <>
-              <CitationMarkdown content={summary.summary} />
+              <CitationMarkdown
+                content={summary.summary}
+                stripSourceSections
+                stripCredibilitySections={!!summary.sources?.length}
+              />
               <SourceCredibility summary={summary} />
               <p className="mt-6 text-[11px] text-fg-subtle">
                 {t.newsGeneratedAt}: {new Date(summary.generated_at * 1000).toLocaleString()}
@@ -202,33 +206,39 @@ function SourceCredibility({ summary }: { summary: NewsSummary }) {
         </span>
       </div>
       <p className="mb-3 text-xs leading-relaxed text-fg-muted">{note}</p>
-      <div className="space-y-2">
-        {sources.map((source) => (
-          <SourceRow key={source.url} source={source} />
+      <ol className="space-y-2">
+        {sources.map((source, index) => (
+          <SourceRow key={source.url} source={source} index={index + 1} />
         ))}
-      </div>
+      </ol>
     </section>
   );
 }
 
-function SourceRow({ source }: { source: NewsSource }) {
+function SourceRow({ source, index }: { source: NewsSource; index: number }) {
+  const citationSource = toCitationSource(source);
   return (
-    <a
-      href={source.url}
-      target="_blank"
-      rel="noreferrer"
-      className="flex items-center gap-2 rounded-lg border border-border bg-bg-subtle/50 px-3 py-2 text-xs transition hover:border-accent/40 hover:bg-bg-subtle"
-      title={source.reason}
-    >
-      <span className="shrink-0 rounded-md border border-border bg-bg px-1.5 py-0.5 font-medium text-fg-muted">
-        T{source.tier}
+    <li className="text-sm leading-relaxed text-fg">
+      <span className="mr-1 text-fg-muted">{index}.</span>
+      <span>
+        {source.tier_label} ({source.score})
+        {source.is_weak_signal ? " · weak signal" : ""}
       </span>
-      <span className="min-w-0 flex-1 truncate text-fg">{source.domain}</span>
-      <span className={source.is_weak_signal ? "text-warn" : "text-fg-subtle"}>
-        {source.score}
-      </span>
-    </a>
+      <CitationCapsules sources={[citationSource]} />
+    </li>
   );
+}
+
+function toCitationSource(source: NewsSource): CitationSource {
+  return {
+    url: source.url,
+    domain: source.domain,
+    tier: source.tier,
+    score: source.score,
+    reason: source.reason,
+    displayText: source.display_text || source.title || source.domain,
+    faviconUrl: faviconUrl(source.domain),
+  };
 }
 
 function NewsSettingsDialog({
