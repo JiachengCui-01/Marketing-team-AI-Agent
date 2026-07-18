@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ExternalLink, Link2 } from "lucide-react";
@@ -246,7 +247,7 @@ function CitationPopover({
   const title = locale === "zh" ? "引用" : "Citations";
   const closeLabel = locale === "zh" ? "关闭" : "Close";
 
-  return (
+  const popover = (
     <span
       className="fixed z-50 block rounded-lg border border-border bg-bg-elevated p-2.5 text-left text-sm shadow-xl animate-fade-in"
       style={{ left: position.left, top: position.top, width: position.width }}
@@ -284,11 +285,12 @@ function CitationPopover({
       </span>
     </span>
   );
+  return createPortal(popover, document.body);
 }
 
 function popoverPosition(anchor: PopoverAnchor): PopoverPosition {
   const edgeGap = 8;
-  const boundaryRightInset = 14;
+  const boundaryRightInset = 24;
   const boundaryLeft = anchor.boundary?.left ?? 0;
   const boundaryRight = anchor.boundary ? anchor.boundary.right - boundaryRightInset : window.innerWidth;
   const availableWidth = Math.max(240, boundaryRight - boundaryLeft - edgeGap * 2);
