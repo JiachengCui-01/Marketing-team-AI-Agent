@@ -36,6 +36,7 @@ class NewsTests(unittest.TestCase):
         from types import SimpleNamespace
 
         self.assertIn("Tier 1", research_agent.SYSTEM)
+        self.assertIn("Do not move all citations only to the final Sources section", research_agent.SYSTEM)
         fake_response = SimpleNamespace(
             content=[
                 SimpleNamespace(
@@ -75,6 +76,17 @@ class NewsTests(unittest.TestCase):
 
         self.assertIn("Simplified Chinese", zh_task)
         self.assertIn("entire response in English", en_task)
+        self.assertIn("Chinese and China-local sources", zh_task)
+
+    def test_build_task_requests_chinese_sources_for_china_topic(self) -> None:
+        from datetime import datetime, timezone
+
+        task, _, _ = news.build_task(
+            "China EV marketing", "brief", datetime.now(timezone.utc), "en"
+        )
+
+        self.assertIn("Chinese and China-local sources", task)
+        self.assertIn("Xinhua", task)
 
     def test_chinese_digest_removes_english_search_preamble(self) -> None:
         raw = "I'll search first.\n\n## 摘要\n这是中文摘要。\n\n## 来源\n1. 示例"

@@ -27,6 +27,16 @@ class SourceScoringTests(unittest.TestCase):
         self.assertEqual(zhihu.tier, 4)
         self.assertTrue(all(s.is_weak_signal for s in (medium, substack, reddit, zhihu)))
 
+    def test_chinese_media_sources_score_as_authoritative(self) -> None:
+        xinhua = source_scoring.score_url("https://www.news.cn/tech/2026-07/18/c_123.htm")
+        caixin = source_scoring.score_url("https://www.caixin.com/2026-07-18/101.htm")
+        kr = source_scoring.score_url("https://www.36kr.com/p/123")
+
+        self.assertEqual(xinhua.tier, 2)
+        self.assertEqual(caixin.tier, 2)
+        self.assertEqual(kr.tier, 2)
+        self.assertFalse(any(source.is_weak_signal for source in (xinhua, caixin, kr)))
+
     def test_extracts_markdown_and_bare_urls_once(self) -> None:
         text = (
             "See [SEC](https://www.sec.gov/news/press-release). "
@@ -43,6 +53,15 @@ class SourceScoringTests(unittest.TestCase):
                 "https://www.reuters.com/world/",
             ],
         )
+
+    def test_extract_source_references_uses_markdown_title(self) -> None:
+        refs = source_scoring.extract_source_references(
+            "See [Reuters AI update](https://www.reuters.com/technology/ai-news)."
+        )
+
+        self.assertEqual(refs[0].title, "Reuters AI update")
+        self.assertEqual(refs[0].display_text, "Reuters AI update")
+        self.assertEqual(refs[0].domain, "reuters.com")
 
     def test_sources_are_sorted_by_score(self) -> None:
         text = "\n".join(

@@ -29,6 +29,9 @@ Rules:
 - If the server reports a search/tool limit after you have any relevant sources,
   stop searching and synthesize from the sources already gathered.
 - Cite every claim with a URL and (where visible) publication date.
+- For each key fact, trend, or competitor move in the body, keep 1-3 citation
+  links at the end of that sentence or bullet, similar to academic inline
+  references. Do not move all citations only to the final Sources section.
 - Distinguish observed facts from inferences — label inferences as such.
 - Prefer recent material (≤ 6 months) for "what's happening" questions; older sources are fine
   for background/context.
@@ -42,7 +45,8 @@ Output format (markdown):
 2-4 sentences capturing the most important findings.
 
 ## Findings
-- Fact / trend / competitor move — [source title, date](url)
+- Fact / trend / competitor move — concise explanation ending with 1-3 links
+  like [source title, date](url)
 - ...
 
 ## Implications for Marketing

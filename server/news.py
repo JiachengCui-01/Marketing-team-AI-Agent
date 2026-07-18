@@ -96,6 +96,43 @@ def _detail_instruction(detail_level: str) -> str:
     return "Keep it brief: one concise sentence per item, only the most important developments."
 
 
+def _needs_chinese_sources(industry: str, language: str) -> bool:
+    if language == "zh":
+        return True
+    lowered = industry.casefold()
+    china_markers = (
+        "china",
+        "chinese",
+        "mainland",
+        "beijing",
+        "shanghai",
+        "shenzhen",
+        "hong kong",
+        "中国",
+        "国内",
+        "北京",
+        "上海",
+        "深圳",
+        "香港",
+        "中文",
+    )
+    return any(marker in lowered for marker in china_markers)
+
+
+def _localized_source_instruction(industry: str, language: str) -> str:
+    if not _needs_chinese_sources(industry, language):
+        return ""
+    return (
+        "Because this is a Chinese-language or China-related digest, actively try "
+        "Chinese and China-local sources in addition to international sources. "
+        "Prioritize Tier 1/Tier 2 sources such as Xinhua/Xinhuanet, People.cn, CCTV, "
+        "China News Service, Caixin, Yicai, CLS, The Paper, Jiemian, 36Kr, IT Home, "
+        "and relevant official company or regulator sites. If there are not enough "
+        "recent Chinese-language sources in the 24-hour window, say so naturally in "
+        "the digest instead of silently relying only on foreign-language media."
+    )
+
+
 def build_task(
     industry: str,
     detail_level: str,
@@ -112,13 +149,14 @@ def build_task(
         if language == "zh"
         else "Write the entire response in English, including all headings and analysis."
     )
+    source_instruction = _localized_source_instruction(industry, language)
     task = (
         f"Summarize the most important {industry} industry news published in the last "
         f"{WINDOW_HOURS} hours — strictly between {window_start.strftime(fmt)} and "
         f"{window_end.strftime(fmt)}. Only include items published within that window; "
         f"ignore older material. {_detail_instruction(detail_level)} "
         f"If little or nothing was published in this window, say so plainly rather than "
-        f"padding with older news. {language_instruction}"
+        f"padding with older news. {source_instruction} {language_instruction}"
     )
     return task, window_start.timestamp(), window_end.timestamp()
 

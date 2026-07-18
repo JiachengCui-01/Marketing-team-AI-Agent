@@ -1,13 +1,12 @@
 "use client";
 
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { User, Sparkles, FileText, Download } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/i18n";
 import { StatusChip, type StatusInfo } from "./status-chip";
 import { artifactDownloadUrl } from "@/lib/api";
 import { AvatarImage } from "./auth-ui";
+import { CitationMarkdown } from "./citation-markdown";
 
 export type MessageArtifact = {
   artifact_id: string;
@@ -81,11 +80,7 @@ export function MessageBubble({
           <span className="whitespace-pre-wrap">{message.content}</span>
         ) : (
           <>
-            <div className="prose-chat">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {message.content + (message.pending ? "▍" : "")}
-              </ReactMarkdown>
-            </div>
+            <CitationMarkdown content={message.content + (message.pending ? "▍" : "")} />
             {message.artifacts && message.artifacts.length > 0 ? (
               <div className="mt-3 flex flex-wrap gap-2">
                 {message.artifacts.map((a) => (

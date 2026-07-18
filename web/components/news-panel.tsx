@@ -17,6 +17,7 @@ import {
 import { localizeError, useI18n } from "@/lib/i18n";
 import { Modal } from "@/components/modal";
 import { Skeleton } from "@/components/ui/skeleton";
+import { LoadingCard, Spinner } from "@/components/ui/spinner";
 
 export function NewsPanel({ onBack }: { onBack: () => void }) {
   const { locale, t } = useI18n();
@@ -28,6 +29,8 @@ export function NewsPanel({ onBack }: { onBack: () => void }) {
   const [error, setError] = useState<string | null>(null);
 
   const cancelled = !!config && config.enabled === false && config.cancelled_at != null;
+  const refreshingEmpty = refreshing && !summary;
+  const refreshingExisting = refreshing && !!summary;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -90,16 +93,21 @@ export function NewsPanel({ onBack }: { onBack: () => void }) {
             </div>
           ) : null}
 
-          <div className="mb-4 flex items-center justify-between">
-            <div className="text-xs text-fg-subtle">
+          <div className="mb-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+            <div className="min-w-0 truncate text-xs text-fg-subtle">
               {config
                 ? `${config.industry} · ${config.summary_time} (${config.timezone})`
                 : t.newsNoConfig}
             </div>
+            <div className="min-h-[28px] min-w-[120px] justify-self-center">
+              {refreshingExisting ? (
+                <Spinner size={14} label={t.newsCollecting} variant="news" className="text-xs" />
+              ) : null}
+            </div>
             <button
               onClick={handleRefresh}
               disabled={refreshing || !config || cancelled}
-              className="btn-accent px-3 py-1.5 text-xs"
+              className="btn-accent justify-self-end px-3 py-1.5 text-xs"
             >
               {refreshing ? <Loader2 size={13} className="animate-spin text-feature-news" /> : <RefreshCw size={13} />}
               <span>{refreshing ? t.newsRefreshing : t.newsRefreshNow}</span>
@@ -137,8 +145,12 @@ export function NewsPanel({ onBack }: { onBack: () => void }) {
                 {t.newsGeneratedAt}: {new Date(summary.generated_at * 1000).toLocaleString()}
               </p>
             </>
+          ) : refreshingEmpty ? (
+            <div className="flex min-h-[360px] items-center justify-center">
+              <LoadingCard label={t.newsCollecting} variant="news" />
+            </div>
           ) : (
-            <div className="text-center py-16">
+            <div className="py-16 text-center">
               <p className="text-sm text-fg-muted">{t.newsEmpty}</p>
             </div>
           )}

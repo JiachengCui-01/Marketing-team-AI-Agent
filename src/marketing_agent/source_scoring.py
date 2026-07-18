@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import re
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 
 @dataclass(frozen=True)
@@ -20,6 +20,8 @@ class SourceMeta:
     score: int
     reason: str
     is_weak_signal: bool
+    title: str | None = None
+    display_text: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -86,6 +88,21 @@ AUTHORITATIVE_EXACT_DOMAINS = {
     "forrester.com",
     "cbinsights.com",
     "statista.com",
+    "xinhuanet.com",
+    "news.cn",
+    "people.com.cn",
+    "cctv.com",
+    "cntv.cn",
+    "caixin.com",
+    "yicai.com",
+    "cls.cn",
+    "thepaper.cn",
+    "jiemian.com",
+    "ithome.com",
+    "chinanews.com.cn",
+    "ce.cn",
+    "stcn.com",
+    "36kr.com",
 }
 
 SELF_MEDIA_DOMAINS = {
@@ -97,7 +114,6 @@ SELF_MEDIA_DOMAINS = {
     "ghost.io",
     "mp.weixin.qq.com",
     "weixin.qq.com",
-    "36kr.com",
 }
 
 COMMUNITY_DOMAINS = {
@@ -170,6 +186,29 @@ def score_url(url: str) -> SourceMeta:
     if any(hint in path for hint in OFFICIAL_PATH_HINTS):
         return _meta(url, domain, 2, "Official-site path such as newsroom, press, or investor relations")
     return _meta(url, domain, 2, "Standard website domain; treat as stronger than self-media/community but verify claims")
+
+
+def extract_source_references(text: str) -> list[SourceMeta]:
+    """Extract source references with display text from markdown links when present."""
+    refs: list[SourceMeta] = []
+    seen: set[str] = set()
+
+    for match in _MARKDOWN_LINK_RE.finditer(text):
+        title = _clean_title(match.group(0).split("](", 1)[0].lstrip("["))
+        url = _normalize_url(match.group(1))
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        refs.append(_with_display(score_url(url), title))
+
+    for match in _BARE_URL_RE.finditer(text):
+        url = _normalize_url(match.group(0))
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        refs.append(_with_display(score_url(url), None))
+
+    return sorted(refs, key=lambda source: (-source.score, source.domain, source.url))
 
 
 def score_sources(text: str) -> list[SourceMeta]:
@@ -271,9 +310,40 @@ def _meta(url: str, domain: str, tier: int, reason: str) -> SourceMeta:
         score=TIER_SCORES[tier],
         reason=reason,
         is_weak_signal=tier >= 3,
+        title=None,
+        display_text=_derive_display_text(url, domain),
     )
 
 
 def _strip_existing_credibility_section(text: str, *headings: str) -> str:
     positions = [text.find(heading) for heading in headings if text.find(heading) >= 0]
     return text[: min(positions)].rstrip() if positions else text
+
+
+def _with_display(source: SourceMeta, title: str | None) -> SourceMeta:
+    display = title or _derive_display_text(source.url, source.domain)
+    return SourceMeta(
+        url=source.url,
+        domain=source.domain,
+        tier=source.tier,
+        tier_label=source.tier_label,
+        score=source.score,
+        reason=source.reason,
+        is_weak_signal=source.is_weak_signal,
+        title=title,
+        display_text=display,
+    )
+
+
+def _clean_title(raw: str) -> str | None:
+    title = re.sub(r"\s+", " ", raw).strip()
+    return title or None
+
+
+def _derive_display_text(url: str, domain: str) -> str:
+    parsed = urlparse(url)
+    path = unquote(parsed.path or "").strip("/")
+    if not path:
+        return domain or url
+    tail = path.rsplit("/", 1)[-1].replace("-", " ").replace("_", " ").strip()
+    return tail[:80] if tail else domain or url
