@@ -22,7 +22,7 @@ type Segment =
 
 const MARKDOWN_LINK_RE = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/gi;
 const BARE_URL_RE = /https?:\/\/[^\s<>()\]]+/gi;
-const TRAILING_CITATION_GROUP_RE = /(?:\s*[\uFF08(]?\s*(?:[-\u2013\u2014,;:\uFF0C\uFF1B\u3001]?\s*)?(?:\[[^\]]+\]\(https?:\/\/[^)\s]+\)|https?:\/\/[^\s<>()\]]+)(?:\s*(?:[-\u2013\u2014,;:\uFF0C\uFF1B\u3001]\s*)?(?:\[[^\]]+\]\(https?:\/\/[^)\s]+\)|https?:\/\/[^\s<>()\]]+))*\s*[\uFF09)]?[.)\]]*)+$/i;
+const TRAILING_LINK_RE = /(?:\s*(?:[-–—,;:，；、]?\s*)?(?:\[[^\]]+\]\(https?:\/\/[^)\s]+\)|https?:\/\/[^\s<>()\]]+)[.)\]]*)+$/i;
 
 const OFFICIAL_DOMAINS = new Set([
   "sec.gov",
@@ -207,7 +207,6 @@ function splitCitationSegments(content: string): Segment[] {
 
   const segments: Segment[] = [];
   let markdownBuffer: string[] = [];
-  let inSourceSection = false;
   const flush = () => {
     const text = markdownBuffer.join("\n").trimEnd();
     if (text) segments.push({ kind: "markdown", text });
@@ -215,16 +214,6 @@ function splitCitationSegments(content: string): Segment[] {
   };
 
   for (const line of content.split("\n")) {
-    const nextSourceSection = sourceSectionHeadingState(line);
-    if (nextSourceSection !== null) {
-      inSourceSection = nextSourceSection;
-      markdownBuffer.push(line);
-      continue;
-    }
-    if (inSourceSection) {
-      markdownBuffer.push(line);
-      continue;
-    }
     const parsed = parseCitationLine(line);
     if (!parsed) {
       markdownBuffer.push(line);
@@ -239,12 +228,12 @@ function splitCitationSegments(content: string): Segment[] {
 
 function parseCitationLine(line: string): Segment | null {
   if (!line.trim() || /^#{1,6}\s/.test(line) || /^\s*>/.test(line)) return null;
-  const match = line.match(TRAILING_CITATION_GROUP_RE);
+  const match = line.match(TRAILING_LINK_RE);
   if (!match || match.index == null) return null;
   const citationText = match[0];
   const sources = citationSources(citationText);
   if (sources.length === 0) return null;
-  const rawBody = line.slice(0, match.index).trimEnd().replace(/\s*[-\u2013\u2014,;:\uFF0C\uFF1B\u3001]\s*$/, "");
+  const rawBody = line.slice(0, match.index).trimEnd().replace(/\s*[-–—,;:，；、]\s*$/, "");
   if (!rawBody) return null;
 
   const listMatch = rawBody.match(/^(\s*(?:[-*+]|\d+[.)])\s+)(.*)$/);
@@ -289,7 +278,7 @@ function addSource(sources: CitationSource[], seen: Set<string>, rawUrl: string,
 }
 
 function normalizeUrl(raw: string): string | null {
-  const url = raw.trim().replace(/[.,;:!?)\]\u3002\uFF09\uFF0C\uFF1B\uFF1A\uFF01\uFF1F]*$/g, "");
+  const url = raw.trim().replace(/[.,;:!?)]*$/g, "");
   try {
     const parsed = new URL(url);
     return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.toString() : null;
@@ -339,17 +328,4 @@ function sourceName(domain: string): string {
   if (parts.length <= 2) return domain;
   if (domain.endsWith(".com.cn") || domain.endsWith(".gov.cn")) return parts.slice(-3).join(".");
   return parts.slice(-2).join(".");
-}
-
-function sourceSectionHeadingState(line: string): boolean | null {
-  const match = line.match(/^#{1,6}\s*(.+?)\s*$/);
-  if (!match) return null;
-  const heading = match[1].trim().toLowerCase();
-  return (
-    heading === "sources" ||
-    heading === "source credibility" ||
-    heading === "来源" ||
-    heading === "信息来源" ||
-    heading === "来源可信度"
-  );
 }
