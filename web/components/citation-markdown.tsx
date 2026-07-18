@@ -166,16 +166,18 @@ function CitationLine({ segment }: { segment: Extract<Segment, { kind: "citation
 }
 
 function MarkdownBody({ children, inline = false }: { children: string; inline?: boolean }) {
+  const components = {
+    ...(inline ? { p: ({ children }: { children?: ReactNode }) => <>{children}</> } : {}),
+    a: ({ href, children }: { href?: string; children?: ReactNode }) => {
+      const source = sourceFromHref(href, children);
+      return source ? <CitationCapsules sources={[source]} /> : <>{children}</>;
+    },
+  };
+
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
-      components={{
-        p: inline ? ({ children }) => <>{children}</> : undefined,
-        a: ({ href, children }) => {
-          const source = sourceFromHref(href, children);
-          return source ? <CitationCapsules sources={[source]} /> : <>{children}</>;
-        },
-      }}
+      components={components}
     >
       {children}
     </ReactMarkdown>
