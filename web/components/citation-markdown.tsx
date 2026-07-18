@@ -133,30 +133,33 @@ function CitationLine({ segment }: { segment: Extract<Segment, { kind: "citation
 
 function CitationCapsules({ sources }: { sources: CitationSource[] }) {
   const [open, setOpen] = useState(false);
+  const visibleSources = sources.slice(0, 2);
   return (
     <span className="relative ml-2 inline-flex align-middle">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex max-w-[180px] items-center gap-1 rounded-full border border-border bg-bg-subtle/80 px-1.5 py-0.5 text-[11px] text-fg-muted shadow-sm transition hover:border-accent/40 hover:text-fg"
+        className="inline-flex max-w-[260px] items-center gap-1 overflow-hidden rounded-full border border-border bg-bg-subtle/80 px-1.5 py-0.5 text-[11px] leading-none text-fg-muted shadow-sm transition hover:border-accent/40 hover:text-fg"
         aria-expanded={open}
         title="Show citations"
       >
-        {sources.slice(0, 4).map((source, index) => (
-          <span key={source.url} className="inline-flex items-center gap-0.5">
+        {visibleSources.map((source) => (
+          <span key={source.url} className="inline-flex min-w-0 items-center gap-1">
             <img
               src={source.faviconUrl}
               alt=""
-              className="h-3 w-3 rounded-sm"
+              className="h-3.5 w-3.5 shrink-0 rounded-sm"
               onError={(event) => {
                 event.currentTarget.style.display = "none";
               }}
             />
-            <span>{index + 1}</span>
+            <span className="max-w-[8.5rem] truncate">{sourceName(source.domain)}</span>
           </span>
         ))}
-        {sources.length > 4 ? <span>+{sources.length - 4}</span> : null}
-        <Link2 size={11} />
+        {sources.length > visibleSources.length ? (
+          <span className="shrink-0 text-fg-subtle">+{sources.length - visibleSources.length}</span>
+        ) : null}
+        <Link2 size={11} className="shrink-0" />
       </button>
       {open ? <CitationPopover sources={sources} onClose={() => setOpen(false)} /> : null}
     </span>
@@ -318,4 +321,11 @@ function displayFromUrl(url: string, domain: string): string {
   } catch {
     return domain || url;
   }
+}
+
+function sourceName(domain: string): string {
+  const parts = domain.split(".");
+  if (parts.length <= 2) return domain;
+  if (domain.endsWith(".com.cn") || domain.endsWith(".gov.cn")) return parts.slice(-3).join(".");
+  return parts.slice(-2).join(".");
 }

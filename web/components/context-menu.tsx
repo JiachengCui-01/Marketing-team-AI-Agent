@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
-import { ChevronRight } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 
 export type MenuItem =
   | {
@@ -49,9 +49,8 @@ export function ContextMenu({
     };
   }, [onClose]);
 
-  // Clamp position to viewport
   const left = Math.min(x, typeof window !== "undefined" ? window.innerWidth - 220 : x);
-  const top = Math.min(y, typeof window !== "undefined" ? window.innerHeight - 200 : y);
+  const top = Math.min(y, typeof window !== "undefined" ? window.innerHeight - 240 : y);
 
   return (
     <div
@@ -108,14 +107,22 @@ function SubmenuItem({
   items: MenuItem[];
   onCloseRoot: () => void;
 }) {
+  const [open, setOpen] = useState(false);
+
   return (
-    <div className="relative group">
-      <div className="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-subtle text-fg cursor-default">
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-subtle text-fg"
+      >
         {Icon ? <Icon size={14} /> : <span className="w-3.5" />}
         <span className="flex-1">{label}</span>
-        <ChevronRight size={12} />
-      </div>
-      <div className="absolute left-full top-0 hidden group-hover:block min-w-[180px] rounded-lg border border-border bg-bg-elevated shadow-xl py-1 ml-0.5">
+        <ChevronDown size={12} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open ? (
+        <div className="mx-1 mb-1 mt-0.5 rounded-md border border-border/70 bg-bg-subtle/70 py-1 shadow-inner animate-fade-in">
+          <div className="mb-1 ml-4 h-2 border-l border-border" aria-hidden />
         {items.map((item, i) => {
           if ("type" in item && item.type === "separator") {
             return <div key={i} className="my-1 border-t border-border" />;
@@ -129,7 +136,7 @@ function SubmenuItem({
                 I.onClick();
                 onCloseRoot();
               }}
-              className="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-subtle text-fg"
+              className="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-elevated text-fg"
             >
               {II ? <II size={14} /> : <span className="w-3.5" />}
               <span>{I.label}</span>
@@ -137,6 +144,7 @@ function SubmenuItem({
           );
         })}
       </div>
+      ) : null}
     </div>
   );
 }

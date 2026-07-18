@@ -1,8 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { ArrowLeft, Settings, RefreshCw, Loader2, Newspaper, AlertTriangle, ShieldCheck } from "lucide-react";
 import {
   getNewsConfig,
@@ -18,6 +16,7 @@ import { localizeError, useI18n } from "@/lib/i18n";
 import { Modal } from "@/components/modal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LoadingCard, Spinner } from "@/components/ui/spinner";
+import { CitationMarkdown } from "@/components/citation-markdown";
 
 export function NewsPanel({ onBack }: { onBack: () => void }) {
   const { locale, t } = useI18n();
@@ -137,9 +136,7 @@ export function NewsPanel({ onBack }: { onBack: () => void }) {
             </div>
           ) : summary ? (
             <>
-              <div className="prose-chat">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{summary.summary}</ReactMarkdown>
-              </div>
+              <CitationMarkdown content={summary.summary} />
               <SourceCredibility summary={summary} />
               <p className="mt-6 text-[11px] text-fg-subtle">
                 {t.newsGeneratedAt}: {new Date(summary.generated_at * 1000).toLocaleString()}
