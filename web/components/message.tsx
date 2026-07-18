@@ -80,7 +80,7 @@ export function MessageBubble({
           <span className="whitespace-pre-wrap">{message.content}</span>
         ) : (
           <>
-            <CitationMarkdown content={message.content + (message.pending ? "▍" : "")} />
+            <CitationMarkdown content={message.content + (message.pending ? "▍" : "")} stripSourceSections />
             {message.artifacts && message.artifacts.length > 0 ? (
               <div className="mt-3 flex flex-wrap gap-2">
                 {message.artifacts.map((a) => (

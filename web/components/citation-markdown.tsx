@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ExternalLink, Link2 } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { useI18n } from "@/lib/i18n";
 
 export type CitationSource = {
   url: string;
@@ -163,12 +164,14 @@ function listMarker(prefix: string): string {
 
 export function CitationCapsules({ sources }: { sources: CitationSource[] }) {
   const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const visibleSources = sources.slice(0, 2);
   if (sources.length === 0) return null;
 
   return (
     <span className="relative ml-1.5 inline-flex whitespace-nowrap align-middle">
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="inline-flex max-w-[260px] items-center gap-1 overflow-hidden rounded-full border border-border bg-bg-subtle/80 px-1.5 py-0.5 text-[11px] leading-none text-fg-muted shadow-sm transition hover:border-accent/40 hover:text-fg"
@@ -193,18 +196,48 @@ export function CitationCapsules({ sources }: { sources: CitationSource[] }) {
         ) : null}
         <Link2 size={11} className="shrink-0" />
       </button>
-      {open ? <CitationPopover sources={sources} onClose={() => setOpen(false)} /> : null}
+      {open ? <CitationPopover sources={sources} trigger={buttonRef.current} onClose={() => setOpen(false)} /> : null}
     </span>
   );
 }
 
-function CitationPopover({ sources, onClose }: { sources: CitationSource[]; onClose: () => void }) {
+function CitationPopover({
+  sources,
+  trigger,
+  onClose,
+}: {
+  sources: CitationSource[];
+  trigger: HTMLElement | null;
+  onClose: () => void;
+}) {
+  const { locale } = useI18n();
+  const [position, setPosition] = useState({ left: 0, top: 0 });
+
+  useLayoutEffect(() => {
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const boundary = trigger.closest(".prose-chat")?.getBoundingClientRect();
+    const width = Math.min(360, Math.max(280, window.innerWidth - 32));
+    const edgeGap = 12;
+    const minLeft = Math.max(edgeGap, boundary?.left ?? edgeGap);
+    const maxRight = Math.min(window.innerWidth - edgeGap, boundary?.right ?? window.innerWidth - edgeGap);
+    const left = Math.min(Math.max(rect.left, minLeft), Math.max(minLeft, maxRight - width));
+    const top = Math.min(rect.bottom + 6, window.innerHeight - 220);
+    setPosition({ left, top: Math.max(edgeGap, top) });
+  }, [trigger]);
+
+  const title = locale === "zh" ? "引用" : "Citations";
+  const closeLabel = locale === "zh" ? "关闭" : "Close";
+
   return (
-    <span className="absolute left-0 top-7 z-30 block w-[min(360px,78vw)] rounded-lg border border-border bg-bg-elevated p-2.5 text-left shadow-xl">
+    <span
+      className="fixed z-50 block w-[min(360px,calc(100vw-32px))] rounded-lg border border-border bg-bg-elevated p-2.5 text-left text-sm shadow-xl animate-fade-in"
+      style={{ left: position.left, top: position.top }}
+    >
       <span className="mb-2 flex items-center justify-between text-xs font-medium text-fg">
-        <span>Citations</span>
+        <span>{title}</span>
         <button type="button" onClick={onClose} className="text-fg-subtle hover:text-fg">
-          Close
+          {closeLabel}
         </button>
       </span>
       <span className="block space-y-2">
@@ -225,13 +258,26 @@ function CitationPopover({ sources, onClose }: { sources: CitationSource[]; onCl
               <span className="mt-0.5 block text-[11px] text-fg-subtle">
                 {source.domain} · T{source.tier} · {source.score}
               </span>
-              <span className="mt-1 block text-[11px] leading-snug text-fg-muted">{source.reason}</span>
+              <span className="mt-1 block text-[11px] leading-snug text-fg-muted">
+                {localizedReason(source.reason, locale)}
+              </span>
             </span>
           </a>
         ))}
       </span>
     </span>
   );
+}
+
+function localizedReason(reason: string, locale: string): string {
+  if (locale !== "zh") return reason;
+  if (/Community or social discussion/i.test(reason)) return "社区讨论或社交平台，仅适合作为弱信号参考";
+  if (/Self-media|personal publishing|commentary/i.test(reason)) return "自媒体、个人发布或评论平台，仅适合作为弱信号参考";
+  if (/Government|regulator|primary authority/i.test(reason)) return "政府、监管机构或一手权威来源";
+  if (/Recognized media|research|advisory/i.test(reason)) return "权威媒体、研究机构或咨询机构来源";
+  if (/Official-site path|newsroom|press|investor/i.test(reason)) return "官网新闻、新闻稿或投资者关系等官方路径";
+  if (/Standard website domain|verify claims/i.test(reason)) return "常规网站来源，建议结合更强来源交叉验证";
+  return reason;
 }
 
 function splitCitationSegments(content: string): Segment[] {
