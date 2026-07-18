@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, Settings, RefreshCw, Loader2, Newspaper, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Settings, RefreshCw, Loader2, Newspaper, AlertTriangle, ShieldCheck } from "lucide-react";
 import {
   getNewsConfig,
   getNewsSummary,
@@ -12,6 +12,7 @@ import {
   cancelNews,
   type NewsConfig,
   type NewsSummary,
+  type NewsSource,
 } from "@/lib/api";
 import { localizeError, useI18n } from "@/lib/i18n";
 import { Modal } from "@/components/modal";
@@ -131,6 +132,7 @@ export function NewsPanel({ onBack }: { onBack: () => void }) {
               <div className="prose-chat">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{summary.summary}</ReactMarkdown>
               </div>
+              <SourceCredibility summary={summary} />
               <p className="mt-6 text-[11px] text-fg-subtle">
                 {t.newsGeneratedAt}: {new Date(summary.generated_at * 1000).toLocaleString()}
               </p>
@@ -154,6 +156,69 @@ export function NewsPanel({ onBack }: { onBack: () => void }) {
         />
       ) : null}
     </div>
+  );
+}
+
+function SourceCredibility({ summary }: { summary: NewsSummary }) {
+  const { locale } = useI18n();
+  const sources = summary.sources ?? [];
+  if (sources.length === 0) return null;
+
+  const weakCount = summary.weak_source_count ?? sources.filter((s) => s.is_weak_signal).length;
+  const strongCount = summary.strong_source_count ?? sources.filter((s) => s.tier <= 2).length;
+  const title = locale === "zh" ? "来源可信度" : "Source credibility";
+  const scoreLabel = locale === "zh" ? "综合评分" : "Score";
+  const note =
+    locale === "zh"
+      ? weakCount > 0 && strongCount === 0
+        ? "当前主要来自自媒体或社区讨论，仅适合作为弱信号参考，不宜作为事实依据。"
+        : weakCount > 0
+          ? "已优先采用高等级来源；自媒体和社区讨论仅作为弱信号参考。"
+          : "本摘要优先基于高等级来源。"
+      : weakCount > 0 && strongCount === 0
+        ? "Sources are mainly self-media or community discussion, so treat them as weak signals rather than standalone factual evidence."
+        : weakCount > 0
+          ? "Higher-tier sources are prioritized; self-media and community discussion are included only as weak signals."
+          : "This summary prioritizes higher-tier sources.";
+
+  return (
+    <section className="mt-5 border-t border-border pt-4">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-sm font-medium text-fg">
+          <ShieldCheck size={15} className="text-feature-news" />
+          <span>{title}</span>
+        </div>
+        <span className="text-xs text-fg-subtle">
+          {scoreLabel}: {summary.source_score ?? 0}
+        </span>
+      </div>
+      <p className="mb-3 text-xs leading-relaxed text-fg-muted">{note}</p>
+      <div className="space-y-2">
+        {sources.map((source) => (
+          <SourceRow key={source.url} source={source} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function SourceRow({ source }: { source: NewsSource }) {
+  return (
+    <a
+      href={source.url}
+      target="_blank"
+      rel="noreferrer"
+      className="flex items-center gap-2 rounded-lg border border-border bg-bg-subtle/50 px-3 py-2 text-xs transition hover:border-accent/40 hover:bg-bg-subtle"
+      title={source.reason}
+    >
+      <span className="shrink-0 rounded-md border border-border bg-bg px-1.5 py-0.5 font-medium text-fg-muted">
+        T{source.tier}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-fg">{source.domain}</span>
+      <span className={source.is_weak_signal ? "text-warn" : "text-fg-subtle"}>
+        {source.score}
+      </span>
+    </a>
   );
 }
 

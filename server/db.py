@@ -139,6 +139,10 @@ CREATE TABLE IF NOT EXISTS news_summaries (
     user_id TEXT NOT NULL,
     config_id TEXT,
     summary TEXT NOT NULL,
+    sources_json TEXT NOT NULL DEFAULT '[]',
+    source_score INTEGER NOT NULL DEFAULT 0,
+    strong_source_count INTEGER NOT NULL DEFAULT 0,
+    weak_source_count INTEGER NOT NULL DEFAULT 0,
     generated_at REAL NOT NULL,
     window_start REAL,
     window_end REAL,
@@ -185,6 +189,7 @@ def init() -> None:
             conn.executescript(SCHEMA)
             _migrate_news_config_language(conn)
             _migrate_news_config_cancelled_at(conn)
+            _migrate_news_summary_sources(conn)
             _migrate_image_template_style(conn)
             _seed_image_templates(conn)
         _INITIALIZED = True
@@ -210,6 +215,18 @@ def _migrate_news_config_language(conn: sqlite3.Connection) -> None:
 def _migrate_news_config_cancelled_at(conn: sqlite3.Connection) -> None:
     if "cancelled_at" not in _table_columns(conn, "news_configs"):
         conn.execute("ALTER TABLE news_configs ADD COLUMN cancelled_at REAL")
+
+
+def _migrate_news_summary_sources(conn: sqlite3.Connection) -> None:
+    cols = _table_columns(conn, "news_summaries")
+    if "sources_json" not in cols:
+        conn.execute("ALTER TABLE news_summaries ADD COLUMN sources_json TEXT NOT NULL DEFAULT '[]'")
+    if "source_score" not in cols:
+        conn.execute("ALTER TABLE news_summaries ADD COLUMN source_score INTEGER NOT NULL DEFAULT 0")
+    if "strong_source_count" not in cols:
+        conn.execute("ALTER TABLE news_summaries ADD COLUMN strong_source_count INTEGER NOT NULL DEFAULT 0")
+    if "weak_source_count" not in cols:
+        conn.execute("ALTER TABLE news_summaries ADD COLUMN weak_source_count INTEGER NOT NULL DEFAULT 0")
 
 
 def _migrate_image_template_style(conn: sqlite3.Connection) -> None:
@@ -765,21 +782,44 @@ def add_news_summary(
     generated_at: float,
     window_start: float | None,
     window_end: float | None,
+    sources: list[dict] | None = None,
+    source_score: int = 0,
+    strong_source_count: int = 0,
+    weak_source_count: int = 0,
 ) -> dict:
     _ensure()
     sid = uuid.uuid4().hex
     now = time.time()
+    sources_json = json.dumps(sources or [], ensure_ascii=False)
     with _connect() as conn:
         conn.execute(
-            "INSERT INTO news_summaries (id, user_id, config_id, summary, generated_at, "
-            "window_start, window_end, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (sid, user_id, config_id, summary, generated_at, window_start, window_end, now),
+            "INSERT INTO news_summaries (id, user_id, config_id, summary, sources_json, "
+            "source_score, strong_source_count, weak_source_count, generated_at, "
+            "window_start, window_end, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                sid,
+                user_id,
+                config_id,
+                summary,
+                sources_json,
+                source_score,
+                strong_source_count,
+                weak_source_count,
+                generated_at,
+                window_start,
+                window_end,
+                now,
+            ),
         )
     return {
         "id": sid,
         "user_id": user_id,
         "config_id": config_id,
         "summary": summary,
+        "sources": sources or [],
+        "source_score": source_score,
+        "strong_source_count": strong_source_count,
+        "weak_source_count": weak_source_count,
         "generated_at": generated_at,
         "window_start": window_start,
         "window_end": window_end,
@@ -791,11 +831,19 @@ def get_latest_news_summary(user_id: str) -> dict | None:
     _ensure()
     with _connect() as conn:
         row = conn.execute(
-            "SELECT id, user_id, config_id, summary, generated_at, window_start, window_end, "
+            "SELECT id, user_id, config_id, summary, sources_json, source_score, "
+            "strong_source_count, weak_source_count, generated_at, window_start, window_end, "
             "created_at FROM news_summaries WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
             (user_id,),
         ).fetchone()
-    return dict(row) if row else None
+    if row is None:
+        return None
+    data = dict(row)
+    try:
+        data["sources"] = json.loads(data.pop("sources_json") or "[]")
+    except (ValueError, TypeError):
+        data["sources"] = []
+    return data
 
 
 # ---------- image generation ----------

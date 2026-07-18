@@ -399,10 +399,24 @@ export type NewsConfigPayload = {
 export type NewsSummary = {
   id: string;
   summary: string;
+  sources?: NewsSource[];
+  source_score?: number;
+  strong_source_count?: number;
+  weak_source_count?: number;
   generated_at: number;
   window_start: number | null;
   window_end: number | null;
   created_at: number;
+};
+
+export type NewsSource = {
+  url: string;
+  domain: string;
+  tier: number;
+  tier_label: string;
+  score: number;
+  reason: string;
+  is_weak_signal: boolean;
 };
 
 export async function getNewsConfig(): Promise<NewsConfig | null> {

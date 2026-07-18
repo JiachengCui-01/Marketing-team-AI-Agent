@@ -5,6 +5,8 @@ from typing import Any
 
 import anthropic
 
+from marketing_agent.source_scoring import annotate_markdown_with_source_tiers
+
 from ..config import MODEL_ID, SUBAGENT_EFFORT
 from .base import unavailable_markdown
 
@@ -15,6 +17,13 @@ Rules:
 
 - Start with one compact web search query that covers the user's task.
 - Gather 3-5 distinct, reputable sources when available.
+- Prioritize Tier 1 and Tier 2 sources:
+  * Tier 1: official/regulatory/primary authority sources.
+  * Tier 2: authoritative media, research institutions, and official company websites.
+  * Tier 3: industry self-media or personal commentary.
+  * Tier 4: community discussions and social platforms.
+- Use Tier 3/Tier 4 only as weak market-signal context. They must not be the sole
+  basis for factual claims, and you must naturally state the uncertainty they add.
 - You may run up to two focused follow-up searches if the first result set is
   malformed, empty, or lacks enough date-confirmed sources.
 - If the server reports a search/tool limit after you have any relevant sources,
@@ -24,6 +33,8 @@ Rules:
 - Prefer recent material (≤ 6 months) for "what's happening" questions; older sources are fine
   for background/context.
 - If sources disagree, surface the disagreement.
+- In the Sources section, preserve every URL used so the system can score and label
+  source tiers after generation.
 
 Output format (markdown):
 
@@ -95,7 +106,7 @@ def run(
         )
         text = _extract_text(response.content)
         if text:
-            return text
+            return annotate_markdown_with_source_tiers(text, language=response_language)
         return (
             "## Research Unavailable\n\n"
             f"The research call ended with stop_reason={response.stop_reason!r} "

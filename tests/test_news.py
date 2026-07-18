@@ -32,6 +32,37 @@ class NewsTests(unittest.TestCase):
         self.assertEqual(research_agent.TOOLS[0]["type"], "web_search_20250305")
         self.assertEqual(research_agent.TOOLS[0]["max_uses"], 3)
 
+    def test_research_prompt_and_output_include_source_tiers(self) -> None:
+        from types import SimpleNamespace
+
+        self.assertIn("Tier 1", research_agent.SYSTEM)
+        fake_response = SimpleNamespace(
+            content=[
+                SimpleNamespace(
+                    type="text",
+                    text=(
+                        "## Summary\nSignal.\n\n"
+                        "## Sources\n"
+                        "1. https://www.reuters.com/technology/\n"
+                        "2. https://www.reddit.com/r/marketing/comments/1"
+                    ),
+                )
+            ],
+            stop_reason="end_turn",
+        )
+        client = SimpleNamespace(messages=SimpleNamespace(create=mock.Mock(return_value=fake_response)))
+
+        result = research_agent.run(
+            client,  # type: ignore[arg-type]
+            task="Research AI marketing",
+            topics=["AI marketing"],
+            response_language="en",
+        )
+
+        self.assertIn("## Source Credibility", result)
+        self.assertLess(result.find("reuters.com"), result.find("reddit.com"))
+        self.assertIn("Tier 4", result)
+
     def test_build_task_uses_requested_language(self) -> None:
         from datetime import datetime, timezone
 
@@ -75,12 +106,75 @@ class NewsTests(unittest.TestCase):
         self.assertIsNone(db.get_news_config(self.user["id"])["last_run_at"])
 
     def test_successful_research_is_persisted(self) -> None:
-        digest = "## Summary\nFresh news.\n\n## Sources\n1. https://example.com/news"
+        digest = "## Summary\nFresh news.\n\n## Sources\n1. https://www.sec.gov/news"
         with mock.patch.object(research_agent, "run", return_value=digest):
             record = news.generate_summary(self.config, client=mock.Mock())
 
-        self.assertEqual(record["summary"], digest)
+        self.assertIn("## 来源可信度", record["summary"])
+        self.assertEqual(record["sources"][0]["domain"], "sec.gov")
+        self.assertEqual(record["sources"][0]["tier"], 1)
+        self.assertEqual(record["strong_source_count"], 1)
+        self.assertEqual(record["weak_source_count"], 0)
         self.assertIsNotNone(db.get_news_config(self.user["id"])["last_run_at"])
+
+    def test_weak_only_news_is_marked_uncertain(self) -> None:
+        digest = "## Summary\nMarket discussion.\n\n## Sources\n1. https://www.reddit.com/r/marketing/comments/1"
+        with mock.patch.object(research_agent, "run", return_value=digest):
+            record = news.generate_summary(self.config, client=mock.Mock())
+
+        self.assertIn("弱信号", record["summary"])
+        self.assertEqual(record["strong_source_count"], 0)
+        self.assertEqual(record["weak_source_count"], 1)
+        self.assertEqual(record["sources"][0]["tier"], 4)
+
+    def test_news_sources_are_persisted_and_returned(self) -> None:
+        record = db.add_news_summary(
+            self.user["id"],
+            self.config["id"],
+            "## Summary\nx",
+            generated_at=1.0,
+            window_start=0.0,
+            window_end=1.0,
+            sources=[
+                {
+                    "url": "https://www.reuters.com/world/",
+                    "domain": "reuters.com",
+                    "tier": 2,
+                    "tier_label": "Tier 2 - authoritative media / official website",
+                    "score": 80,
+                    "reason": "Recognized media",
+                    "is_weak_signal": False,
+                }
+            ],
+            source_score=80,
+            strong_source_count=1,
+            weak_source_count=0,
+        )
+
+        latest = db.get_latest_news_summary(self.user["id"])
+
+        self.assertEqual(latest["id"], record["id"])
+        self.assertEqual(latest["source_score"], 80)
+        self.assertEqual(latest["sources"][0]["domain"], "reuters.com")
+
+    def test_news_summary_source_columns_migrate_from_old_schema(self) -> None:
+        db.reset_for_tests()
+        with db._connect() as conn:  # type: ignore[attr-defined]
+            conn.execute(
+                "CREATE TABLE news_summaries ("
+                "id TEXT PRIMARY KEY, user_id TEXT NOT NULL, config_id TEXT, "
+                "summary TEXT NOT NULL, generated_at REAL NOT NULL, window_start REAL, "
+                "window_end REAL, created_at REAL NOT NULL)"
+            )
+
+        db.init()
+
+        with db._connect() as conn:  # type: ignore[attr-defined]
+            cols = db._table_columns(conn, "news_summaries")  # type: ignore[attr-defined]
+        self.assertIn("sources_json", cols)
+        self.assertIn("source_score", cols)
+        self.assertIn("strong_source_count", cols)
+        self.assertIn("weak_source_count", cols)
 
     def test_revert_time_is_next_calendar_day_at_summary_time(self) -> None:
         from datetime import datetime, timezone

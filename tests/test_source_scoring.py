@@ -1,0 +1,72 @@
+from __future__ import annotations
+
+import unittest
+
+from marketing_agent import source_scoring
+
+
+class SourceScoringTests(unittest.TestCase):
+    def test_official_and_authoritative_sources_score_high(self) -> None:
+        official = source_scoring.score_url("https://www.sec.gov/news/press-release")
+        media = source_scoring.score_url("https://www.reuters.com/technology/ai-news")
+
+        self.assertEqual(official.tier, 1)
+        self.assertEqual(media.tier, 2)
+        self.assertFalse(official.is_weak_signal)
+        self.assertGreater(official.score, media.score)
+
+    def test_self_media_and_community_sources_are_weak(self) -> None:
+        medium = source_scoring.score_url("https://medium.com/@analyst/post")
+        substack = source_scoring.score_url("https://example.substack.com/p/post")
+        reddit = source_scoring.score_url("https://www.reddit.com/r/marketing/comments/1")
+        zhihu = source_scoring.score_url("https://www.zhihu.com/question/123")
+
+        self.assertEqual(medium.tier, 3)
+        self.assertEqual(substack.tier, 3)
+        self.assertEqual(reddit.tier, 4)
+        self.assertEqual(zhihu.tier, 4)
+        self.assertTrue(all(s.is_weak_signal for s in (medium, substack, reddit, zhihu)))
+
+    def test_extracts_markdown_and_bare_urls_once(self) -> None:
+        text = (
+            "See [SEC](https://www.sec.gov/news/press-release). "
+            "Also https://www.reuters.com/world/. "
+            "Duplicate https://www.reuters.com/world/."
+        )
+
+        urls = source_scoring.extract_urls(text)
+
+        self.assertEqual(
+            urls,
+            [
+                "https://www.sec.gov/news/press-release",
+                "https://www.reuters.com/world/",
+            ],
+        )
+
+    def test_sources_are_sorted_by_score(self) -> None:
+        text = "\n".join(
+            [
+                "https://www.reddit.com/r/marketing/comments/1",
+                "https://www.sec.gov/news/press-release",
+                "https://medium.com/post",
+            ]
+        )
+
+        sources = source_scoring.score_sources(text)
+
+        self.assertEqual([source.domain for source in sources], ["sec.gov", "medium.com", "reddit.com"])
+
+    def test_annotation_adds_weak_signal_notice(self) -> None:
+        annotated = source_scoring.annotate_markdown_with_source_tiers(
+            "## Summary\nA market rumor. https://www.reddit.com/r/marketing/comments/1",
+            language="en",
+        )
+
+        self.assertIn("## Source Credibility", annotated)
+        self.assertIn("weak signals", annotated)
+        self.assertIn("Tier 4", annotated)
+
+
+if __name__ == "__main__":
+    unittest.main()

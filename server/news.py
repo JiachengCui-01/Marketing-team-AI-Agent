@@ -13,6 +13,12 @@ from zoneinfo import ZoneInfo
 import anthropic
 
 from marketing_agent.agents import research_agent
+from marketing_agent.source_scoring import (
+    annotate_markdown_with_source_tiers,
+    score_sources,
+    source_dicts,
+    summarize_sources,
+)
 
 from . import db
 
@@ -141,10 +147,14 @@ def generate_summary(config: dict, client: anthropic.Anthropic | None = None) ->
         response_language=language,
     )
     summary = _trim_search_preamble(summary, language)
+    summary = annotate_markdown_with_source_tiers(summary, language=language)
     if _research_failed(summary):
         raise NewsGenerationError(
             "新闻检索未返回可用来源，请稍后重试。上一份有效摘要不会被覆盖。"
         )
+
+    sources = score_sources(summary)
+    source_summary = summarize_sources(sources)
 
     record = db.add_news_summary(
         user_id=config["user_id"],
@@ -153,6 +163,8 @@ def generate_summary(config: dict, client: anthropic.Anthropic | None = None) ->
         generated_at=time.time(),
         window_start=window_start,
         window_end=window_end,
+        sources=source_dicts(sources),
+        **source_summary,
     )
     db.set_news_config_last_run(config["user_id"], record["generated_at"])
     return record
