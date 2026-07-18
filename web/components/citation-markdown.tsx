@@ -145,16 +145,14 @@ export function CitationMarkdown({
 
 function CitationLine({ segment }: { segment: Extract<Segment, { kind: "citation" }> }) {
   return (
-    <div className={cn("my-1.5 flex items-baseline gap-2", segment.listPrefix ? "pl-0" : "")}>
-      {segment.listPrefix ? <span className="w-4 shrink-0 text-center">{listMarker(segment.listPrefix)}</span> : null}
-      <div className="min-w-0 flex-1">
-        <span className="inline">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({ children }) => <>{children}</> }}>
-            {segment.body}
-          </ReactMarkdown>
-        </span>
-        <CitationCapsules sources={segment.sources} />
-      </div>
+    <div className={cn("my-1.5", segment.listPrefix ? "pl-0" : "")}>
+      {segment.listPrefix ? <span className="mr-2 inline-block w-4 text-center">{listMarker(segment.listPrefix)}</span> : null}
+      <span className="inline">
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({ children }) => <>{children}</> }}>
+          {segment.body}
+        </ReactMarkdown>
+      </span>
+      <CitationCapsules sources={segment.sources} />
     </div>
   );
 }
@@ -169,7 +167,7 @@ export function CitationCapsules({ sources }: { sources: CitationSource[] }) {
   if (sources.length === 0) return null;
 
   return (
-    <span className="relative ml-2 inline-flex align-middle">
+    <span className="relative ml-1.5 inline-flex whitespace-nowrap align-middle">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
