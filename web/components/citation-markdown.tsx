@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ExternalLink, Link2 } from "lucide-react";
@@ -20,6 +20,11 @@ export type CitationSource = {
 type Segment =
   | { kind: "markdown"; text: string }
   | { kind: "citation"; body: string; sources: CitationSource[]; listPrefix?: string };
+
+type PopoverAnchor = {
+  trigger: DOMRect;
+  boundary: DOMRect | null;
+};
 
 const MARKDOWN_LINK_RE = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/gi;
 const BARE_URL_RE = /https?:\/\/[^\s<>()\]]+/gi;
@@ -164,16 +169,20 @@ function listMarker(prefix: string): string {
 
 export function CitationCapsules({ sources }: { sources: CitationSource[] }) {
   const [open, setOpen] = useState(false);
-  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [anchor, setAnchor] = useState<PopoverAnchor | null>(null);
   const visibleSources = sources.slice(0, 2);
   if (sources.length === 0) return null;
 
   return (
     <span className="relative ml-1.5 inline-flex whitespace-nowrap align-middle">
       <button
-        ref={buttonRef}
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={(event) => {
+          const trigger = event.currentTarget.getBoundingClientRect();
+          const boundary = event.currentTarget.closest(".panel-card")?.getBoundingClientRect() ?? null;
+          setAnchor({ trigger, boundary });
+          setOpen((v) => !v);
+        }}
         className="inline-flex max-w-[260px] items-center gap-1 overflow-hidden rounded-full border border-border bg-bg-subtle/80 px-1.5 py-0.5 text-[11px] leading-none text-fg-muted shadow-sm transition hover:border-accent/40 hover:text-fg"
         aria-expanded={open}
         title="Show citations"
@@ -196,35 +205,22 @@ export function CitationCapsules({ sources }: { sources: CitationSource[] }) {
         ) : null}
         <Link2 size={11} className="shrink-0" />
       </button>
-      {open ? <CitationPopover sources={sources} trigger={buttonRef.current} onClose={() => setOpen(false)} /> : null}
+      {open && anchor ? <CitationPopover sources={sources} anchor={anchor} onClose={() => setOpen(false)} /> : null}
     </span>
   );
 }
 
 function CitationPopover({
   sources,
-  trigger,
+  anchor,
   onClose,
 }: {
   sources: CitationSource[];
-  trigger: HTMLElement | null;
+  anchor: PopoverAnchor;
   onClose: () => void;
 }) {
   const { locale } = useI18n();
-  const [position, setPosition] = useState({ left: 0, top: 0 });
-
-  useLayoutEffect(() => {
-    if (!trigger) return;
-    const rect = trigger.getBoundingClientRect();
-    const boundary = trigger.closest(".prose-chat")?.getBoundingClientRect();
-    const width = Math.min(360, Math.max(280, window.innerWidth - 32));
-    const edgeGap = 12;
-    const minLeft = Math.max(edgeGap, boundary?.left ?? edgeGap);
-    const maxRight = Math.min(window.innerWidth - edgeGap, boundary?.right ?? window.innerWidth - edgeGap);
-    const left = Math.min(Math.max(rect.left, minLeft), Math.max(minLeft, maxRight - width));
-    const top = Math.min(rect.bottom + 6, window.innerHeight - 220);
-    setPosition({ left, top: Math.max(edgeGap, top) });
-  }, [trigger]);
+  const position = popoverPosition(anchor);
 
   const title = locale === "zh" ? "引用" : "Citations";
   const closeLabel = locale === "zh" ? "关闭" : "Close";
@@ -267,6 +263,21 @@ function CitationPopover({
       </span>
     </span>
   );
+}
+
+function popoverPosition(anchor: PopoverAnchor): { left: number; top: number } {
+  const edgeGap = 12;
+  const width = Math.min(360, window.innerWidth - edgeGap * 2);
+  const minLeft = Math.max(edgeGap, anchor.boundary?.left ?? edgeGap);
+  const maxRight = Math.min(window.innerWidth - edgeGap, anchor.boundary?.right ?? window.innerWidth - edgeGap);
+  const maxLeft = Math.max(minLeft, maxRight - width);
+  const left = Math.min(Math.max(anchor.trigger.left, minLeft), maxLeft);
+  const below = anchor.trigger.bottom + 6;
+  const estimatedHeight = 220;
+  const top = below + estimatedHeight > window.innerHeight - edgeGap
+    ? Math.max(edgeGap, anchor.trigger.top - estimatedHeight - 6)
+    : below;
+  return { left, top };
 }
 
 function localizedReason(reason: string, locale: string): string {

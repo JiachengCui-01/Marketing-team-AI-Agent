@@ -249,9 +249,16 @@ def source_dicts(sources: list[SourceMeta]) -> list[dict]:
     return [source.to_dict() for source in sources]
 
 
-def annotate_markdown_with_source_tiers(text: str, *, language: str | None = None) -> str:
+def annotate_markdown_with_source_tiers(
+    text: str,
+    *,
+    language: str | None = None,
+    fallback_source_text: str | None = None,
+    ensure_inline_citations: bool = False,
+) -> str:
     """Append a deterministic source-tier section to research/news markdown."""
-    sources = score_sources(text)
+    scoring_text = text if not fallback_source_text else f"{text}\n\n{fallback_source_text}"
+    sources = score_sources(scoring_text)
     if not sources:
         return text.strip()
 
@@ -260,6 +267,8 @@ def annotate_markdown_with_source_tiers(text: str, *, language: str | None = Non
     base = strip_raw_source_sections(
         _strip_existing_credibility_section(text, marker, zh_marker)
     ).rstrip()
+    if ensure_inline_citations:
+        base = _ensure_inline_citations(base, sources)
     zh = language == "zh" or ("## 摘要" in text and language != "en")
     weak = any(source.is_weak_signal for source in sources)
     strong = any(source.tier <= 2 for source in sources)
@@ -290,6 +299,42 @@ def annotate_markdown_with_source_tiers(text: str, *, language: str | None = Non
             f"[{source.domain}]({source.url})"
         )
     return base + "\n".join(lines)
+
+
+def _ensure_inline_citations(text: str, sources: list[SourceMeta]) -> str:
+    if not sources or extract_urls(text):
+        return text
+
+    citation_sources = sources[:2]
+    citation = " " + " ".join(f"[{source.domain}]({source.url})" for source in citation_sources)
+    lines = text.splitlines()
+    attached = 0
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if attached >= 6:
+            break
+        if not _is_citable_line(stripped):
+            continue
+        lines[index] = line.rstrip() + citation
+        attached += 1
+
+    if attached == 0:
+        return text.rstrip() + citation
+    return "\n".join(lines).strip()
+
+
+def _is_citable_line(stripped: str) -> bool:
+    if not stripped:
+        return False
+    if stripped.startswith("#"):
+        return False
+    if set(stripped) <= {"-", "_", "*"}:
+        return False
+    if stripped.lower() in {"strengths", "weaknesses", "opportunities", "threats"}:
+        return False
+    if len(stripped) < 18:
+        return False
+    return True
 
 
 def strip_raw_source_sections(text: str) -> str:

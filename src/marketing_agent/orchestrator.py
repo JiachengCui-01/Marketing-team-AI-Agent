@@ -17,6 +17,7 @@ from .config import (
     ORCHESTRATOR_MAX_TOKENS,
 )
 from .conversation import Conversation
+from .source_scoring import annotate_markdown_with_source_tiers
 from .tools.delegation_tools import DELEGATION_TOOLS
 
 SYSTEM = """You are the chief of staff for an enterprise marketing team. Your job is to
@@ -48,6 +49,10 @@ Hard rules:
 9. If your previous assistant message asked a clarification question and the latest
    user message answers it, merge that answer into the original task and execute the
    task. Do not ask the same clarification again.
+10. When synthesizing research specialist output, preserve inline citation links at
+    the end of factual sentences or bullets. Do not drop the specialist's source
+    URLs or Source Credibility notes; the UI depends on those URLs to render source
+    capsules and source-tier risk labels.
 
 Be decisive. Don't ask clarifying questions unless the request is genuinely ambiguous.
 """
@@ -77,6 +82,7 @@ def run_orchestrator(
     """
     conversation.messages.append({"role": "user", "content": user_message})
     failed_specialists: set[str] = set()
+    research_contexts: list[str] = []
 
     for _ in range(MAX_TOOL_ROUNDS):
         response = client.messages.create(
@@ -104,7 +110,7 @@ def run_orchestrator(
             )
 
         if response.stop_reason == "end_turn":
-            final_text = _final_text(response.content)
+            final_text = _finalize_text(_final_text(response.content), research_contexts)
             # Stream deltas of the already-completed text so the UI sees typewriter output.
             if on_event:
                 _stream_text(on_event, final_text)
@@ -135,6 +141,8 @@ def run_orchestrator(
                     on_event("delegating", {"specialist": block.name, "input": block.input})
                 try:
                     result = _dispatch(client, block.name, block.input, on_event=on_event)
+                    if block.name == "delegate_to_research_agent":
+                        research_contexts.append(result)
                     if _is_unavailable_result(result):
                         failed_specialists.add(block.name)
                         unavailable_results.append(result)
@@ -165,7 +173,7 @@ def run_orchestrator(
                 return final_text
             continue
 
-        final = _final_text(response.content)
+        final = _finalize_text(_final_text(response.content), research_contexts)
         if on_event:
             _stream_text(on_event, final)
             on_event("result", {"text": final})
@@ -189,6 +197,23 @@ def _stream_text(on_event: Callable[[str, dict], None], text: str, chunk: int = 
 
 def _final_text(content: list) -> str:
     return "\n".join(b.text for b in content if b.type == "text").strip()
+
+
+def _finalize_text(text: str, research_contexts: list[str]) -> str:
+    if not research_contexts:
+        return text
+    return annotate_markdown_with_source_tiers(
+        text,
+        language=_language_for_text(text),
+        fallback_source_text="\n\n".join(research_contexts),
+        ensure_inline_citations=True,
+    )
+
+
+def _language_for_text(text: str) -> str:
+    cjk = sum(1 for char in text if "\u4e00" <= char <= "\u9fff")
+    letters = sum(1 for char in text if char.isalpha())
+    return "zh" if cjk >= max(4, letters // 5) else "en"
 
 
 def _is_unavailable_result(text: str) -> bool:
