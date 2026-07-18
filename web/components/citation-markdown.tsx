@@ -146,7 +146,7 @@ export function CitationMarkdown({
 function CitationLine({ segment }: { segment: Extract<Segment, { kind: "citation" }> }) {
   return (
     <div className={cn("my-1.5 flex items-baseline gap-2", segment.listPrefix ? "pl-0" : "")}>
-      {segment.listPrefix ? <span className="shrink-0">{segment.listPrefix}</span> : null}
+      {segment.listPrefix ? <span className="w-4 shrink-0 text-center">{listMarker(segment.listPrefix)}</span> : null}
       <div className="min-w-0 flex-1">
         <span className="inline">
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({ children }) => <>{children}</> }}>
@@ -157,6 +157,10 @@ function CitationLine({ segment }: { segment: Extract<Segment, { kind: "citation
       </div>
     </div>
   );
+}
+
+function listMarker(prefix: string): string {
+  return /^[-*+]$/.test(prefix) ? "•" : prefix;
 }
 
 export function CitationCapsules({ sources }: { sources: CitationSource[] }) {
@@ -244,6 +248,11 @@ function splitCitationSegments(content: string): Segment[] {
   };
 
   for (const line of content.split("\n")) {
+    const standaloneSources = standaloneCitationSources(line);
+    if (standaloneSources.length > 0 && attachStandaloneCitation(markdownBuffer, segments, standaloneSources)) {
+      continue;
+    }
+
     const parsed = parseCitationLine(line);
     if (!parsed) {
       markdownBuffer.push(line);
@@ -275,6 +284,69 @@ function parseCitationLine(line: string): Segment | null {
     };
   }
   return { kind: "citation", body: rawBody.trim(), sources };
+}
+
+function standaloneCitationSources(line: string): CitationSource[] {
+  const withoutListPrefix = line.trim().replace(/^(?:[-*+]|\d+[.)])\s+/, "").trim();
+  if (!withoutListPrefix) return [];
+  const trailingCitation = trailingCitationText(withoutListPrefix);
+  if (!trailingCitation || trailingCitation.start !== 0) return [];
+  return citationSources(trailingCitation.text);
+}
+
+function attachStandaloneCitation(
+  markdownBuffer: string[],
+  segments: Segment[],
+  sources: CitationSource[],
+): boolean {
+  const previousCitation = segments[segments.length - 1];
+  if (markdownBuffer.length === 0 && previousCitation?.kind === "citation") {
+    previousCitation.sources = mergeSources(previousCitation.sources, sources);
+    return true;
+  }
+
+  let previousLineIndex = markdownBuffer.length - 1;
+  while (previousLineIndex >= 0 && !markdownBuffer[previousLineIndex].trim()) {
+    previousLineIndex -= 1;
+  }
+  if (previousLineIndex < 0) return false;
+
+  const previousLine = markdownBuffer[previousLineIndex];
+  if (/^#{1,6}\s/.test(previousLine) || /^\s*>/.test(previousLine)) return false;
+  const segment = lineToCitationSegment(previousLine, sources);
+  if (!segment) return false;
+
+  const before = markdownBuffer.slice(0, previousLineIndex).join("\n").trimEnd();
+  if (before) segments.push({ kind: "markdown", text: before });
+  segments.push(segment);
+  markdownBuffer.length = 0;
+  return true;
+}
+
+function lineToCitationSegment(line: string, sources: CitationSource[]): Extract<Segment, { kind: "citation" }> | null {
+  const body = line.trimEnd();
+  if (!body.trim()) return null;
+  const listMatch = body.match(/^(\s*(?:[-*+]|\d+[.)])\s+)(.*)$/);
+  if (listMatch) {
+    return {
+      kind: "citation",
+      listPrefix: listMatch[1].trim(),
+      body: listMatch[2].trim(),
+      sources,
+    };
+  }
+  return { kind: "citation", body: body.trim(), sources };
+}
+
+function mergeSources(existing: CitationSource[], incoming: CitationSource[]): CitationSource[] {
+  const seen = new Set(existing.map((source) => source.url));
+  const merged = [...existing];
+  for (const source of incoming) {
+    if (seen.has(source.url)) continue;
+    seen.add(source.url);
+    merged.push(source);
+  }
+  return merged.sort((a, b) => b.score - a.score || a.domain.localeCompare(b.domain));
 }
 
 function trailingCitationText(line: string): { start: number; text: string } | null {
