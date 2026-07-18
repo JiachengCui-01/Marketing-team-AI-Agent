@@ -66,6 +66,37 @@ class NewsTests(unittest.TestCase):
         self.assertLess(result.find("reuters.com"), result.find("reddit.com"))
         self.assertIn("Tier 4", result)
 
+    def test_research_extracts_tool_citation_metadata(self) -> None:
+        from types import SimpleNamespace
+
+        fake_response = SimpleNamespace(
+            content=[
+                SimpleNamespace(
+                    type="text",
+                    text="## Summary\nAI market activity is accelerating.",
+                    citations=[
+                        SimpleNamespace(
+                            title="Reuters AI",
+                            url="https://www.reuters.com/technology/ai/",
+                        )
+                    ],
+                )
+            ],
+            stop_reason="end_turn",
+        )
+        client = SimpleNamespace(messages=SimpleNamespace(create=mock.Mock(return_value=fake_response)))
+
+        result = research_agent.run(
+            client,  # type: ignore[arg-type]
+            task="Research AI marketing",
+            topics=["AI marketing"],
+            response_language="en",
+        )
+
+        self.assertIn("[Reuters AI](https://www.reuters.com/technology/ai/)", result)
+        self.assertIn("## Source Credibility", result)
+        self.assertIn("Tier 2", result)
+
     def test_build_task_uses_requested_language(self) -> None:
         from datetime import datetime, timezone
 

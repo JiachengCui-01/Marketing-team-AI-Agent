@@ -125,4 +125,26 @@ def run(
 
 
 def _extract_text(content: list[Any]) -> str:
-    return "\n".join(block.text for block in content if block.type == "text").strip()
+    parts: list[str] = []
+    for block in content:
+        if block.type != "text":
+            continue
+        text = block.text
+        citations = _block_citation_links(block)
+        if citations and not any(url in text for _, url in citations):
+            text = text.rstrip() + " " + " ".join(f"[{title}]({url})" for title, url in citations)
+        parts.append(text)
+    return "\n".join(parts).strip()
+
+
+def _block_citation_links(block: Any) -> list[tuple[str, str]]:
+    links: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for citation in getattr(block, "citations", None) or []:
+        url = str(getattr(citation, "url", "") or "").strip()
+        if not url or url in seen:
+            continue
+        title = str(getattr(citation, "title", "") or "").strip() or url
+        seen.add(url)
+        links.append((title, url))
+    return links

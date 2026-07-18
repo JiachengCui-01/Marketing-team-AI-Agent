@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ExternalLink, Link2 } from "lucide-react";
@@ -26,12 +26,18 @@ type PopoverAnchor = {
   boundary: DOMRect | null;
 };
 
+type PopoverPosition = {
+  left: number;
+  top: number;
+  width: number;
+};
+
 const MARKDOWN_LINK_RE = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/gi;
 const BARE_URL_RE = /https?:\/\/[^\s<>()\]]+/gi;
 const LINK_OR_URL = String.raw`(?:\[[^\]]+\]\(https?:\/\/[^)\s]+\)|https?:\/\/[^\s<>()\]]+)`;
-const DATE_OR_STATUS = String.raw`(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}|更新|updated?|更新版)`;
+const DATE_OR_STATUS = String.raw`(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}|\u66f4\u65b0|updated?|\u66f4\u65b0\u7248)`;
 const TRAILING_LINK_RE = new RegExp(
-  String.raw`(?:\s*(?:[-–—,;:，；、]?\s*)?${LINK_OR_URL}(?:\s*(?:[,;，；、]\s*)?${DATE_OR_STATUS})?[.)\]）]*)+$`,
+  String.raw`(?:\s*(?:[-–—,;:\uFF0C\uFF1B\u3001]?\s*)?${LINK_OR_URL}(?:\s*(?:[,;\uFF0C\uFF1B\u3001]\s*)?${DATE_OR_STATUS})?[.)\]\uFF09\u3002\uFF01\uFF1F]*)+$`,
   "i",
 );
 
@@ -138,9 +144,7 @@ export function CitationMarkdown({
     <div className="prose-chat">
       {segments.map((segment, index) =>
         segment.kind === "markdown" ? (
-          <ReactMarkdown key={index} remarkPlugins={[remarkGfm]}>
-            {segment.text}
-          </ReactMarkdown>
+          <MarkdownBody key={index}>{segment.text}</MarkdownBody>
         ) : (
           <CitationLine key={index} segment={segment} />
         ),
@@ -154,12 +158,27 @@ function CitationLine({ segment }: { segment: Extract<Segment, { kind: "citation
     <div className={cn("my-1.5", segment.listPrefix ? "pl-0" : "")}>
       {segment.listPrefix ? <span className="mr-2 inline-block w-4 text-center">{listMarker(segment.listPrefix)}</span> : null}
       <span className="inline">
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({ children }) => <>{children}</> }}>
-          {segment.body}
-        </ReactMarkdown>
+        <MarkdownBody inline>{segment.body}</MarkdownBody>
       </span>
       <CitationCapsules sources={segment.sources} />
     </div>
+  );
+}
+
+function MarkdownBody({ children, inline = false }: { children: string; inline?: boolean }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        p: inline ? ({ children }) => <>{children}</> : undefined,
+        a: ({ href, children }) => {
+          const source = sourceFromHref(href, children);
+          return source ? <CitationCapsules sources={[source]} /> : <>{children}</>;
+        },
+      }}
+    >
+      {children}
+    </ReactMarkdown>
   );
 }
 
@@ -227,8 +246,8 @@ function CitationPopover({
 
   return (
     <span
-      className="fixed z-50 block w-[min(360px,calc(100vw-32px))] rounded-lg border border-border bg-bg-elevated p-2.5 text-left text-sm shadow-xl animate-fade-in"
-      style={{ left: position.left, top: position.top }}
+      className="fixed z-50 block rounded-lg border border-border bg-bg-elevated p-2.5 text-left text-sm shadow-xl animate-fade-in"
+      style={{ left: position.left, top: position.top, width: position.width }}
     >
       <span className="mb-2 flex items-center justify-between text-xs font-medium text-fg">
         <span>{title}</span>
@@ -265,19 +284,18 @@ function CitationPopover({
   );
 }
 
-function popoverPosition(anchor: PopoverAnchor): { left: number; top: number } {
-  const edgeGap = 12;
-  const width = Math.min(360, window.innerWidth - edgeGap * 2);
-  const minLeft = Math.max(edgeGap, anchor.boundary?.left ?? edgeGap);
-  const maxRight = Math.min(window.innerWidth - edgeGap, anchor.boundary?.right ?? window.innerWidth - edgeGap);
+function popoverPosition(anchor: PopoverAnchor): PopoverPosition {
+  const edgeGap = 8;
+  const boundaryRightInset = 14;
+  const boundaryLeft = anchor.boundary?.left ?? 0;
+  const boundaryRight = anchor.boundary ? anchor.boundary.right - boundaryRightInset : window.innerWidth;
+  const availableWidth = Math.max(240, boundaryRight - boundaryLeft - edgeGap * 2);
+  const width = Math.min(360, availableWidth);
+  const minLeft = Math.max(edgeGap, boundaryLeft + edgeGap);
+  const maxRight = Math.min(window.innerWidth - edgeGap, boundaryRight - edgeGap);
   const maxLeft = Math.max(minLeft, maxRight - width);
   const left = Math.min(Math.max(anchor.trigger.left, minLeft), maxLeft);
-  const below = anchor.trigger.bottom + 6;
-  const estimatedHeight = 220;
-  const top = below + estimatedHeight > window.innerHeight - edgeGap
-    ? Math.max(edgeGap, anchor.trigger.top - estimatedHeight - 6)
-    : below;
-  return { left, top };
+  return { left, top: anchor.trigger.bottom + 3, width };
 }
 
 function localizedReason(reason: string, locale: string): string {
@@ -445,6 +463,22 @@ function citationSources(text: string): CitationSource[] {
   }
 
   return sources.sort((a, b) => b.score - a.score || a.domain.localeCompare(b.domain));
+}
+
+function sourceFromHref(href: string | undefined, children: ReactNode): CitationSource | null {
+  if (!href) return null;
+  const sources: CitationSource[] = [];
+  addSource(sources, new Set<string>(), href, textFromChildren(children));
+  return sources[0] ?? null;
+}
+
+function textFromChildren(children: ReactNode): string | null {
+  if (typeof children === "string") return children;
+  if (typeof children === "number") return String(children);
+  if (Array.isArray(children)) {
+    return children.map(textFromChildren).filter(Boolean).join(" ") || null;
+  }
+  return null;
 }
 
 function addSource(sources: CitationSource[], seen: Set<string>, rawUrl: string, title: string | null) {
