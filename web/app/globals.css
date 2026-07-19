@@ -116,6 +116,28 @@ html, body {
     linear-gradient(180deg, #ffffff 0%, #fafdff 42%, #dff7ff 68%, #1670ff 100%);
 }
 
+@keyframes session-running-pulse {
+  0%, 100% {
+    transform: scale(0.9);
+    opacity: 0.72;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+}
+
+@keyframes session-running-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.65;
+  }
+  100% {
+    transform: scale(2.25);
+    opacity: 0;
+  }
+}
+
 /* Keyboard focus ring only (avoids ring on mouse click). */
 *:focus-visible {
   outline: none;
@@ -305,6 +327,20 @@ html, body {
   .trace-dot-neutral {
     color: rgb(var(--fg-muted));
     border-color: rgb(var(--border));
+  }
+  .session-running-indicator {
+    @apply relative ml-1 h-2.5 w-2.5 shrink-0 rounded-full;
+    background: rgb(var(--accent));
+    box-shadow:
+      0 0 0 3px rgb(var(--accent) / 0.14),
+      0 0 14px rgb(var(--accent) / 0.55);
+    animation: session-running-pulse 1.15s ease-in-out infinite;
+  }
+  .session-running-indicator::after {
+    content: "";
+    @apply absolute inset-0 rounded-full;
+    border: 1px solid rgb(var(--accent) / 0.58);
+    animation: session-running-ring 1.15s ease-out infinite;
   }
   /* Smooth focus state for interactive elements */
   @supports (outline-offset: 0) {

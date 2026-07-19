@@ -78,10 +78,10 @@ export default function HomePage() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [trace, setTrace] = useState<TraceEvent[]>([]);
+  const [messagesBySession, setMessagesBySession] = useState<Record<string, ChatMessage[]>>({});
+  const [traceBySession, setTraceBySession] = useState<Record<string, TraceEvent[]>>({});
+  const [runningSessions, setRunningSessions] = useState<Record<string, boolean>>({});
   const [input, setInput] = useState("");
-  const [busy, setBusy] = useState(false);
   const [attached, setAttached] = useState<UploadResponse[]>([]);
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const [workspaceFileIds, setWorkspaceFileIds] = useState<string[]>([]);
@@ -93,8 +93,13 @@ export default function HomePage() {
   const [view, setView] = useState<"chat" | "news" | "image">("chat");
   const [leftWidth, setLeftWidth] = useState(LEFT_MIN_WIDTH);
   const [rightWidth, setRightWidth] = useState(RIGHT_MIN_WIDTH);
-  const closeRef = useRef<(() => void) | null>(null);
+  const closeRefs = useRef<Map<string, () => void>>(new Map());
+  const activeIdRef = useRef<string | null>(null);
   const workspaceHandleRef = useRef<DirectoryHandle | null>(null);
+
+  const messages = activeId ? messagesBySession[activeId] ?? [] : [];
+  const trace = activeId ? traceBySession[activeId] ?? [] : [];
+  const busy = activeId ? !!runningSessions[activeId] : false;
 
   const applyUserSettings = useCallback(
     (profile: UserProfile) => {
@@ -108,6 +113,30 @@ export default function HomePage() {
     (profile: UserProfile | null = user) =>
       profile ? `${ACTIVE_KEY}:${profile.account}` : ACTIVE_KEY,
     [user],
+  );
+
+  useEffect(() => {
+    activeIdRef.current = activeId;
+  }, [activeId]);
+
+  const setSessionMessages = useCallback(
+    (sessionId: string, updater: (messages: ChatMessage[]) => ChatMessage[]) => {
+      setMessagesBySession((current) => ({
+        ...current,
+        [sessionId]: updater(current[sessionId] ?? []),
+      }));
+    },
+    [],
+  );
+
+  const setSessionTrace = useCallback(
+    (sessionId: string, updater: (events: TraceEvent[]) => TraceEvent[]) => {
+      setTraceBySession((current) => ({
+        ...current,
+        [sessionId]: updater(current[sessionId] ?? []),
+      }));
+    },
+    [],
   );
 
   const maxSidebarWidth = useCallback((side: "left" | "right", min: number) => {
@@ -196,37 +225,33 @@ export default function HomePage() {
       setView("chat");
       setActiveId(id);
       window.localStorage.setItem(activeKey(), id);
-      setTrace([]);
       setPreview(null);
+      if (messagesBySession[id]) return;
       try {
         const { messages: stored } = await getSessionMessages(id);
-        setMessages(
-          stored.map((m) => ({
+        setMessagesBySession((current) => ({
+          ...current,
+          [id]: stored.map((m) => ({
             id: newId(),
             role: m.role,
             content: m.content,
             artifacts: m.artifacts,
           })),
-        );
+        }));
       } catch {
-        setMessages([]);
+        setMessagesBySession((current) => ({ ...current, [id]: [] }));
       }
     },
-    [activeKey],
+    [activeKey, messagesBySession],
   );
 
   const handleNewChat = useCallback(async () => {
-    if (closeRef.current) {
-      closeRef.current();
-      closeRef.current = null;
-    }
     setView("chat");
-    setBusy(false);
-    setMessages([]);
-    setTrace([]);
     setAttached([]);
     setPreview(null);
     const id = await store.createSession();
+    setMessagesBySession((current) => ({ ...current, [id]: [] }));
+    setTraceBySession((current) => ({ ...current, [id]: [] }));
     setActiveId(id);
     window.localStorage.setItem(activeKey(), id);
   }, [activeKey, store]);
@@ -251,8 +276,22 @@ export default function HomePage() {
     const text = (override ?? input).trim();
     if (!text || busy) return;
     setInput("");
-    setBusy(true);
-    setTrace([]);
+
+    let sid: string;
+    try {
+      sid = await ensureSession();
+    } catch (e) {
+      if (activeId) {
+        setSessionMessages(activeId, (m) => [
+          ...m,
+          { id: newId(), role: "assistant", content: `${t.failedToStartSession}: ${String(e)}` },
+        ]);
+      }
+      return;
+    }
+
+    setRunningSessions((current) => ({ ...current, [sid]: true }));
+    setTraceBySession((current) => ({ ...current, [sid]: [] }));
 
     const userMsg: ChatMessage = { id: newId(), role: "user", content: text };
     const pendingId = newId();
@@ -263,26 +302,17 @@ export default function HomePage() {
       pending: true,
       status: deriveStatus([], t),
     };
-    setMessages((m) => [...m, userMsg, pendingMsg]);
-
-    let sid: string;
-    try {
-      sid = await ensureSession();
-    } catch (e) {
-      setMessages((m) =>
-        m.map((msg) =>
-          msg.id === pendingId
-            ? { ...msg, pending: false, content: `${t.failedToStartSession}: ${String(e)}` }
-            : msg,
-        ),
-      );
-      setBusy(false);
-      return;
-    }
+    setSessionMessages(sid, (m) => [...m, userMsg, pendingMsg]);
 
     const fileIds = Array.from(new Set([...attached.map((a) => a.file_id), ...workspaceFileIds]));
     const skillIds = selectedSkillIds;
     const url = streamUrl(sid, text, fileIds, skillIds);
+
+    const updatePending = (updater: (msg: ChatMessage) => ChatMessage) => {
+      setSessionMessages(sid, (current) =>
+        current.map((msg) => (msg.id === pendingId ? updater(msg) : msg)),
+      );
+    };
 
     const recoverAfterStreamError = async () => {
       await new Promise((resolve) => window.setTimeout(resolve, 1500));
@@ -299,7 +329,7 @@ export default function HomePage() {
           .find((msg) => msg.role === "assistant" && msg.content.trim().length > 0);
 
         if (recoveredAssistant) {
-          setMessages(hydrated);
+          setMessagesBySession((current) => ({ ...current, [sid]: hydrated }));
           store.touch();
           return;
         }
@@ -316,43 +346,33 @@ export default function HomePage() {
             }))
           : [];
         if (fallbackEvents.length > 0) {
-          setTrace((t) => [...t, ...fallbackEvents]);
+          setSessionTrace(sid, (events) => [...events, ...fallbackEvents]);
         }
-        setMessages((m) =>
-          m.map((msg) =>
-            msg.id === pendingId
-              ? {
-                  ...msg,
-                  pending: false,
-                  status: undefined,
-                  content:
-                    completed.text ||
-                    (completed.ok
-                      ? `${t.error}: ${t.noTextReturned}`
-                      : `${t.error}: ${t.noMessageReturned}`),
-                }
-              : msg,
-          ),
-        );
+        updatePending((msg) => ({
+          ...msg,
+          pending: false,
+          status: undefined,
+          content:
+            completed.text ||
+            (completed.ok
+              ? `${t.error}: ${t.noTextReturned}`
+              : `${t.error}: ${t.noMessageReturned}`),
+        }));
         store.touch();
         return;
       } catch (fallbackErr) {
         console.error("non-stream fallback failed", fallbackErr);
       }
 
-      setMessages((m) =>
-        m.map((msg) =>
-          msg.id === pendingId && msg.pending
-            ? {
-                ...msg,
-                pending: false,
-                status: undefined,
-                content:
-                  msg.content ||
-                  `${t.error}: ${API_BASE}`,
-              }
-            : msg,
-        ),
+      updatePending((msg) =>
+        msg.pending
+          ? {
+              ...msg,
+              pending: false,
+              status: undefined,
+              content: msg.content || `${t.error}: ${API_BASE}`,
+            }
+          : msg,
       );
     };
 
@@ -360,109 +380,76 @@ export default function HomePage() {
       url,
       (e) => {
         const traced = { ...e, ts: Date.now() } as TraceEvent;
-        setTrace((prevTrace) => {
+        setSessionTrace(sid, (prevTrace) => {
           const next = [...prevTrace, traced];
-          // Update the pending bubble's status chip from the latest trace.
-          setMessages((m) =>
-            m.map((msg) =>
-              msg.id === pendingId && msg.pending && msg.content.length === 0
-                ? { ...msg, status: deriveStatus(next, t) }
-                : msg,
-            ),
+          updatePending((msg) =>
+            msg.pending && msg.content.length === 0
+              ? { ...msg, status: deriveStatus(next, t) }
+              : msg,
           );
           return next;
         });
 
         if (e.event === "assistant_delta") {
           const delta = String(e.payload.delta ?? "");
-          setMessages((m) =>
-            m.map((msg) =>
-              msg.id === pendingId
-                ? { ...msg, content: msg.content + delta, status: undefined }
-                : msg,
-            ),
-          );
+          updatePending((msg) => ({ ...msg, content: msg.content + delta, status: undefined }));
         } else if (e.event === "artifact_created") {
           const artifact: MessageArtifact = {
             artifact_id: String(e.payload.artifact_id),
             filename: String(e.payload.filename),
             mime: String(e.payload.mime ?? "application/pdf"),
           };
-          setMessages((m) =>
-            m.map((msg) =>
-              msg.id === pendingId
-                ? { ...msg, artifacts: [...(msg.artifacts ?? []), artifact] }
-                : msg,
-            ),
-          );
-          // Auto-select in preview pane.
-          setPreview({
-            source: "artifact",
-            id: artifact.artifact_id,
-            filename: artifact.filename,
-            mime: artifact.mime,
-          });
+          updatePending((msg) => ({ ...msg, artifacts: [...(msg.artifacts ?? []), artifact] }));
+          if (activeIdRef.current === sid) {
+            setPreview({
+              source: "artifact",
+              id: artifact.artifact_id,
+              filename: artifact.filename,
+              mime: artifact.mime,
+            });
+          }
         } else if (e.event === "result") {
           const finalText = String(e.payload.text ?? "");
-          setMessages((m) =>
-            m.map((msg) =>
-              msg.id === pendingId
-                ? {
-                    ...msg,
-                    pending: false,
-                    status: undefined,
-                    content: finalText || msg.content,
-                  }
-                : msg,
-            ),
-          );
+          updatePending((msg) => ({
+            ...msg,
+            pending: false,
+            status: undefined,
+            content: finalText || msg.content,
+          }));
         } else if (e.event === "error") {
-          setMessages((m) =>
-            m.map((msg) =>
-              msg.id === pendingId
-                ? {
-                    ...msg,
-                    pending: false,
-                    status: undefined,
-                    content: `**${t.error}:** ${String(e.payload.message ?? "")}`,
-                  }
-                : msg,
-            ),
-          );
+          updatePending((msg) => ({
+            ...msg,
+            pending: false,
+            status: undefined,
+            content: `**${t.error}:** ${String(e.payload.message ?? "")}`,
+          }));
         } else if (e.event === "cancelled") {
-          setMessages((m) =>
-            m.map((msg) =>
-              msg.id === pendingId
-                ? {
-                    ...msg,
-                    pending: false,
-                    status: undefined,
-                    content:
-                      msg.content ||
-                      `**${t.streamCancelled}:** ${String(e.payload.message ?? t.connectionClosed)}`,
-                  }
-                : msg,
-            ),
-          );
+          updatePending((msg) => ({
+            ...msg,
+            pending: false,
+            status: undefined,
+            content:
+              msg.content ||
+              `**${t.streamCancelled}:** ${String(e.payload.message ?? t.connectionClosed)}`,
+          }));
         }
       },
       () => {
-        setBusy(false);
-        closeRef.current = null;
+        setRunningSessions((current) => ({ ...current, [sid]: false }));
+        closeRefs.current.delete(sid);
         store.touch();
       },
       (err) => {
         console.error("stream error", err);
         void recoverAfterStreamError();
-        setBusy(false);
-        closeRef.current = null;
+        setRunningSessions((current) => ({ ...current, [sid]: false }));
+        closeRefs.current.delete(sid);
       },
     );
-    closeRef.current = close;
+    closeRefs.current.set(sid, close);
     // Clear attachments after sending.
     setAttached([]);
-  }, [input, busy, attached, workspaceFileIds, selectedSkillIds, ensureSession, store, t]);
-
+  }, [input, busy, activeId, attached, workspaceFileIds, selectedSkillIds, ensureSession, setSessionMessages, setSessionTrace, store, t]);
   const onPreviewUpload = useCallback((f: UploadResponse) => {
     setPreview({
       source: "upload",
@@ -483,11 +470,26 @@ export default function HomePage() {
 
   const handleDeleteSession = useCallback(
     async (id: string) => {
+      closeRefs.current.get(id)?.();
+      closeRefs.current.delete(id);
       await store.deleteSession(id);
+      setMessagesBySession((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+      setTraceBySession((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+      setRunningSessions((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
       if (id === activeId) {
         setActiveId(null);
-        setMessages([]);
-        setTrace([]);
         setPreview(null);
         window.localStorage.removeItem(activeKey());
       }
@@ -499,11 +501,28 @@ export default function HomePage() {
     async (id: string) => {
       // Sessions in this group are about to be cascade-deleted server-side.
       const affected = store.sessions.filter((s) => s.group_id === id);
+      for (const session of affected) {
+        closeRefs.current.get(session.id)?.();
+        closeRefs.current.delete(session.id);
+      }
       await store.deleteGroup(id);
+      setMessagesBySession((current) => {
+        const next = { ...current };
+        for (const session of affected) delete next[session.id];
+        return next;
+      });
+      setTraceBySession((current) => {
+        const next = { ...current };
+        for (const session of affected) delete next[session.id];
+        return next;
+      });
+      setRunningSessions((current) => {
+        const next = { ...current };
+        for (const session of affected) delete next[session.id];
+        return next;
+      });
       if (activeId && affected.some((s) => s.id === activeId)) {
         setActiveId(null);
-        setMessages([]);
-        setTrace([]);
         setPreview(null);
         window.localStorage.removeItem(activeKey());
       }
@@ -519,8 +538,11 @@ export default function HomePage() {
       setSwitchOpen(false);
       setView("chat");
       setActiveId(null);
-      setMessages([]);
-      setTrace([]);
+      for (const close of closeRefs.current.values()) close();
+      closeRefs.current.clear();
+      setMessagesBySession({});
+      setTraceBySession({});
+      setRunningSessions({});
       setPreview(null);
       setAttached([]);
       void store.refresh();
@@ -529,16 +551,15 @@ export default function HomePage() {
   );
 
   const handleLogout = useCallback(async () => {
-    if (closeRef.current) {
-      closeRef.current();
-      closeRef.current = null;
-    }
+    for (const close of closeRefs.current.values()) close();
+    closeRefs.current.clear();
     await logoutUser().catch(() => undefined);
     setUser(null);
     setView("chat");
     setActiveId(null);
-    setMessages([]);
-    setTrace([]);
+    setMessagesBySession({});
+    setTraceBySession({});
+    setRunningSessions({});
     setPreview(null);
     setAttached([]);
   }, []);
@@ -590,6 +611,7 @@ export default function HomePage() {
           sessions={store.sessions}
           groups={store.groups}
           activeId={activeId}
+          runningIds={Object.keys(runningSessions).filter((id) => runningSessions[id])}
           collapsed={collapsed}
           width={leftWidth}
           onToggle={() => setCollapsed((c) => !c)}

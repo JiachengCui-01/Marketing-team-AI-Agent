@@ -31,6 +31,7 @@ export function SessionSidebar({
   sessions,
   groups,
   activeId,
+  runningIds,
   collapsed,
   width,
   onToggle,
@@ -48,6 +49,7 @@ export function SessionSidebar({
   sessions: SessionRecord[];
   groups: GroupRecord[];
   activeId: string | null;
+  runningIds?: string[];
   collapsed: boolean;
   width?: number;
   onToggle: () => void;
@@ -66,6 +68,7 @@ export function SessionSidebar({
   const sidebarRef = useRef<HTMLElement | null>(null);
   const [menu, setMenu] = useState<MenuState>(null);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const running = useMemo(() => new Set(runningIds ?? []), [runningIds]);
 
   const ungrouped = useMemo(
     () => sessions.filter((s) => !s.group_id),
@@ -304,6 +307,7 @@ export function SessionSidebar({
                       key={s.id}
                       session={s}
                       active={!!activeId && s.id === activeId}
+                      running={running.has(s.id)}
                       onSelect={onSelect}
                       onContext={openSessionMenu}
                     />
@@ -324,6 +328,7 @@ export function SessionSidebar({
             key={s.id}
             session={s}
             active={!!activeId && s.id === activeId}
+            running={running.has(s.id)}
             onSelect={onSelect}
             onContext={openSessionMenu}
           />
@@ -353,11 +358,13 @@ export function SessionSidebar({
 function SessionRow({
   session,
   active,
+  running,
   onSelect,
   onContext,
 }: {
   session: SessionRecord;
   active: boolean;
+  running?: boolean;
   onSelect: (id: string) => void;
   onContext: (e: React.MouseEvent, id: string) => void;
 }) {
@@ -374,6 +381,7 @@ function SessionRow({
     >
       <MessageSquare size={13} className={`shrink-0 ${active ? "text-accent" : "opacity-70"}`} />
       <span className="truncate flex-1">{session.name}</span>
+      {running ? <span className="session-running-indicator" aria-hidden /> : null}
     </button>
   );
 }
