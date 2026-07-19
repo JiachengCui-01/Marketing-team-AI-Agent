@@ -26,6 +26,7 @@ import { getUserLocale, getUserTheme } from "@/lib/user-settings";
 import { useSessionsStore } from "@/lib/sessions-store";
 import {
   API_BASE,
+  artifactDownloadUrl,
   completeSession,
   getMe,
   getSessionMessages,
@@ -41,8 +42,33 @@ const ACTIVE_KEY = "marketing-agent-active-session";
 const LEFT_MIN_WIDTH = 256;
 const RIGHT_MIN_WIDTH = 384;
 
+type DirectoryHandle = FileSystemDirectoryHandle;
+
 function newId() {
   return Math.random().toString(36).slice(2, 10);
+}
+
+function safeFilename(name: string): string {
+  return name.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").slice(0, 160) || "artifact";
+}
+
+async function saveArtifactToWorkspace(
+  handle: DirectoryHandle | null,
+  artifact: MessageArtifact,
+  workspaceName: string | null,
+) {
+  if (!handle || !workspaceName) return;
+  try {
+    const res = await fetch(artifactDownloadUrl(artifact.artifact_id));
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const fileHandle = await handle.getFileHandle(safeFilename(artifact.filename), { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+  } catch (error) {
+    console.warn("workspace artifact save failed", error);
+  }
 }
 
 export default function HomePage() {
@@ -57,6 +83,9 @@ export default function HomePage() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [attached, setAttached] = useState<UploadResponse[]>([]);
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
+  const [workspaceFileIds, setWorkspaceFileIds] = useState<string[]>([]);
+  const [workspaceName, setWorkspaceName] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewItem | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
@@ -65,6 +94,7 @@ export default function HomePage() {
   const [leftWidth, setLeftWidth] = useState(LEFT_MIN_WIDTH);
   const [rightWidth, setRightWidth] = useState(RIGHT_MIN_WIDTH);
   const closeRef = useRef<(() => void) | null>(null);
+  const workspaceHandleRef = useRef<DirectoryHandle | null>(null);
 
   const applyUserSettings = useCallback(
     (profile: UserProfile) => {
@@ -217,8 +247,8 @@ export default function HomePage() {
     return id;
   }, [activeId, activeKey, store]);
 
-  const handleSend = useCallback(async () => {
-    const text = input.trim();
+  const handleSend = useCallback(async (override?: string) => {
+    const text = (override ?? input).trim();
     if (!text || busy) return;
     setInput("");
     setBusy(true);
@@ -250,8 +280,9 @@ export default function HomePage() {
       return;
     }
 
-    const fileIds = attached.map((a) => a.file_id);
-    const url = streamUrl(sid, text, fileIds);
+    const fileIds = Array.from(new Set([...attached.map((a) => a.file_id), ...workspaceFileIds]));
+    const skillIds = selectedSkillIds;
+    const url = streamUrl(sid, text, fileIds, skillIds);
 
     const recoverAfterStreamError = async () => {
       await new Promise((resolve) => window.setTimeout(resolve, 1500));
@@ -277,7 +308,7 @@ export default function HomePage() {
       }
 
       try {
-        const completed = await completeSession(sid, text, fileIds);
+        const completed = await completeSession(sid, text, fileIds, skillIds);
         const fallbackEvents = Array.isArray(completed.events)
           ? (completed.events as TraceEvent[]).map((event) => ({
               ...event,
@@ -371,6 +402,7 @@ export default function HomePage() {
             filename: artifact.filename,
             mime: artifact.mime,
           });
+          void saveArtifactToWorkspace(workspaceHandleRef.current, artifact, workspaceName);
         } else if (e.event === "result") {
           const finalText = String(e.payload.text ?? "");
           setMessages((m) =>
@@ -430,7 +462,7 @@ export default function HomePage() {
     closeRef.current = close;
     // Clear attachments after sending.
     setAttached([]);
-  }, [input, busy, attached, ensureSession, store, t]);
+  }, [input, busy, attached, workspaceFileIds, selectedSkillIds, workspaceName, ensureSession, store, t]);
 
   const onPreviewUpload = useCallback((f: UploadResponse) => {
     setPreview({
@@ -601,7 +633,20 @@ export default function HomePage() {
             }
             onPreviewUpload={onPreviewUpload}
             onPreviewArtifact={onPreviewArtifact}
+            onDownloadArtifact={
+              workspaceName
+                ? (artifact) => void saveArtifactToWorkspace(workspaceHandleRef.current, artifact, workspaceName)
+                : undefined
+            }
             userAvatar={user.avatar}
+            selectedSkillIds={selectedSkillIds}
+            setSelectedSkillIds={setSelectedSkillIds}
+            workspaceFileIds={workspaceFileIds}
+            setWorkspaceFileIds={setWorkspaceFileIds}
+            onWorkspaceSelected={(handle, name) => {
+              workspaceHandleRef.current = handle;
+              setWorkspaceName(name);
+            }}
           />
         )}
         {!previewCollapsed ? (
@@ -617,6 +662,16 @@ export default function HomePage() {
           collapsed={previewCollapsed}
           width={rightWidth}
           onToggle={() => setPreviewCollapsed((c) => !c)}
+          onDownloadArtifact={
+            workspaceName
+              ? (item) =>
+                  void saveArtifactToWorkspace(
+                    workspaceHandleRef.current,
+                    { artifact_id: item.id, filename: item.filename, mime: item.mime },
+                    workspaceName,
+                  )
+              : undefined
+          }
           defaultTab={preview ? "preview" : "trace"}
         />
       </div>

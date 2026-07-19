@@ -65,6 +65,7 @@ export function PreviewPanel({
   collapsed,
   width,
   onToggle,
+  onDownloadArtifact,
 }: {
   events: TraceEvent[];
   totals: { input: number; output: number };
@@ -73,6 +74,7 @@ export function PreviewPanel({
   collapsed: boolean;
   width?: number;
   onToggle: () => void;
+  onDownloadArtifact?: (item: Extract<PreviewItem, { source: "artifact" }>) => void;
 }) {
   const { t } = useI18n();
   const [tab, setTab] = useState<"preview" | "trace">(
@@ -123,7 +125,7 @@ export function PreviewPanel({
       </header>
 
       {tab === "preview" ? (
-        <PreviewBody item={preview} />
+        <PreviewBody item={preview} onDownloadArtifact={onDownloadArtifact} />
       ) : (
         <TraceBody events={events} totals={totals} />
       )}
@@ -164,7 +166,13 @@ function iconForMime(mime: string): LucideIcon {
   return FileIcon;
 }
 
-function PreviewBody({ item }: { item: PreviewItem | null }) {
+function PreviewBody({
+  item,
+  onDownloadArtifact,
+}: {
+  item: PreviewItem | null;
+  onDownloadArtifact?: (item: Extract<PreviewItem, { source: "artifact" }>) => void;
+}) {
   const { t } = useI18n();
   if (!item) {
     return (
@@ -192,6 +200,11 @@ function PreviewBody({ item }: { item: PreviewItem | null }) {
         <a
           href={downloadUrl}
           download={item.filename}
+          onClick={(event) => {
+            if (item.source !== "artifact" || !onDownloadArtifact) return;
+            event.preventDefault();
+            onDownloadArtifact(item);
+          }}
           className="btn-accent px-2.5 py-1 text-xs"
           title={t.download}
         >

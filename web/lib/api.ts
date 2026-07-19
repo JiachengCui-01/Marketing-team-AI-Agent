@@ -261,11 +261,12 @@ export async function completeSession(
   id: string,
   prompt: string,
   fileIds: string[] = [],
+  skillIds: string[] = [],
 ): Promise<{ ok: boolean; text: string; events?: unknown[] }> {
   const res = await fetch(`${API_BASE}/api/sessions/${id}/complete`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ prompt, file_ids: fileIds }),
+    body: JSON.stringify({ prompt, file_ids: fileIds, skill_ids: skillIds }),
   });
   if (!res.ok) throw new Error(`completeSession ${res.status}`);
   return res.json();
@@ -479,6 +480,19 @@ export async function refreshNews(language: "zh" | "en"): Promise<NewsSummary> {
 
 export type ImageStyleKey = "xiaohongshu" | "taobao" | "amazon" | "instagram" | "generic";
 
+export type WorkflowSkill = {
+  id: string;
+  name: string;
+  description: string;
+  structure: string[];
+};
+
+export async function getWorkflowSkills(): Promise<WorkflowSkill[]> {
+  const res = await fetch(`${API_BASE}/api/skills`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).skills;
+}
+
 export type ImageSkill = {
   id: ImageStyleKey;
   name: string;
@@ -657,11 +671,15 @@ export function streamUrl(
   sessionId: string,
   prompt: string,
   fileIds: string[] = [],
+  skillIds: string[] = [],
 ): string {
   const url = new URL(`${API_BASE}/api/sessions/${sessionId}/stream`, urlBase());
   url.searchParams.set("prompt", prompt);
   if (fileIds.length > 0) {
     url.searchParams.set("file_ids", fileIds.join(","));
+  }
+  if (skillIds.length > 0) {
+    url.searchParams.set("skill_ids", skillIds.join(","));
   }
   const token = getAuthToken();
   if (token) url.searchParams.set("token", token);

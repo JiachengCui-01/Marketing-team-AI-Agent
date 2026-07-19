@@ -26,10 +26,12 @@ export type ChatMessage = {
 export function MessageBubble({
   message,
   onPreviewArtifact,
+  onDownloadArtifact,
   userAvatar,
 }: {
   message: ChatMessage;
   onPreviewArtifact?: (a: MessageArtifact) => void;
+  onDownloadArtifact?: (a: MessageArtifact) => void;
   userAvatar?: string | null;
 }) {
   const { t } = useI18n();
@@ -88,6 +90,7 @@ export function MessageBubble({
                     key={a.artifact_id}
                     artifact={a}
                     onPreview={onPreviewArtifact}
+                    onDownload={onDownloadArtifact}
                     downloadLabel={t.download}
                   />
                 ))}
@@ -103,10 +106,12 @@ export function MessageBubble({
 function ArtifactChip({
   artifact,
   onPreview,
+  onDownload,
   downloadLabel,
 }: {
   artifact: MessageArtifact;
   onPreview?: (a: MessageArtifact) => void;
+  onDownload?: (a: MessageArtifact) => void;
   downloadLabel: string;
 }) {
   return (
@@ -122,6 +127,11 @@ function ArtifactChip({
       <a
         href={artifactDownloadUrl(artifact.artifact_id)}
         download={artifact.filename}
+        onClick={(event) => {
+          if (!onDownload) return;
+          event.preventDefault();
+          onDownload(artifact);
+        }}
         className="inline-flex items-center gap-1 text-fg-muted hover:text-accent transition"
         title={downloadLabel}
       >

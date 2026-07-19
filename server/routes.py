@@ -17,7 +17,7 @@ from marketing_agent.file_inputs import build_prompt_addendum, extract
 from marketing_agent.orchestrator import run_orchestrator
 from marketing_agent.tools import image_gen
 
-from . import auth, db, image_processing, image_serve, news, sessions, uploads
+from . import auth, db, image_processing, image_serve, marketing_skills, news, sessions, uploads
 from .streaming import orchestrator_event_stream, to_sse
 
 router = APIRouter(prefix="/api")
@@ -797,6 +797,12 @@ def image_templates(request: Request, platform: str | None = None, style: str | 
     return {"templates": db.list_image_templates(platform, style)}
 
 
+@router.get("/skills")
+def content_workflow_skills(request: Request) -> dict:
+    auth.require_user(request)
+    return {"skills": marketing_skills.list_skills()}
+
+
 def _attached_ids(file_ids: str | list[str] | None, csv_id: str | None = None) -> list[str]:
     ids: list[str] = []
     if isinstance(file_ids, str):
@@ -808,7 +814,13 @@ def _attached_ids(file_ids: str | list[str] | None, csv_id: str | None = None) -
     return ids
 
 
-def _build_user_message(user_id: str, prompt: str, file_ids: str | list[str] | None, csv_id: str | None = None):
+def _build_user_message(
+    user_id: str,
+    prompt: str,
+    file_ids: str | list[str] | None,
+    csv_id: str | None = None,
+    skill_ids: str | list[str] | None = None,
+):
     extracted: list[dict] = []
     image_blocks: list[dict] = []
 
@@ -844,9 +856,15 @@ def _build_user_message(user_id: str, prompt: str, file_ids: str | list[str] | N
             extracted.append(info)
 
     addendum = build_prompt_addendum(extracted) if extracted else ""
+    selected_skills = (
+        [sid for sid in skill_ids.split(",") if sid.strip()]
+        if isinstance(skill_ids, str)
+        else [str(sid) for sid in (skill_ids or []) if str(sid).strip()]
+    )
+    skill_addendum = marketing_skills.build_skill_addendum(selected_skills)
     if image_blocks:
-        return [{"type": "text", "text": prompt + addendum}, *image_blocks]
-    return prompt + addendum
+        return [{"type": "text", "text": prompt + addendum + skill_addendum}, *image_blocks]
+    return prompt + addendum + skill_addendum
 
 
 def _persist_user_prompt(user_id: str, session_id: str, prompt: str) -> None:
@@ -906,6 +924,7 @@ async def stream_session(
     prompt: str,
     csv_id: str | None = None,
     file_ids: str | None = None,
+    skill_ids: str | None = None,
 ):
     user = auth.require_user(request)
     conversation = sessions.get(session_id, user["id"])
@@ -914,7 +933,7 @@ async def stream_session(
     if not prompt.strip():
         raise HTTPException(400, "Empty prompt.")
 
-    user_message = _build_user_message(user["id"], prompt, file_ids, csv_id)
+    user_message = _build_user_message(user["id"], prompt, file_ids, csv_id, skill_ids)
     _persist_user_prompt(user["id"], session_id, prompt)
 
     # Build user_message — string if no images, else list-of-blocks.
@@ -946,6 +965,7 @@ async def complete_session(request: Request, session_id: str, payload: dict = Bo
         prompt,
         payload.get("file_ids"),
         payload.get("csv_id"),
+        payload.get("skill_ids"),
     )
     _persist_user_prompt(user["id"], session_id, prompt)
     client = _client()
