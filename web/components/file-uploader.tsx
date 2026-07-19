@@ -27,11 +27,13 @@ export function FileUploader({
   onAttach,
   onRemove,
   onPreview,
+  compact = false,
 }: {
   attached: UploadResponse[];
   onAttach: (f: UploadResponse) => void;
   onRemove: (fileId: string) => void;
   onPreview?: (f: UploadResponse) => void;
+  compact?: boolean;
 }) {
   const { locale, t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -53,14 +55,17 @@ export function FileUploader({
     }
   }
 
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-3">
+  const trigger = (
+    <>
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
           disabled={busy}
-          className="btn-ghost border border-border px-2.5 py-1.5 text-xs disabled:opacity-50 transition-all duration-150 hover:border-accent/50 hover:shadow-sm"
+          className={`btn-ghost text-xs disabled:opacity-50 transition-all duration-150 ${
+            compact
+              ? "h-8 px-2"
+              : "border border-border px-2.5 py-1.5 hover:border-accent/50 hover:shadow-sm"
+          }`}
         >
           {busy ? (
             <Loader2 size={14} className="animate-spin text-feature-analytics" />
@@ -69,9 +74,11 @@ export function FileUploader({
           )}
           <span className="transition-colors duration-150">{busy ? t.uploading : t.attachFiles}</span>
         </button>
+        {!compact ? (
         <span className="text-[10px] text-fg-subtle">
           {t.fileTypes}
         </span>
+        ) : null}
         <input
           ref={inputRef}
           type="file"
@@ -83,40 +90,59 @@ export function FileUploader({
             e.target.value = "";
           }}
         />
+    </>
+  );
+
+  const chips = attached.length > 0 ? (
+    <div className="flex flex-wrap gap-2">
+      {attached.map((f) => {
+        const Icon = iconFor(f.mime);
+        return (
+          <div
+            key={f.file_id}
+            className="flex items-center gap-2 rounded-lg border border-border bg-bg-elevated px-2.5 py-1.5 text-xs animate-scale-in transition-all duration-200 hover:bg-bg-elevated/60 hover:shadow-sm hover:border-accent/30"
+          >
+            <Icon size={13} className="text-accent shrink-0 transition-transform duration-200" />
+            <button
+              onClick={() => onPreview?.(f)}
+              className="truncate max-w-[18ch] hover:underline transition-colors duration-150"
+              title={f.original_name}
+            >
+              {f.original_name}
+            </button>
+            <span className="text-fg-subtle text-[10px]">
+              {(f.size / 1024).toFixed(0)} KB
+            </span>
+            <button
+              onClick={() => onRemove(f.file_id)}
+              className="ml-0.5 text-fg-subtle hover:text-danger hover:bg-danger/10 transition-all duration-150 rounded p-0.5"
+              aria-label={t.removeFile}
+            >
+              <X size={13} />
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  ) : null;
+
+  if (compact) {
+    return (
+      <>
+        {trigger}
+        {chips ? <div className="order-last basis-full px-1 pt-1">{chips}</div> : null}
+        {error && <span className="order-last basis-full px-1 text-xs text-danger">{error}</span>}
+      </>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-3">
+        {trigger}
       </div>
 
-      {attached.length > 0 ? (
-        <div className="flex flex-wrap gap-2">
-          {attached.map((f) => {
-            const Icon = iconFor(f.mime);
-            return (
-              <div
-                key={f.file_id}
-                className="flex items-center gap-2 rounded-lg border border-border bg-bg-elevated px-2.5 py-1.5 text-xs animate-scale-in transition-all duration-200 hover:bg-bg-elevated/60 hover:shadow-sm hover:border-accent/30"
-              >
-                <Icon size={13} className="text-accent shrink-0 transition-transform duration-200" />
-                <button
-                  onClick={() => onPreview?.(f)}
-                  className="truncate max-w-[18ch] hover:underline transition-colors duration-150"
-                  title={f.original_name}
-                >
-                  {f.original_name}
-                </button>
-                <span className="text-fg-subtle text-[10px]">
-                  {(f.size / 1024).toFixed(0)} KB
-                </span>
-                <button
-                  onClick={() => onRemove(f.file_id)}
-                  className="ml-0.5 text-fg-subtle hover:text-danger hover:bg-danger/10 transition-all duration-150 rounded p-0.5"
-                  aria-label={t.removeFile}
-                >
-                  <X size={13} />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      ) : null}
+      {chips}
 
       {error && <span className="text-xs text-danger">{error}</span>}
     </div>

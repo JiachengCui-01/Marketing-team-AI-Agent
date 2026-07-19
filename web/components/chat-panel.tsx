@@ -11,6 +11,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
+import { createPortal } from "react-dom";
 import { useEffect, useRef, useState } from "react";
 import { MessageBubble, type ChatMessage, type MessageArtifact } from "./message";
 import { FileUploader } from "./file-uploader";
@@ -68,6 +69,7 @@ export function ChatPanel({
   const [workspaceNote, setWorkspaceNote] = useState<string | null>(null);
   const [clarifyOpen, setClarifyOpen] = useState(false);
   const [clarifyDraft, setClarifyDraft] = useState("");
+  const skillButtonRef = useRef<HTMLButtonElement>(null);
 
   const copy = locale === "zh"
     ? {
@@ -75,9 +77,9 @@ export function ChatPanel({
         chooseWorkspace: "选择工作区",
         workspaceSynced: (count: number) => `已同步 ${count} 个可读文件`,
         workspaceUnsupported: "当前浏览器不支持直接选择文件夹，可继续使用上传文件。",
-        skills: "Skills",
-        noSkill: "未选择 SOP",
-        selected: (count: number) => `已选 ${count} 个 SOP`,
+        skills: "skill",
+        noSkill: "未选择 skill",
+        selected: (count: number) => `已选 ${count} 个 skill`,
         clarifyTitle: "补充一下任务信息",
         clarifyBody: "这个问题有点宽泛。补充目标、受众、渠道或交付格式后，我能按更稳定的流程生成。",
         clarifyPlaceholder: "例如：目标用户、品牌/产品、平台、语气、字数、截止时间、需要的格式...",
@@ -88,9 +90,9 @@ export function ChatPanel({
         chooseWorkspace: "Choose workspace",
         workspaceSynced: (count: number) => `${count} readable files synced`,
         workspaceUnsupported: "This browser cannot choose folders directly. You can still attach files.",
-        skills: "Skills",
-        noSkill: "No SOP selected",
-        selected: (count: number) => `${count} SOPs selected`,
+        skills: "skill",
+        noSkill: "No skill selected",
+        selected: (count: number) => `${count} skills selected`,
         clarifyTitle: "Add a little context",
         clarifyBody: "This request is broad. Adding goal, audience, channel, or output format helps produce a steadier result.",
         clarifyPlaceholder: "e.g. audience, product, platform, tone, length, deadline, desired format...",
@@ -211,14 +213,8 @@ export function ChatPanel({
       </div>
 
       <div className="border-t border-border bg-bg-elevated/60 backdrop-blur">
-        <div className="max-w-3xl mx-auto px-4 py-3 space-y-2">
-          <FileUploader
-            attached={attached}
-            onAttach={onAttach}
-            onRemove={onRemoveAttached}
-            onPreview={onPreviewUpload}
-          />
-          <div className="input-shell overflow-hidden">
+        <div className="max-w-3xl mx-auto px-4 py-2">
+          <div className="input-shell overflow-visible">
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -231,10 +227,17 @@ export function ChatPanel({
               rows={1}
               placeholder={t.inputPlaceholder}
               disabled={busy}
-              className="block w-full resize-none bg-transparent px-4 pt-3 pb-2 text-sm placeholder:text-fg-subtle focus:outline-none disabled:opacity-50 max-h-48"
-              style={{ minHeight: 48 }}
+              className="block w-full resize-none bg-transparent px-4 pt-2.5 pb-1 text-sm placeholder:text-fg-subtle focus:outline-none disabled:opacity-50 max-h-40"
+              style={{ minHeight: 40 }}
             />
-            <div className="flex flex-wrap items-center gap-1.5 border-t border-border/70 px-2 py-2">
+            <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2 pt-1">
+              <FileUploader
+                attached={attached}
+                onAttach={onAttach}
+                onRemove={onRemoveAttached}
+                onPreview={onPreviewUpload}
+                compact
+              />
               <button
                 type="button"
                 onClick={chooseWorkspace}
@@ -255,8 +258,9 @@ export function ChatPanel({
                   <X size={14} />
                 </button>
               ) : null}
-              <div className="relative">
+              <div>
                 <button
+                  ref={skillButtonRef}
                   type="button"
                   onClick={() => setSkillsOpen((open) => !open)}
                   className="btn-ghost h-8 px-2 text-xs"
@@ -266,35 +270,14 @@ export function ChatPanel({
                   <span>{selectedSkills.length ? copy.selected(selectedSkills.length) : copy.noSkill}</span>
                   <ChevronDown size={13} className={`transition ${skillsOpen ? "rotate-180" : ""}`} />
                 </button>
-                {skillsOpen ? (
-                  <div className="absolute bottom-9 left-0 z-20 w-[min(28rem,calc(100vw-2rem))] rounded-xl border border-border bg-bg-elevated p-2 shadow-xl">
-                    <div className="space-y-1">
-                      {skills.map((skill) => {
-                        const active = selectedSkillIds.includes(skill.id);
-                        return (
-                          <button
-                            key={skill.id}
-                            type="button"
-                            onClick={() => toggleSkill(skill.id)}
-                            className={`flex w-full items-start gap-2 rounded-lg px-3 py-2 text-left transition ${
-                              active ? "bg-accent/10 text-fg" : "hover:bg-bg-subtle text-fg-muted"
-                            }`}
-                          >
-                            <span className={`mt-0.5 flex h-4 w-4 items-center justify-center rounded border ${
-                              active ? "border-accent bg-accent text-accent-fg" : "border-border"
-                            }`}>
-                              {active ? <Check size={11} /> : null}
-                            </span>
-                            <span className="min-w-0">
-                              <span className="block text-xs font-medium text-fg">{skill.name}</span>
-                              <span className="mt-0.5 block text-[11px] leading-snug text-fg-muted">{skill.description}</span>
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : null}
+                <SkillPickerPopover
+                  open={skillsOpen}
+                  anchorRef={skillButtonRef}
+                  skills={skills}
+                  selectedSkillIds={selectedSkillIds}
+                  onToggleSkill={toggleSkill}
+                  onClose={() => setSkillsOpen(false)}
+                />
               </div>
               {workspaceNote ? (
                 <span className="min-w-0 truncate text-[11px] text-fg-subtle">
@@ -352,6 +335,109 @@ function looksAmbiguous(text: string): boolean {
   const broad = /^(帮我)?(写|做|生成|分析|总结|策划|优化)(一下|一个|一份)?[。.!！?？]*$/;
   const englishBroad = /^(write|make|generate|analyze|summarize|plan|optimize)(\s+it|\s+this)?[.!?]*$/i;
   return compact.length <= 8 || broad.test(compact) || englishBroad.test(text.trim());
+}
+
+function SkillPickerPopover({
+  open,
+  anchorRef,
+  skills,
+  selectedSkillIds,
+  onToggleSkill,
+  onClose,
+}: {
+  open: boolean;
+  anchorRef: React.RefObject<HTMLButtonElement>;
+  skills: WorkflowSkill[];
+  selectedSkillIds: string[];
+  onToggleSkill: (skillId: string) => void;
+  onClose: () => void;
+}) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ left: 16, bottom: 88, width: 448 });
+
+  useEffect(() => {
+    if (!open) return;
+
+    function updatePosition() {
+      const anchor = anchorRef.current;
+      if (!anchor) return;
+      const rect = anchor.getBoundingClientRect();
+      const width = Math.min(448, window.innerWidth - 24);
+      const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
+      setPosition({
+        left,
+        width,
+        bottom: Math.max(12, window.innerHeight - rect.top + 8),
+      });
+    }
+
+    function onPointerDown(event: MouseEvent | TouchEvent) {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (panelRef.current?.contains(target)) return;
+      if (anchorRef.current?.contains(target)) return;
+      onClose();
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("touchstart", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("touchstart", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [anchorRef, onClose, open]);
+
+  if (!open || typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      ref={panelRef}
+      className="fixed z-[70] max-h-[42vh] overflow-y-auto rounded-xl border border-border bg-bg-elevated p-2 shadow-2xl"
+      style={{
+        left: position.left,
+        bottom: position.bottom,
+        width: position.width,
+      }}
+    >
+      <div className="space-y-1">
+        {skills.map((skill) => {
+          const active = selectedSkillIds.includes(skill.id);
+          return (
+            <button
+              key={skill.id}
+              type="button"
+              onClick={() => onToggleSkill(skill.id)}
+              className={`flex w-full items-start gap-2 rounded-lg px-3 py-2 text-left transition ${
+                active ? "bg-accent/10 text-fg" : "hover:bg-bg-subtle text-fg-muted"
+              }`}
+            >
+              <span className={`mt-0.5 flex h-4 w-4 items-center justify-center rounded border ${
+                active ? "border-accent bg-accent text-accent-fg" : "border-border"
+              }`}>
+                {active ? <Check size={11} /> : null}
+              </span>
+              <span className="min-w-0">
+                <span className="block text-xs font-medium text-fg">{skill.name}</span>
+                <span className="mt-0.5 block text-[11px] leading-snug text-fg-muted">{skill.description}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>,
+    document.body,
+  );
 }
 
 async function collectWorkspaceFiles(handle: DirectoryHandle): Promise<File[]> {
