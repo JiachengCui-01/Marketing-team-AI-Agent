@@ -146,6 +146,7 @@ SKILLS: dict[str, ContentSkill] = {
         ),
         output_contract=(
             "Call the generate_pdf tool with a clean title and 3-8 sections.",
+            "Match the PDF language to the requested output language in the brief.",
             "After the tool returns, briefly tell the user the PDF was generated.",
             "Do not paste the full PDF body back into chat.",
         ),

@@ -60,7 +60,7 @@ def requires_pdf_deliverable(skill_ids: list[str]) -> bool:
     return any(sid in PDF_DELIVERABLE_SKILLS for sid in skill_ids)
 
 
-def build_skill_addendum(skill_ids: list[str]) -> str:
+def build_skill_addendum(skill_ids: list[str], output_language: str | None = None) -> str:
     if not skill_ids:
         return ""
     chunks: list[str] = []
@@ -77,11 +77,23 @@ def build_skill_addendum(skill_ids: list[str]) -> str:
         chunks.append("\n\n".join(parts))
     if not chunks:
         return ""
+    language_instruction = ""
+    if output_language == "zh":
+        language_instruction = (
+            "Unless the user explicitly requested another deliverable language, write all generated deliverables, "
+            "including PDF titles, headings, tables, and body content, in Simplified Chinese.\n\n"
+        )
+    elif output_language == "en":
+        language_instruction = (
+            "Unless the user explicitly requested another deliverable language, write all generated deliverables, "
+            "including PDF titles, headings, tables, and body content, in English.\n\n"
+        )
     return (
         "\n\n[Selected marketing SOP skills]\n"
         "Follow the selected SOP skill(s) below when producing the answer. "
         "If required inputs are missing, ask concise clarifying questions before making strong assumptions.\n\n"
-        "If a selected skill requires a PDF deliverable, the final answer must still include a detailed in-chat "
+        + language_instruction
+        + "If a selected skill requires a PDF deliverable, the final answer must still include a detailed in-chat "
         "analysis that follows the skill SOP; the PDF is a companion deliverable, not a replacement for the answer. "
         "Do not answer only with a file-generated notice.\n\n"
         + "\n\n---\n\n".join(chunks)

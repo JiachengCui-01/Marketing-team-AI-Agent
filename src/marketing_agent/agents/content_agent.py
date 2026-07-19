@@ -25,6 +25,19 @@ note it.
 """
 
 
+def _output_language_for_task(task: str) -> str:
+    lowered = task.lower()
+    explicit_en = any(token in lowered for token in ("english", "in en", "write in en", "英文", "英语"))
+    explicit_zh = any(token in lowered for token in ("chinese", "simplified chinese", "中文", "简体中文", "汉语"))
+    if explicit_en and not explicit_zh:
+        return "en"
+    if explicit_zh and not explicit_en:
+        return "zh"
+    cjk = sum(1 for char in task if "\u4e00" <= char <= "\u9fff")
+    letters = sum(1 for char in task if char.isalpha())
+    return "zh" if cjk >= max(2, letters // 5) else "en"
+
+
 def run(
     client: anthropic.Anthropic,
     task: str,
@@ -36,10 +49,21 @@ def run(
     on_event: Callable[[str, dict], None] | None = None,
 ) -> str:
     skill = select_content_skill(format, task, platform)
+    output_language = _output_language_for_task(task)
+    language_instruction = (
+        "Output language: Simplified Chinese. The chat response and any generated PDF "
+        "must use Simplified Chinese for titles, headings, tables, and body content, "
+        "unless the user explicitly requested another language."
+        if output_language == "zh"
+        else "Output language: English. The chat response and any generated PDF must use "
+        "English for titles, headings, tables, and body content, unless the user explicitly "
+        "requested another language."
+    )
     brief_lines = [
         f"Task: {task}",
         f"Format: {format}",
         f"Selected platform skill: {skill.key}",
+        language_instruction,
         "",
         skill.render(),
     ]

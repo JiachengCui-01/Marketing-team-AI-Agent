@@ -46,7 +46,24 @@ class ContentSkillTests(unittest.TestCase):
         self.assertEqual(result, "ok")
         self.assertIn("Platform skill: Xiaohongshu", captured["user_message"])
         self.assertIn("Selected platform skill: xiaohongshu", captured["user_message"])
+        self.assertIn("Output language: Simplified Chinese", captured["user_message"])
         self.assertNotIn("Twitter/X", captured["system"])
+
+    def test_content_agent_respects_explicit_english_request(self) -> None:
+        captured: dict[str, str] = {}
+
+        def fake_run_agent(**kwargs):
+            captured["user_message"] = kwargs["user_message"]
+            return "ok"
+
+        with mock.patch.object(content_agent, "run_agent", side_effect=fake_run_agent):
+            content_agent.run(
+                client=mock.Mock(),
+                task="请用英文生成一份竞品分析 PDF",
+                format="pdf",
+            )
+
+        self.assertIn("Output language: English", captured["user_message"])
 
     def test_competitive_skill_requires_pdf_deliverable(self) -> None:
         skills = {skill["id"]: skill for skill in marketing_skills.list_skills()}

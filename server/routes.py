@@ -830,6 +830,19 @@ def _skill_notice(skill_ids: list[str]) -> str | None:
     return "已使用 skill：" + "、".join(names)
 
 
+def _output_language_for_prompt(prompt: str) -> str:
+    lowered = prompt.lower()
+    explicit_en = any(token in lowered for token in ("english", "in en", "write in en", "英文", "英语"))
+    explicit_zh = any(token in lowered for token in ("chinese", "simplified chinese", "中文", "简体中文", "汉语"))
+    if explicit_en and not explicit_zh:
+        return "en"
+    if explicit_zh and not explicit_en:
+        return "zh"
+    cjk = sum(1 for char in prompt if "\u4e00" <= char <= "\u9fff")
+    letters = sum(1 for char in prompt if char.isalpha())
+    return "zh" if cjk >= max(2, letters // 5) else "en"
+
+
 def _build_user_message(
     user_id: str,
     prompt: str,
@@ -873,7 +886,8 @@ def _build_user_message(
 
     addendum = build_prompt_addendum(extracted) if extracted else ""
     selected_skills = _selected_skill_ids(skill_ids)
-    skill_addendum = marketing_skills.build_skill_addendum(selected_skills)
+    output_language = _output_language_for_prompt(prompt)
+    skill_addendum = marketing_skills.build_skill_addendum(selected_skills, output_language=output_language)
     if image_blocks:
         return [{"type": "text", "text": prompt + addendum + skill_addendum}, *image_blocks]
     return prompt + addendum + skill_addendum
@@ -887,9 +901,9 @@ def _persist_user_prompt(user_id: str, session_id: str, prompt: str) -> None:
     db.update_session(session_id, user_id=user_id, name=_derive_name(session_id, prompt), touch=True)
 
 
-def _pdf_sections_from_markdown(text: str) -> list[dict]:
+def _pdf_sections_from_markdown(text: str, output_language: str = "en") -> list[dict]:
     sections: list[dict] = []
-    current_heading = "Summary"
+    current_heading = "摘要" if output_language == "zh" else "Summary"
     current_body: list[str] = []
     for line in text.splitlines():
         stripped = line.strip()
@@ -904,14 +918,24 @@ def _pdf_sections_from_markdown(text: str) -> list[dict]:
         current_body.append(line)
     if current_body:
         sections.append({"heading": current_heading, "body": "\n".join(current_body).strip()})
-    return sections or [{"heading": "Summary", "body": text}]
+    fallback_heading = "摘要" if output_language == "zh" else "Summary"
+    return sections or [{"heading": fallback_heading, "body": text}]
 
 
-def _create_competitive_pdf_artifact(user_id: str, session_id: str, text: str) -> dict:
+def _create_competitive_pdf_artifact(user_id: str, session_id: str, text: str, output_language: str = "en") -> dict:
+    if output_language == "zh":
+        title = "竞品分析报告"
+        subtitle = "基于所选竞品分析 skill 生成"
+        eyebrow = "企业营销交付物"
+    else:
+        title = "Competitive Positioning Brief"
+        subtitle = "Generated from the selected competitive analysis skill."
+        eyebrow = "Marketing Strategy Deliverable"
     payload = {
-        "title": "Competitive Positioning Brief",
-        "subtitle": "Generated from the selected competitive analysis skill.",
-        "sections": _pdf_sections_from_markdown(text),
+        "title": title,
+        "subtitle": subtitle,
+        "eyebrow": eyebrow,
+        "sections": _pdf_sections_from_markdown(text, output_language=output_language),
     }
     rendered = generate_pdf(payload)
     return db.add_artifact(
@@ -929,6 +953,7 @@ def _session_aware_on_event_factory(
     session_id: str,
     skill_notice: str | None = None,
     auto_competitive_pdf: bool = False,
+    output_language: str = "en",
 ):
     accumulated_text: list[str] = []
     notice_emitted = False
@@ -949,7 +974,7 @@ def _session_aware_on_event_factory(
                     payload = {**payload, "text": final_text}
                 if auto_competitive_pdf and final_text and not pdf_created:
                     try:
-                        rec = _create_competitive_pdf_artifact(user_id, session_id, final_text)
+                        rec = _create_competitive_pdf_artifact(user_id, session_id, final_text, output_language)
                         pdf_created = True
                         inner_emit(
                             "artifact_created",
@@ -1014,6 +1039,7 @@ async def stream_session(
         raise HTTPException(400, "Empty prompt.")
 
     selected_skills = _selected_skill_ids(skill_ids)
+    output_language = _output_language_for_prompt(prompt)
     user_message = _build_user_message(user["id"], prompt, file_ids, csv_id, selected_skills)
     _persist_user_prompt(user["id"], session_id, prompt)
 
@@ -1031,6 +1057,7 @@ async def stream_session(
             session_id,
             skill_notice=_skill_notice(selected_skills),
             auto_competitive_pdf=marketing_skills.requires_pdf_deliverable(selected_skills),
+            output_language=output_language,
         ),
     )
     return EventSourceResponse(to_sse(_with_current_user(user["id"], event_stream)))
@@ -1047,6 +1074,7 @@ async def complete_session(request: Request, session_id: str, payload: dict = Bo
         raise HTTPException(400, "Empty prompt.")
 
     selected_skills = _selected_skill_ids(payload.get("skill_ids"))
+    output_language = _output_language_for_prompt(prompt)
     user_message = _build_user_message(
         user["id"],
         prompt,
@@ -1073,6 +1101,7 @@ async def complete_session(request: Request, session_id: str, payload: dict = Bo
         session_id,
         skill_notice=_skill_notice(selected_skills),
         auto_competitive_pdf=marketing_skills.requires_pdf_deliverable(selected_skills),
+        output_language=output_language,
     )(emit)
     token = db.CURRENT_USER_ID.set(user["id"])
     try:

@@ -279,6 +279,15 @@ class RouteTests(unittest.TestCase):
         finally:
             routes.run_orchestrator = old_run_orchestrator
 
+    def test_chinese_prompt_defaults_pdf_deliverable_to_chinese(self) -> None:
+        from server import routes
+
+        self.assertEqual(routes._output_language_for_prompt("请帮我生成竞品分析 PDF"), "zh")
+        self.assertEqual(routes._output_language_for_prompt("请用英文生成竞品分析 PDF"), "en")
+
+        sections = routes._pdf_sections_from_markdown("正文内容", output_language="zh")
+        self.assertEqual(sections[0]["heading"], "摘要")
+
     def _save_news_config(self, headers: dict[str, str]) -> dict:
         response = self.client.put(
             "/api/news/config",
