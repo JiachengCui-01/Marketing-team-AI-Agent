@@ -204,6 +204,108 @@ html, body {
   .hover-lift {
     @apply transition-all duration-200 ease-macos hover:-translate-y-1 hover:shadow-lg hover:shadow-accent/15;
   }
+  .trace-flow {
+    @apply relative;
+  }
+  .trace-flow::before {
+    content: "";
+    @apply absolute bottom-3 top-3 w-px;
+    left: 25px;
+    background: linear-gradient(180deg, transparent, rgb(var(--border)), rgb(var(--accent) / 0.28), transparent);
+  }
+  .trace-node {
+    @apply relative py-1;
+  }
+  .trace-card {
+    @apply relative flex min-w-0 items-start gap-2.5 rounded-xl border px-2.5 py-2 transition-all duration-200 ease-macos;
+    margin-left: 18px;
+    background:
+      linear-gradient(180deg, rgb(var(--fg) / 0.018), transparent 55%),
+      rgb(var(--bg-elevated) / 0.78);
+    border-color: rgb(var(--border) / 0.82);
+    box-shadow: 0 6px 20px -18px rgb(0 0 0 / 0.45);
+  }
+  .trace-node:hover .trace-card {
+    border-color: rgb(var(--accent) / 0.36);
+    box-shadow: 0 10px 24px -20px rgb(var(--accent) / 0.45);
+    transform: translateX(2px);
+  }
+  .trace-card-active {
+    box-shadow:
+      0 0 0 1px rgb(var(--accent) / 0.08),
+      0 10px 24px -20px rgb(var(--accent) / 0.55);
+  }
+  .trace-dot {
+    @apply absolute inline-flex h-6 w-6 items-center justify-center rounded-full border bg-bg-elevated shadow-sm;
+    left: -29px;
+    top: 10px;
+  }
+  .trace-live-pill {
+    @apply shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase leading-none;
+    color: rgb(var(--accent));
+    border-color: rgb(var(--accent) / 0.24);
+    background: rgb(var(--accent) / 0.08);
+  }
+  .trace-card-orchestrator,
+  .trace-dot-orchestrator {
+    border-color: rgb(var(--feature-content) / 0.36);
+  }
+  .trace-dot-orchestrator {
+    color: rgb(var(--feature-content));
+    background: rgb(var(--feature-content) / 0.10);
+  }
+  .trace-card-content,
+  .trace-dot-content {
+    border-color: rgb(var(--feature-content) / 0.34);
+  }
+  .trace-dot-content {
+    color: rgb(var(--feature-content));
+    background: rgb(var(--feature-content) / 0.10);
+  }
+  .trace-card-analytics,
+  .trace-dot-analytics {
+    border-color: rgb(var(--feature-analytics) / 0.34);
+  }
+  .trace-dot-analytics {
+    color: rgb(var(--feature-analytics));
+    background: rgb(var(--feature-analytics) / 0.10);
+  }
+  .trace-card-research,
+  .trace-dot-research {
+    border-color: rgb(var(--feature-research) / 0.34);
+  }
+  .trace-dot-research {
+    color: rgb(var(--feature-research));
+    background: rgb(var(--feature-research) / 0.10);
+  }
+  .trace-card-artifact,
+  .trace-dot-artifact {
+    border-color: rgb(var(--feature-image) / 0.34);
+  }
+  .trace-dot-artifact {
+    color: rgb(var(--feature-image));
+    background: rgb(var(--feature-image) / 0.10);
+  }
+  .trace-card-success,
+  .trace-dot-success {
+    border-color: rgb(var(--success) / 0.34);
+  }
+  .trace-dot-success {
+    color: rgb(var(--success));
+    background: rgb(var(--success) / 0.10);
+  }
+  .trace-card-error,
+  .trace-dot-error {
+    border-color: rgb(var(--danger) / 0.38);
+  }
+  .trace-dot-error {
+    color: rgb(var(--danger));
+    background: rgb(var(--danger) / 0.10);
+  }
+  .trace-dot-neutral {
+    color: rgb(var(--fg-muted));
+    border-color: rgb(var(--border));
+  }
   /* Smooth focus state for interactive elements */
   @supports (outline-offset: 0) {
     button:not(:disabled):not(.btn-ghost):hover {

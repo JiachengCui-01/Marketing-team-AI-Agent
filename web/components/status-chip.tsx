@@ -50,6 +50,22 @@ export function deriveStatus(events: TraceEvent[], t: I18nText): StatusInfo {
         tone: "working",
       };
     }
+    if (type === "orchestrator_step") {
+      return {
+        label: String(event.payload.title ?? t.synthesizing),
+        icon: Cpu,
+        tone: String(event.payload.status ?? "running") === "done" ? "ok" : "working",
+      };
+    }
+    if (type === "specialist_start") {
+      const name = event.payload.specialist as string;
+      const meta = SPECIALIST_LABEL[name];
+      return {
+        label: meta ? `${t.delegating} ${t[meta.key]}...` : `${t.delegating} ${name}...`,
+        icon: meta?.icon ?? Cpu,
+        tone: "working",
+      };
+    }
     if (type === "specialist_done") {
       const name = event.payload.specialist as string;
       const meta = SPECIALIST_LABEL[name];

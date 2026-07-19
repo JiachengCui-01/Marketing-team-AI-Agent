@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   AlertCircle,
   ChevronRight,
+  CircleDot,
   Cpu,
   PenLine,
   BarChart3,
@@ -16,8 +17,10 @@ import {
   FileSpreadsheet,
   File as FileIcon,
   Eye,
+  Layers3,
   PanelRight,
   PanelRightClose,
+  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 import type { StreamEvent } from "@/lib/sse";
@@ -323,18 +326,19 @@ function TraceBody({
 }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState<TraceEvent | null>(null);
+  const visibleEvents = events.filter(isVisibleTraceEvent);
   return (
     <>
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        {events.length === 0 ? (
+      <div className="trace-flow flex-1 overflow-y-auto px-3 py-2">
+        {visibleEvents.length === 0 ? (
           <p className="text-xs text-fg-subtle px-2 py-6 text-center">{t.traceEmpty}</p>
         ) : (
-          events.map((e, i) => (
+          visibleEvents.map((e, i) => (
             <button
               key={i}
               type="button"
               onClick={() => setExpanded(e)}
-              className="block w-full text-left cursor-pointer rounded-xl hover-lift"
+              className="trace-node group block w-full text-left cursor-pointer"
               title={t.traceDetailHint}
             >
               <TraceItem event={e} />
@@ -355,170 +359,188 @@ function TraceBody({
   );
 }
 
-function TraceItem({ event }: { event: TraceEvent }) {
-  const { t } = useI18n();
+function isVisibleTraceEvent(event: TraceEvent) {
+  return !["assistant_delta", "result", "heartbeat", "orchestrator_response", "delegating"].includes(event.event);
+}
+
+type TraceTone = "orchestrator" | "content" | "analytics" | "research" | "success" | "error" | "artifact" | "neutral";
+
+type TraceView = {
+  title: string;
+  subtitle: string;
+  detailTitle: string;
+  detail: string;
+  method: string;
+  tone: TraceTone;
+  icon: LucideIcon;
+  active?: boolean;
+};
+
+function traceView(event: TraceEvent, t: ReturnType<typeof useI18n>["t"]): TraceView {
   const { event: type, payload } = event;
-
   if (type === "started") {
-    return (
-      <div className="rounded-lg border border-border/60 bg-bg-elevated/60 px-3 py-2 animate-fade-in">
-        <div className="flex items-center gap-2 text-[11px] text-fg-muted">
-          <Cpu size={12} />
-          <span>{t.connected}</span>
-        </div>
-      </div>
-    );
+    return {
+      title: t.connected,
+      subtitle: t.startingWork,
+      detailTitle: t.connected,
+      detail: t.startingWork,
+      method: "建立实时连接后，系统会开始接收编排器和专家执行过程中的事件。",
+      tone: "neutral",
+      icon: Cpu,
+      active: true,
+    };
   }
-
-  if (type === "delegating") {
+  if (type === "orchestrator_step") {
+    const status = String(payload.status ?? "running");
+    return {
+      title: String(payload.title ?? t.orchestrator),
+      subtitle: String(payload.detail ?? ""),
+      detailTitle: String(payload.title ?? t.orchestrator),
+      detail: String(payload.detail ?? ""),
+      method: orchestratorMethod(String(payload.stage ?? "")),
+      tone: status === "done" ? "success" : "orchestrator",
+      icon: status === "done" ? CheckCircle2 : Layers3,
+      active: status !== "done",
+    };
+  }
+  if (type === "specialist_start") {
     const name = payload.specialist as string;
-    const Icon = specialistIcon(name);
-    const input = payload.input as Record<string, unknown> | undefined;
-    const task = input?.task as string | undefined;
-    return (
-      <div className="rounded-lg border border-border bg-bg-elevated p-3 animate-fade-in">
-        <div className="flex items-center gap-2 text-xs font-medium text-accent">
-          <ChevronRight size={14} />
-          <Icon size={14} />
-          <span>{t.delegating} {specialistLabel(name, t)}</span>
-        </div>
-        {task ? <p className="mt-1.5 text-[11px] text-fg-muted line-clamp-3">{task}</p> : null}
-      </div>
-    );
+    const meta = SPECIALIST_META[name];
+    return {
+      title: `${t.delegating} ${specialistLabel(name, t)}`,
+      subtitle: String(payload.task ?? ""),
+      detailTitle: specialistLabel(name, t),
+      detail: String(payload.task ?? ""),
+      method: String(payload.method ?? ""),
+      tone: meta?.key ?? "neutral",
+      icon: specialistIcon(name),
+      active: true,
+    };
   }
-
   if (type === "specialist_done") {
     const name = payload.specialist as string;
-    const chars = payload.chars as number;
-    return (
-      <div className="rounded-lg border border-border bg-bg-elevated p-3 animate-fade-in">
-        <div className="flex items-center gap-2 text-xs font-medium text-success">
-          <CheckCircle2 size={14} />
-          <span>{specialistLabel(name, t)} {t.specialistReturned}</span>
-        </div>
-        <p className="mt-1 text-[11px] text-fg-subtle">{chars} {t.chars}</p>
-      </div>
-    );
+    return {
+      title: `${specialistLabel(name, t)} ${t.specialistReturned}`,
+      subtitle: `${payload.chars ?? 0} ${t.chars}`,
+      detailTitle: `${specialistLabel(name, t)} ${t.specialistReturned}`,
+      detail: "专家已返回结果，正在交给 Orchestrator 继续判断和汇总。",
+      method: "专家先完成各自范围内的分析，再把结论交回编排器统一整合。",
+      tone: "success",
+      icon: CheckCircle2,
+    };
   }
-
   if (type === "specialist_error") {
-    return (
-      <div className="rounded-lg border border-danger/40 bg-danger/10 p-3 animate-fade-in">
-        <div className="flex items-center gap-2 text-xs font-medium text-danger">
-          <AlertCircle size={14} />
-          <span>{specialistLabel(payload.specialist as string, t)} {t.specialistFailed}</span>
-        </div>
-        <p className="mt-1 text-[11px] text-fg-muted">{String(payload.error ?? "")}</p>
-      </div>
-    );
+    const name = payload.specialist as string;
+    return {
+      title: `${specialistLabel(name, t)} ${t.specialistFailed}`,
+      subtitle: String(payload.error ?? ""),
+      detailTitle: `${specialistLabel(name, t)} ${t.specialistFailed}`,
+      detail: String(payload.error ?? ""),
+      method: "专家执行失败后，Orchestrator 会保留错误信息，并尽量用已有上下文继续处理。",
+      tone: "error",
+      icon: AlertCircle,
+    };
   }
-
-  if (type === "orchestrator_response") {
-    const usage = payload.usage as { input_tokens?: number; output_tokens?: number } | undefined;
-    return (
-      <div className="rounded-lg border border-border/60 bg-bg-elevated/60 px-3 py-2 animate-fade-in">
-        <div className="flex items-center gap-2 text-[11px] text-fg-muted">
-          <Cpu size={12} />
-          <span>
-            {t.orchestrator} {String(payload.stop_reason)} · {t.tokensShortIn}={usage?.input_tokens ?? 0} {t.tokensShortOut}={usage?.output_tokens ?? 0}
-          </span>
-        </div>
-      </div>
-    );
-  }
-
   if (type === "artifact_created") {
-    return (
-      <div className="rounded-lg border border-accent/40 bg-accent/10 p-3 animate-fade-in">
-        <div className="flex items-center gap-2 text-xs font-medium text-accent">
-          <FileText size={14} />
-          <span>{t.artifactReady}: {String(payload.filename)}</span>
-        </div>
-      </div>
-    );
+    return {
+      title: t.artifactReady,
+      subtitle: String(payload.filename ?? ""),
+      detailTitle: t.artifactReady,
+      detail: String(payload.filename ?? ""),
+      method: "系统已生成可下载交付物，并把它加入右侧预览与下载区域。",
+      tone: "artifact",
+      icon: FileText,
+    };
   }
-
   if (type === "error") {
-    return (
-      <div className="rounded-lg border border-danger/40 bg-danger/10 p-3 animate-fade-in">
-        <div className="flex items-center gap-2 text-xs font-medium text-danger">
-          <AlertCircle size={14} />
-          <span>{t.error}</span>
-        </div>
-        <p className="mt-1 text-[11px] text-fg-muted">{String(payload.message ?? "")}</p>
-      </div>
-    );
+    return {
+      title: t.error,
+      subtitle: String(payload.message ?? ""),
+      detailTitle: t.error,
+      detail: String(payload.message ?? ""),
+      method: "执行过程中出现错误，请根据错误信息调整输入或稍后重试。",
+      tone: "error",
+      icon: AlertCircle,
+    };
   }
-
   if (type === "cancelled") {
-    return (
-      <div className="rounded-lg border border-border bg-bg-elevated p-3 animate-fade-in">
-        <div className="flex items-center gap-2 text-xs font-medium text-fg-muted">
-          <AlertCircle size={14} />
-          <span>{t.streamCancelled}</span>
-        </div>
-        <p className="mt-1 text-[11px] text-fg-muted">{String(payload.message ?? "")}</p>
-      </div>
-    );
+    return {
+      title: t.streamCancelled,
+      subtitle: String(payload.message ?? ""),
+      detailTitle: t.streamCancelled,
+      detail: String(payload.message ?? ""),
+      method: "任务已取消，当前请求不会继续消耗模型或工具资源。",
+      tone: "neutral",
+      icon: AlertCircle,
+    };
   }
+  return {
+    title: String(type),
+    subtitle: "",
+    detailTitle: String(type),
+    detail: "",
+    method: "记录该事件用于追踪执行过程，便于理解系统当前状态。",
+    tone: "neutral",
+    icon: CircleDot,
+  };
+}
 
-  return null;
+function orchestratorMethod(stage: string) {
+  if (stage === "intake") return "读取用户请求、附件和已选 skill，判断任务需要哪些能力。";
+  if (stage === "planning") return "规划下一步执行路径：继续分派专家、等待结果，或进入最终汇总。";
+  if (stage === "dispatch") return "把任务拆给合适的专家代理，让不同能力并行或分步处理。";
+  if (stage === "review") return "检查专家返回内容，判断信息是否足够生成最终答案。";
+  if (stage === "synthesis") return "整合专家结论、引用和交付物说明，生成最终回复。";
+  return "记录当前执行阶段，帮助用户理解系统正在做什么。";
+}
+
+function TraceItem({ event }: { event: TraceEvent }) {
+  const { t } = useI18n();
+  const view = traceView(event, t);
+  const Icon = view.icon;
+
+  return (
+    <div className={`trace-card trace-card-${view.tone} ${view.active ? "trace-card-active" : ""}`}>
+      <span className={`trace-dot trace-dot-${view.tone}`} aria-hidden>
+        <Icon size={13} className={view.active ? "animate-pulse" : ""} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <p className="truncate text-xs font-semibold text-fg">{view.title}</p>
+          {view.active ? <span className="trace-live-pill">{t.live}</span> : null}
+        </div>
+        {view.subtitle ? <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-fg-muted">{view.subtitle}</p> : null}
+      </div>
+      <ChevronRight size={13} className="shrink-0 text-fg-subtle transition group-hover:translate-x-0.5 group-hover:text-accent" />
+    </div>
+  );
 }
 
 function TraceDetailModal({ event, onClose }: { event: TraceEvent; onClose: () => void }) {
   const { t } = useI18n();
-  const { event: type, payload } = event;
-
-  let heading = String(type);
-  let body = "";
-
-  if (type === "started") {
-    heading = t.connected;
-  } else if (type === "delegating") {
-    const input = payload.input as Record<string, unknown> | undefined;
-    heading = `${t.delegating} ${specialistLabel(payload.specialist as string, t)}`;
-    body = String(input?.task ?? "");
-  } else if (type === "specialist_done") {
-    heading = `${specialistLabel(payload.specialist as string, t)} ${t.specialistReturned}`;
-    body = `${payload.chars} ${t.chars}`;
-  } else if (type === "specialist_error") {
-    heading = `${specialistLabel(payload.specialist as string, t)} ${t.specialistFailed}`;
-    body = String(payload.error ?? "");
-  } else if (type === "orchestrator_response") {
-    const usage = payload.usage as { input_tokens?: number; output_tokens?: number } | undefined;
-    heading = t.orchestrator;
-    body = `${payload.stop_reason}\n${t.tokensShortIn}=${usage?.input_tokens ?? 0} ${t.tokensShortOut}=${usage?.output_tokens ?? 0}`;
-  } else if (type === "artifact_created") {
-    heading = t.artifactReady;
-    body = String(payload.filename ?? "");
-  } else if (type === "error") {
-    heading = t.error;
-    body = String(payload.message ?? "");
-  } else if (type === "cancelled") {
-    heading = t.streamCancelled;
-    body = String(payload.message ?? "");
-  }
-
-  const raw = JSON.stringify(payload, null, 2);
+  const view = traceView(event, t);
+  const Icon = view.icon;
 
   return (
     <Modal title={t.traceDetailTitle} onClose={onClose} wide>
-      <p className="text-sm font-medium text-fg">{heading}</p>
-      {body ? (
-        <div className="mt-3 whitespace-pre-wrap break-words rounded-lg border border-border bg-bg p-3 text-xs text-fg-muted max-h-[50vh] overflow-y-auto">
-          {body}
+      <div className="flex items-start gap-3">
+        <span className={`trace-dot trace-dot-${view.tone} mt-0.5`} aria-hidden>
+          <Icon size={14} />
+        </span>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-fg">{view.detailTitle}</p>
+          {view.detail ? <p className="mt-1 text-xs leading-relaxed text-fg-muted">{view.detail}</p> : null}
         </div>
-      ) : null}
-      <details className="mt-3">
-        <summary className="cursor-pointer text-xs text-fg-subtle hover:text-fg">{t.traceRaw}</summary>
-        <pre className="mt-2 whitespace-pre-wrap break-words rounded-lg border border-border bg-bg p-3 text-[11px] text-fg-muted max-h-[40vh] overflow-y-auto">
-          {raw}
-        </pre>
-      </details>
+      </div>
+      <div className="mt-4 rounded-xl border border-border bg-bg p-3">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-fg-subtle">工作方法</p>
+        <p className="mt-1.5 whitespace-pre-wrap break-words text-xs leading-relaxed text-fg-muted">
+          {view.method || "记录该事件用于追踪执行过程，便于理解系统当前状态。"}
+        </p>
+      </div>
     </Modal>
   );
 }
-
 export function classifyTotals(events: TraceEvent[]): {
   input: number;
   output: number;

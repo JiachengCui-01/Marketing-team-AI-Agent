@@ -69,6 +69,23 @@ def _dispatch(client: anthropic.Anthropic, name: str, payload: dict, on_event=No
     return f"Error: unknown specialist '{name}'."
 
 
+def _task_text(payload: dict) -> str:
+    task = payload.get("task") or payload.get("brief") or payload.get("query") or payload.get("prompt")
+    if isinstance(task, str) and task.strip():
+        return task.strip()
+    return "Review the request and complete the assigned specialist work."
+
+
+def _specialist_method(name: str) -> str:
+    if name == "delegate_to_content_agent":
+        return "Use the content SOP to turn the request into polished marketing copy or a shareable deliverable."
+    if name == "delegate_to_analytics_agent":
+        return "Inspect the supplied data, calculate the requested metrics, and summarize decision-useful findings."
+    if name == "delegate_to_research_agent":
+        return "Gather market or competitor evidence, check source quality, and preserve citations for synthesis."
+    return "Complete the assigned specialist task and return concise findings."
+
+
 def run_orchestrator(
     client: anthropic.Anthropic,
     conversation: Conversation,
@@ -83,8 +100,29 @@ def run_orchestrator(
     conversation.messages.append({"role": "user", "content": user_message})
     failed_specialists: set[str] = set()
     research_contexts: list[str] = []
+    if on_event:
+        on_event(
+            "orchestrator_step",
+            {
+                "stage": "intake",
+                "title": "理解任务",
+                "detail": "读取用户请求、附件和已选 skill，判断需要哪些专家能力参与。",
+                "status": "running",
+            },
+        )
 
-    for _ in range(MAX_TOOL_ROUNDS):
+    for round_index in range(MAX_TOOL_ROUNDS):
+        if on_event:
+            on_event(
+                "orchestrator_step",
+                {
+                    "stage": "planning",
+                    "title": "规划下一步",
+                    "detail": "根据当前上下文决定是继续分派专家、等待专家结果，还是开始汇总最终答案。",
+                    "status": "running",
+                    "round": round_index + 1,
+                },
+            )
         response = client.messages.create(
             model=MODEL_ID,
             max_tokens=ORCHESTRATOR_MAX_TOKENS,
@@ -110,10 +148,29 @@ def run_orchestrator(
             )
 
         if response.stop_reason == "end_turn":
+            if on_event:
+                on_event(
+                    "orchestrator_step",
+                    {
+                        "stage": "synthesis",
+                        "title": "汇总最终答案",
+                        "detail": "整合专家结论、补充必要说明，并将内容整理成可读的最终回复。",
+                        "status": "running",
+                    },
+                )
             final_text = _finalize_text(_final_text(response.content), research_contexts)
             # Stream deltas of the already-completed text so the UI sees typewriter output.
             if on_event:
                 _stream_text(on_event, final_text)
+                on_event(
+                    "orchestrator_step",
+                    {
+                        "stage": "synthesis",
+                        "title": "答案汇总完成",
+                        "detail": "最终回复已完成整理，正在展示给用户。",
+                        "status": "done",
+                    },
+                )
                 on_event("result", {"text": final_text})
             return final_text
 
@@ -123,6 +180,17 @@ def run_orchestrator(
         if response.stop_reason == "tool_use":
             tool_results = []
             unavailable_results = []
+            tool_blocks = [block for block in response.content if block.type == "tool_use"]
+            if on_event and tool_blocks:
+                on_event(
+                    "orchestrator_step",
+                    {
+                        "stage": "dispatch",
+                        "title": "分派专家任务",
+                        "detail": f"识别到 {len(tool_blocks)} 个专家任务，开始按能力边界分派执行。",
+                        "status": "running",
+                    },
+                )
             for block in response.content:
                 if block.type != "tool_use":
                     continue
@@ -138,6 +206,14 @@ def run_orchestrator(
                     })
                     continue
                 if on_event:
+                    on_event(
+                        "specialist_start",
+                        {
+                            "specialist": block.name,
+                            "task": _task_text(block.input),
+                            "method": _specialist_method(block.name),
+                        },
+                    )
                     on_event("delegating", {"specialist": block.name, "input": block.input})
                 try:
                     result = _dispatch(client, block.name, block.input, on_event=on_event)
@@ -168,14 +244,61 @@ def run_orchestrator(
             if unavailable_results and len(tool_results) == len(unavailable_results):
                 final_text = "\n\n".join(unavailable_results)
                 if on_event:
+                    on_event(
+                        "orchestrator_step",
+                        {
+                            "stage": "synthesis",
+                            "title": "整理不可用结果",
+                            "detail": "所有专家均返回不可用或错误信息，正在将可解释的失败原因反馈给用户。",
+                            "status": "running",
+                        },
+                    )
                     _stream_text(on_event, final_text)
+                    on_event(
+                        "orchestrator_step",
+                        {
+                            "stage": "synthesis",
+                            "title": "反馈已完成",
+                            "detail": "已完成异常结果整理。",
+                            "status": "done",
+                        },
+                    )
                     on_event("result", {"text": final_text})
                 return final_text
+            if on_event:
+                on_event(
+                    "orchestrator_step",
+                    {
+                        "stage": "review",
+                        "title": "检查专家结果",
+                        "detail": "专家结果已返回，正在判断是否需要继续分派或进入最终汇总。",
+                        "status": "done",
+                    },
+                )
             continue
 
+        if on_event:
+            on_event(
+                "orchestrator_step",
+                {
+                    "stage": "synthesis",
+                    "title": "汇总最终答案",
+                    "detail": "根据已获得的信息生成最终回复，并保留必要的引用和交付物说明。",
+                    "status": "running",
+                },
+            )
         final = _finalize_text(_final_text(response.content), research_contexts)
         if on_event:
             _stream_text(on_event, final)
+            on_event(
+                "orchestrator_step",
+                {
+                    "stage": "synthesis",
+                    "title": "答案汇总完成",
+                    "detail": "最终回复已完成整理，正在展示给用户。",
+                    "status": "done",
+                },
+            )
             on_event("result", {"text": final})
         return final
 
