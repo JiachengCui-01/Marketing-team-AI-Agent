@@ -303,7 +303,7 @@ export function SessionSidebar({
                     <SessionRow
                       key={s.id}
                       session={s}
-                      active={s.id === activeId}
+                      active={!!activeId && s.id === activeId}
                       onSelect={onSelect}
                       onContext={openSessionMenu}
                     />
@@ -323,7 +323,7 @@ export function SessionSidebar({
           <SessionRow
             key={s.id}
             session={s}
-            active={s.id === activeId}
+            active={!!activeId && s.id === activeId}
             onSelect={onSelect}
             onContext={openSessionMenu}
           />

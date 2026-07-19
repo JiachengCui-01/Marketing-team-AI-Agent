@@ -235,14 +235,14 @@ export function MarketingImagePanel({
         ) : null}
       </div>
 
-      {/* integrated skills + input + actions */}
+      {/* platform style + input + actions */}
       <div className="border-t border-border bg-bg-elevated/60 backdrop-blur">
         <div className="max-w-3xl mx-auto px-4 py-3">
-          <div className="input-shell overflow-hidden">
+          <div className="relative z-0 mx-auto mb-[-0.55rem] w-[calc(100%-1.5rem)] max-w-2xl overflow-hidden rounded-xl border border-border bg-bg-elevated/80 shadow-macos backdrop-blur">
             {/* skills — collapsible card attached to the top of the input */}
             <button
               onClick={() => setSkillsOpen((v) => !v)}
-              className="w-full flex items-center justify-between px-3.5 py-2.5 text-sm border-b border-border hover:bg-bg-subtle/50 transition"
+              className="flex w-full items-center justify-between px-3.5 pb-4 pt-2.5 text-sm transition hover:bg-bg-subtle/50"
             >
               <span className="flex items-center gap-2 font-medium">
                 <Wand2 size={15} className="text-accent" />
@@ -257,7 +257,7 @@ export function MarketingImagePanel({
               </span>
             </button>
             {skillsOpen ? (
-              <div className="grid gap-2 border-b border-border p-3 sm:grid-cols-2">
+              <div className="grid gap-2 border-t border-border p-3 pb-4 sm:grid-cols-2">
                 {skills.map((s) => {
                   const active = activeStyle === s.id;
                   return (
@@ -284,16 +284,26 @@ export function MarketingImagePanel({
             ) : null}
 
             {/* action row: upload / history / templates (equal width) */}
-            <div className="grid grid-cols-3 gap-2 border-b border-border p-2">
-              <label
-                className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm cursor-pointer transition ${
-                  upload
-                    ? "border-border text-fg-muted hover:bg-bg-elevated"
-                    : "border-accent/40 bg-accent/10 text-accent hover:bg-accent/15"
-                }`}
-              >
-                {uploading ? <Loader2 size={15} className="animate-spin text-feature-analytics" /> : <Upload size={15} />}
-                <span className="truncate">{t.imageUploadButton}</span>
+          </div>
+
+          <div className="input-shell chat-composer-shell relative z-10 overflow-visible">
+            <div className="chat-composer-input-row">
+              <div className="flex items-end gap-2 px-2 py-1.5">
+                <textarea
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  rows={1}
+                  placeholder={t.imagePromptPlaceholder}
+                  disabled={busy}
+                  className="flex-1 resize-none bg-transparent px-2 py-2.5 text-sm placeholder:text-fg-subtle focus:outline-none disabled:opacity-50 max-h-40"
+                  style={{ minHeight: 44 }}
+                />
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2 pt-1">
+              <label className="btn-ghost h-8 cursor-pointer px-2 text-sm">
+                {uploading ? <Loader2 size={15} className="animate-spin text-feature-analytics" /> : <Upload size={15} className="text-accent" />}
+                <span>{t.imageUploadButton}</span>
                 <input
                   type="file"
                   accept="image/png,image/jpeg,image/webp"
@@ -307,40 +317,40 @@ export function MarketingImagePanel({
               </label>
               <button
                 onClick={() => setHistoryOpen(true)}
-                className="btn-ghost border border-border px-3 py-2 text-sm"
+                className="btn-ghost h-8 px-2 text-sm"
               >
                 <History size={15} className="text-feature-content" />
-                <span className="truncate">{t.imageHistory}</span>
+                <span>{t.imageHistory}</span>
               </button>
               <button
                 onClick={() => setTemplatesOpen(true)}
-                className="btn-ghost border border-border px-3 py-2 text-sm"
+                className="btn-ghost h-8 px-2 text-sm"
               >
                 <LayoutTemplate size={15} className="text-feature-research" />
-                <span className="truncate">{t.imageTemplates}</span>
+                <span>{t.imageTemplates}</span>
               </button>
-            </div>
-
-            {/* prompt input — at the very bottom */}
-            <div className="flex items-end gap-2 px-2 py-1.5">
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                rows={1}
-                placeholder={t.imagePromptPlaceholder}
-                disabled={busy}
-                className="flex-1 resize-none bg-transparent px-2 py-2.5 text-sm placeholder:text-fg-subtle focus:outline-none disabled:opacity-50 max-h-40"
-                style={{ minHeight: 44 }}
-              />
+              {upload ? (
+                <button
+                  onClick={resetUpload}
+                  className="btn-ghost h-8 max-w-[180px] px-2 text-xs"
+                  title={upload.original_name}
+                >
+                  <ImageIcon size={14} className="text-feature-image" />
+                  <span className="truncate">{upload.original_name}</span>
+                  <X size={13} />
+                </button>
+              ) : null}
               <button
                 onClick={handleGenerate}
                 disabled={busy || uploading}
-                className="btn-accent m-1 px-3.5 h-9 text-sm"
+                className="btn-accent ml-auto h-8 px-3 text-sm"
               >
                 {busy ? <Loader2 size={15} className="animate-spin text-feature-image" /> : <Wand2 size={15} />}
                 <span>{busy ? t.imageGenerating : t.imageGenerate}</span>
               </button>
             </div>
+
+            {/* prompt input — at the very bottom */}
           </div>
         </div>
       </div>

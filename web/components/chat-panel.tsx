@@ -23,6 +23,11 @@ type DirectoryHandle = FileSystemDirectoryHandle & {
   values: () => AsyncIterable<FileSystemHandle>;
 };
 
+type WorkspaceFile = {
+  file: File;
+  key: string;
+};
+
 export function ChatPanel({
   messages,
   input,
@@ -67,9 +72,11 @@ export function ChatPanel({
   const [workspaceName, setWorkspaceName] = useState<string | null>(null);
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const [workspaceNote, setWorkspaceNote] = useState<string | null>(null);
+  const [workspaceHandle, setWorkspaceHandle] = useState<DirectoryHandle | null>(null);
   const [clarifyOpen, setClarifyOpen] = useState(false);
   const [clarifyDraft, setClarifyDraft] = useState("");
   const skillButtonRef = useRef<HTMLButtonElement>(null);
+  const workspaceUploadMapRef = useRef<Map<string, string>>(new Map());
 
   const copy = locale === "zh"
     ? {
@@ -112,6 +119,15 @@ export function ChatPanel({
   const empty = messages.length === 0;
   const selectedSkills = skills.filter((skill) => selectedSkillIds.includes(skill.id));
 
+  useEffect(() => {
+    if (!workspaceHandle) return;
+    const id = window.setInterval(() => {
+      void syncWorkspace(workspaceHandle, true);
+    }, 4500);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceHandle]);
+
   function toggleSkill(skillId: string) {
     setSelectedSkillIds(
       selectedSkillIds.includes(skillId)
@@ -132,16 +148,10 @@ export function ChatPanel({
     setWorkspaceNote(null);
     try {
       const handle = await picker();
-      const files = await collectWorkspaceFiles(handle);
-      const uploaded: string[] = [];
-      for (const file of files) {
-        const saved = await uploadFile(file);
-        uploaded.push(saved.file_id);
-      }
       setWorkspaceName(handle.name);
-      setWorkspaceFileIds(uploaded);
+      setWorkspaceHandle(handle);
       onWorkspaceSelected(handle, handle.name);
-      setWorkspaceNote(copy.workspaceSynced(uploaded.length));
+      await syncWorkspace(handle);
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) {
         setWorkspaceNote(String(error));
@@ -153,9 +163,39 @@ export function ChatPanel({
 
   function clearWorkspace() {
     setWorkspaceName(null);
+    setWorkspaceHandle(null);
+    workspaceUploadMapRef.current.clear();
     setWorkspaceFileIds([]);
     onWorkspaceSelected(null, null);
     setWorkspaceNote(null);
+  }
+
+  async function syncWorkspace(handle: DirectoryHandle, quiet = false) {
+    if (!quiet) setWorkspaceBusy(true);
+    try {
+      const files = await collectWorkspaceFiles(handle);
+      const known = workspaceUploadMapRef.current;
+      const nextIds: string[] = [];
+      const liveKeys = new Set(files.map((item) => item.key));
+      for (const key of Array.from(known.keys())) {
+        if (!liveKeys.has(key)) known.delete(key);
+      }
+      for (const item of files) {
+        let fileId = known.get(item.key);
+        if (!fileId) {
+          const saved = await uploadFile(item.file);
+          fileId = saved.file_id;
+          known.set(item.key, fileId);
+        }
+        nextIds.push(fileId);
+      }
+      setWorkspaceFileIds(nextIds);
+      setWorkspaceNote(copy.workspaceSynced(nextIds.length));
+    } catch (error) {
+      if (!quiet) setWorkspaceNote(String(error));
+    } finally {
+      if (!quiet) setWorkspaceBusy(false);
+    }
   }
 
   function submitWithClarifyCheck() {
@@ -214,22 +254,24 @@ export function ChatPanel({
 
       <div className="border-t border-border bg-bg-elevated/60 backdrop-blur">
         <div className="max-w-3xl mx-auto px-4 py-2">
-          <div className="input-shell overflow-visible">
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  submitWithClarifyCheck();
-                }
-              }}
-              rows={1}
-              placeholder={t.inputPlaceholder}
-              disabled={busy}
-              className="block w-full resize-none bg-transparent px-4 pt-2.5 pb-1 text-sm placeholder:text-fg-subtle focus:outline-none disabled:opacity-50 max-h-40"
-              style={{ minHeight: 40 }}
-            />
+          <div className="input-shell chat-composer-shell overflow-visible">
+            <div className="chat-composer-input-row">
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    submitWithClarifyCheck();
+                  }
+                }}
+                rows={1}
+                placeholder={t.inputPlaceholder}
+                disabled={busy}
+                className="block w-full resize-none bg-transparent px-4 pt-2.5 pb-1 text-sm placeholder:text-fg-subtle focus:outline-none disabled:opacity-50 max-h-40"
+                style={{ minHeight: 40 }}
+              />
+            </div>
             <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2 pt-1">
               <FileUploader
                 attached={attached}
@@ -476,21 +518,26 @@ function localizedSkill(skill: WorkflowSkill, locale: "zh" | "en") {
   return zh[skill.id] ?? skill;
 }
 
-async function collectWorkspaceFiles(handle: DirectoryHandle): Promise<File[]> {
+async function collectWorkspaceFiles(handle: DirectoryHandle): Promise<WorkspaceFile[]> {
   const allowed = new Set(["csv", "xlsx", "xls", "json", "pdf", "docx", "txt", "md", "png", "jpg", "jpeg", "webp"]);
-  const out: File[] = [];
+  const out: WorkspaceFile[] = [];
 
-  async function visit(dir: DirectoryHandle) {
+  async function visit(dir: DirectoryHandle, prefix = "") {
     for await (const entry of dir.values()) {
       if (out.length >= 20) return;
       if (entry.kind === "directory") {
         if (!entry.name.startsWith(".") && entry.name !== "node_modules") {
-          await visit(entry as DirectoryHandle);
+          await visit(entry as DirectoryHandle, `${prefix}${entry.name}/`);
         }
       } else if (entry.kind === "file") {
         const file = await (entry as FileSystemFileHandle).getFile();
         const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
-        if (allowed.has(ext) && file.size <= 5 * 1024 * 1024) out.push(file);
+        if (allowed.has(ext) && file.size <= 5 * 1024 * 1024) {
+          out.push({
+            file,
+            key: `${prefix}${file.name}:${file.size}:${file.lastModified}`,
+          });
+        }
       }
     }
   }
