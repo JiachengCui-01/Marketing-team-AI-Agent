@@ -156,12 +156,16 @@ export function CitationMarkdown({
 
 function CitationLine({ segment }: { segment: Extract<Segment, { kind: "citation" }> }) {
   return (
-    <div className={cn("my-1.5", segment.listPrefix ? "pl-0" : "")}>
-      {segment.listPrefix ? <span className="mr-2 inline-block w-4 text-center">{listMarker(segment.listPrefix)}</span> : null}
-      <span className="inline">
+    <div className={cn("my-1.5", segment.listPrefix ? "flex items-start gap-2" : "")}>
+      {segment.listPrefix ? (
+        <span className="inline-flex w-8 shrink-0 justify-end whitespace-nowrap tabular-nums">
+          {listMarker(segment.listPrefix)}
+        </span>
+      ) : null}
+      <span className="min-w-0 flex-1">
         <MarkdownBody inline>{segment.body}</MarkdownBody>
+        <CitationCapsules sources={segment.sources} />
       </span>
-      <CitationCapsules sources={segment.sources} />
     </div>
   );
 }

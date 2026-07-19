@@ -58,6 +58,7 @@ def optimized_preview(src_path: str, cache_key: str) -> tuple[str, str]:
 
 def _mime_for(suffix: str) -> str:
     return {
+        ".pdf": "application/pdf",
         ".png": "image/png",
         ".jpg": "image/jpeg",
         ".jpeg": "image/jpeg",

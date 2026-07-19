@@ -81,6 +81,8 @@ def build_skill_addendum(skill_ids: list[str]) -> str:
         "\n\n[Selected marketing SOP skills]\n"
         "Follow the selected SOP skill(s) below when producing the answer. "
         "If required inputs are missing, ask concise clarifying questions before making strong assumptions.\n\n"
-        "If a selected skill requires a PDF deliverable, the final answer must include a generated PDF artifact.\n\n"
+        "If a selected skill requires a PDF deliverable, the final answer must still include a detailed in-chat "
+        "analysis that follows the skill SOP; the PDF is a companion deliverable, not a replacement for the answer. "
+        "Do not answer only with a file-generated notice.\n\n"
         + "\n\n---\n\n".join(chunks)
     )[:MAX_SKILL_TEXT_CHARS]

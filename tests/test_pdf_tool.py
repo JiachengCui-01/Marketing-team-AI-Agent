@@ -28,3 +28,34 @@ class PdfToolTests(unittest.TestCase):
 
         self.assertEqual(result["mime"], "application/pdf")
         self.assertTrue(result["filename"].endswith(".pdf"))
+
+    def test_generate_pdf_accepts_markdown_tables_and_lists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(pdf_tool, "ARTIFACTS_DIR", Path(tmp)):
+                result = pdf_tool.generate_pdf(
+                    {
+                        "title": "Competitive Positioning Brief",
+                        "subtitle": "Enterprise layout smoke test",
+                        "sections": [
+                            {
+                                "heading": "Competitor comparison",
+                                "body": (
+                                    "Executive summary for a business audience.\n\n"
+                                    "| Competitor | Positioning | Risk |\n"
+                                    "|---|---|---|\n"
+                                    "| Alpha | Low-cost suite | Price pressure |\n"
+                                    "| Beta | Enterprise workflow | Feature parity |\n\n"
+                                    "- Clarify the strongest differentiation pillar\n"
+                                    "- Separate verified evidence from assumptions\n\n"
+                                    "1. Collect pricing proof\n"
+                                    "2. Validate customer pain points"
+                                ),
+                            }
+                        ],
+                    }
+                )
+                path = Path(result["path"])
+                self.assertTrue(path.exists())
+                self.assertGreater(path.stat().st_size, 1000)
+
+        self.assertEqual(result["mime"], "application/pdf")

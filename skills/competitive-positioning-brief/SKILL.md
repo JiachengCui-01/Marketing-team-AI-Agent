@@ -20,6 +20,8 @@ Use this skill when the user needs a competitor comparison, differentiation narr
 
 ## Output Rules
 
+- In the chat reply, provide the full competitive analysis following the SOP sections; never respond only with a PDF-generated notice.
+- Treat the PDF as a companion deliverable that mirrors or summarizes the in-chat analysis.
 - Always produce a downloadable PDF document for the final competitive positioning brief.
 - Do not invent competitor facts when sources or user materials are missing.
 - Mark unverifiable claims as assumptions.

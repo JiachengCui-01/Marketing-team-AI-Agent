@@ -402,7 +402,6 @@ export default function HomePage() {
             filename: artifact.filename,
             mime: artifact.mime,
           });
-          void saveArtifactToWorkspace(workspaceHandleRef.current, artifact, workspaceName);
         } else if (e.event === "result") {
           const finalText = String(e.payload.text ?? "");
           setMessages((m) =>
@@ -462,7 +461,7 @@ export default function HomePage() {
     closeRef.current = close;
     // Clear attachments after sending.
     setAttached([]);
-  }, [input, busy, attached, workspaceFileIds, selectedSkillIds, workspaceName, ensureSession, store, t]);
+  }, [input, busy, attached, workspaceFileIds, selectedSkillIds, ensureSession, store, t]);
 
   const onPreviewUpload = useCallback((f: UploadResponse) => {
     setPreview({
