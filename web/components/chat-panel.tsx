@@ -275,6 +275,7 @@ export function ChatPanel({
                   anchorRef={skillButtonRef}
                   skills={skills}
                   selectedSkillIds={selectedSkillIds}
+                  locale={locale}
                   onToggleSkill={toggleSkill}
                   onClose={() => setSkillsOpen(false)}
                 />
@@ -342,6 +343,7 @@ function SkillPickerPopover({
   anchorRef,
   skills,
   selectedSkillIds,
+  locale,
   onToggleSkill,
   onClose,
 }: {
@@ -349,6 +351,7 @@ function SkillPickerPopover({
   anchorRef: React.RefObject<HTMLButtonElement>;
   skills: WorkflowSkill[];
   selectedSkillIds: string[];
+  locale: "zh" | "en";
   onToggleSkill: (skillId: string) => void;
   onClose: () => void;
 }) {
@@ -403,33 +406,49 @@ function SkillPickerPopover({
   return createPortal(
     <div
       ref={panelRef}
-      className="fixed z-[70] max-h-[42vh] overflow-y-auto rounded-xl border border-border bg-bg-elevated p-2 shadow-2xl"
+      className="fixed z-[70] max-h-[44vh] overflow-hidden rounded-2xl border border-border bg-bg-elevated/95 shadow-2xl backdrop-blur-xl"
       style={{
         left: position.left,
         bottom: position.bottom,
         width: position.width,
       }}
     >
-      <div className="space-y-1">
+      <div className="border-b border-border/70 px-4 py-3">
+        <div className="flex items-center gap-2 text-xs font-semibold text-fg">
+          <Sparkles size={14} className="text-accent" />
+          <span>{locale === "zh" ? "选择 skill" : "Choose skill"}</span>
+        </div>
+        <p className="mt-1 text-[11px] leading-snug text-fg-subtle">
+          {locale === "zh"
+            ? "选择一个营销 SOP，生成内容时会按对应流程执行。"
+            : "Pick a marketing SOP to guide the response workflow."}
+        </p>
+      </div>
+      <div className="max-h-[calc(44vh-4.75rem)] space-y-2 overflow-y-auto p-2">
         {skills.map((skill) => {
           const active = selectedSkillIds.includes(skill.id);
+          const display = localizedSkill(skill, locale);
           return (
             <button
               key={skill.id}
               type="button"
               onClick={() => onToggleSkill(skill.id)}
-              className={`flex w-full items-start gap-2 rounded-lg px-3 py-2 text-left transition ${
-                active ? "bg-accent/10 text-fg" : "hover:bg-bg-subtle text-fg-muted"
+              className={`group flex w-full items-start gap-3 rounded-xl border px-3 py-3 text-left transition ${
+                active
+                  ? "border-accent/45 bg-accent/10 text-fg shadow-sm"
+                  : "border-border/70 bg-bg-elevated/55 text-fg-muted hover:border-accent/30 hover:bg-bg-subtle/70"
               }`}
             >
-              <span className={`mt-0.5 flex h-4 w-4 items-center justify-center rounded border ${
-                active ? "border-accent bg-accent text-accent-fg" : "border-border"
+              <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition ${
+                active
+                  ? "border-accent bg-accent text-accent-fg shadow-sm shadow-accent/25"
+                  : "border-border bg-bg text-transparent group-hover:border-accent/45"
               }`}>
-                {active ? <Check size={11} /> : null}
+                <Check size={13} strokeWidth={2.6} />
               </span>
               <span className="min-w-0">
-                <span className="block text-xs font-medium text-fg">{skill.name}</span>
-                <span className="mt-0.5 block text-[11px] leading-snug text-fg-muted">{skill.description}</span>
+                <span className="block text-sm font-semibold leading-tight text-fg">{display.name}</span>
+                <span className="mt-1 block text-xs leading-relaxed text-fg-muted">{display.description}</span>
               </span>
             </button>
           );
@@ -438,6 +457,23 @@ function SkillPickerPopover({
     </div>,
     document.body,
   );
+}
+
+function localizedSkill(skill: WorkflowSkill, locale: "zh" | "en") {
+  if (locale !== "zh") return skill;
+
+  const zh: Record<string, { name: string; description: string }> = {
+    "competitive-positioning-brief": {
+      name: "竞争定位简报",
+      description: "用于竞品对比、差异化叙事、销售 battlecard 或定位备忘录，帮助梳理竞争格局、证据强度、差异化支柱和营销话术。",
+    },
+    "product-launch-campaign": {
+      name: "产品上市 campaign",
+      description: "用于新产品、新功能或服务发布，按目标、受众、渠道、时间线和 KPI 拆解完整上市计划与内容交付清单。",
+    },
+  };
+
+  return zh[skill.id] ?? skill;
 }
 
 async function collectWorkspaceFiles(handle: DirectoryHandle): Promise<File[]> {
