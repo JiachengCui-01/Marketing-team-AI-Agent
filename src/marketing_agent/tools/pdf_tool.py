@@ -4,11 +4,16 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 from typing import Any
+from xml.sax.saxutils import escape
 
 from marketing_agent.config import PROJECT_ROOT
 
 ARTIFACTS_DIR = PROJECT_ROOT / "tmp" / "artifacts"
 PDF_FONT_NAME = "STSong-Light"
+
+
+def _paragraph_text(value: Any) -> str:
+    return escape(str(value or "")).replace("\n", "<br/>")
 
 
 GENERATE_PDF_TOOL = {
@@ -113,15 +118,14 @@ def generate_pdf(payload: dict[str, Any]) -> dict[str, Any]:
         bottomMargin=1 * inch,
     )
     story: list[Any] = []
-    story.append(Paragraph(payload.get("title", "Untitled"), title_style))
+    story.append(Paragraph(_paragraph_text(payload.get("title", "Untitled")), title_style))
     if payload.get("subtitle"):
-        story.append(Paragraph(payload["subtitle"], subtitle_style))
+        story.append(Paragraph(_paragraph_text(payload["subtitle"]), subtitle_style))
     story.append(Spacer(1, 0.2 * inch))
 
     for sec in payload.get("sections", []):
-        story.append(Paragraph(sec.get("heading", ""), heading_style))
-        body = (sec.get("body") or "").replace("\n", "<br/>")
-        story.append(Paragraph(body, body_style))
+        story.append(Paragraph(_paragraph_text(sec.get("heading", "")), heading_style))
+        story.append(Paragraph(_paragraph_text(sec.get("body", "")), body_style))
 
     doc.build(story)
 

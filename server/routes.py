@@ -16,6 +16,7 @@ from marketing_agent.agents.image_skills import IMAGE_SKILLS, select_image_skill
 from marketing_agent.file_inputs import build_prompt_addendum, extract
 from marketing_agent.orchestrator import run_orchestrator
 from marketing_agent.tools import image_gen
+from marketing_agent.tools.pdf_tool import generate_pdf
 
 from . import auth, db, image_processing, image_serve, marketing_skills, news, sessions, uploads
 from .streaming import orchestrator_event_stream, to_sse
@@ -814,6 +815,21 @@ def _attached_ids(file_ids: str | list[str] | None, csv_id: str | None = None) -
     return ids
 
 
+def _selected_skill_ids(skill_ids: str | list[str] | None) -> list[str]:
+    return (
+        [sid for sid in skill_ids.split(",") if sid.strip()]
+        if isinstance(skill_ids, str)
+        else [str(sid) for sid in (skill_ids or []) if str(sid).strip()]
+    )
+
+
+def _skill_notice(skill_ids: list[str]) -> str | None:
+    names = marketing_skills.selected_skill_names(skill_ids)
+    if not names:
+        return None
+    return "已使用 skill：" + "、".join(names)
+
+
 def _build_user_message(
     user_id: str,
     prompt: str,
@@ -856,11 +872,7 @@ def _build_user_message(
             extracted.append(info)
 
     addendum = build_prompt_addendum(extracted) if extracted else ""
-    selected_skills = (
-        [sid for sid in skill_ids.split(",") if sid.strip()]
-        if isinstance(skill_ids, str)
-        else [str(sid) for sid in (skill_ids or []) if str(sid).strip()]
-    )
+    selected_skills = _selected_skill_ids(skill_ids)
     skill_addendum = marketing_skills.build_skill_addendum(selected_skills)
     if image_blocks:
         return [{"type": "text", "text": prompt + addendum + skill_addendum}, *image_blocks]
@@ -875,15 +887,81 @@ def _persist_user_prompt(user_id: str, session_id: str, prompt: str) -> None:
     db.update_session(session_id, user_id=user_id, name=_derive_name(session_id, prompt), touch=True)
 
 
-def _session_aware_on_event_factory(user_id: str, session_id: str):
+def _pdf_sections_from_markdown(text: str) -> list[dict]:
+    sections: list[dict] = []
+    current_heading = "Summary"
+    current_body: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            heading = stripped.lstrip("#").strip()
+            if heading:
+                if current_body:
+                    sections.append({"heading": current_heading, "body": "\n".join(current_body).strip()})
+                    current_body = []
+                current_heading = heading
+                continue
+        current_body.append(line)
+    if current_body:
+        sections.append({"heading": current_heading, "body": "\n".join(current_body).strip()})
+    return sections or [{"heading": "Summary", "body": text}]
+
+
+def _create_competitive_pdf_artifact(user_id: str, session_id: str, text: str) -> dict:
+    payload = {
+        "title": "Competitive Positioning Brief",
+        "subtitle": "Generated from the selected competitive analysis skill.",
+        "sections": _pdf_sections_from_markdown(text),
+    }
+    rendered = generate_pdf(payload)
+    return db.add_artifact(
+        session_id=session_id,
+        kind="pdf",
+        filename=rendered["filename"],
+        mime=rendered["mime"],
+        path=rendered["path"],
+        user_id=user_id,
+    )
+
+
+def _session_aware_on_event_factory(
+    user_id: str,
+    session_id: str,
+    skill_notice: str | None = None,
+    auto_competitive_pdf: bool = False,
+):
     accumulated_text: list[str] = []
+    notice_emitted = False
+    pdf_created = False
 
     def wrapper(inner_emit):
         def emit(event: str, payload: dict):
+            nonlocal notice_emitted, pdf_created
+            if event == "assistant_delta" and skill_notice and not notice_emitted:
+                notice_emitted = True
+                inner_emit("assistant_delta", {"delta": f"**{skill_notice}**\n\n"})
             if event == "assistant_delta":
                 accumulated_text.append(str(payload.get("delta", "")))
             elif event == "result":
                 final_text = str(payload.get("text", ""))
+                if skill_notice and final_text and not final_text.startswith(f"**{skill_notice}**"):
+                    final_text = f"**{skill_notice}**\n\n{final_text}"
+                    payload = {**payload, "text": final_text}
+                if auto_competitive_pdf and final_text and not pdf_created:
+                    try:
+                        rec = _create_competitive_pdf_artifact(user_id, session_id, final_text)
+                        pdf_created = True
+                        inner_emit(
+                            "artifact_created",
+                            {
+                                "artifact_id": rec["id"],
+                                "filename": rec["filename"],
+                                "mime": rec["mime"],
+                                "kind": rec["kind"],
+                            },
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        inner_emit("error", {"message": f"PDF generation failed: {exc}"})
                 if final_text:
                     db.add_message(session_id, "assistant", final_text)
             elif event == "error":
@@ -891,6 +969,8 @@ def _session_aware_on_event_factory(user_id: str, session_id: str):
                 if message:
                     db.add_message(session_id, "assistant", f"**Error:** {message}")
             elif event == "artifact_created":
+                if str(payload.get("mime") or "") == "application/pdf":
+                    pdf_created = True
                 try:
                     aid = payload.get("artifact_id")
                     if aid:
@@ -933,7 +1013,8 @@ async def stream_session(
     if not prompt.strip():
         raise HTTPException(400, "Empty prompt.")
 
-    user_message = _build_user_message(user["id"], prompt, file_ids, csv_id, skill_ids)
+    selected_skills = _selected_skill_ids(skill_ids)
+    user_message = _build_user_message(user["id"], prompt, file_ids, csv_id, selected_skills)
     _persist_user_prompt(user["id"], session_id, prompt)
 
     # Build user_message — string if no images, else list-of-blocks.
@@ -945,7 +1026,12 @@ async def stream_session(
         conversation,
         user_message,
         request=request,
-        on_event_wrapper=_session_aware_on_event_factory(user["id"], session_id),
+        on_event_wrapper=_session_aware_on_event_factory(
+            user["id"],
+            session_id,
+            skill_notice=_skill_notice(selected_skills),
+            auto_competitive_pdf=marketing_skills.requires_pdf_deliverable(selected_skills),
+        ),
     )
     return EventSourceResponse(to_sse(_with_current_user(user["id"], event_stream)))
 
@@ -960,12 +1046,13 @@ async def complete_session(request: Request, session_id: str, payload: dict = Bo
     if not prompt:
         raise HTTPException(400, "Empty prompt.")
 
+    selected_skills = _selected_skill_ids(payload.get("skill_ids"))
     user_message = _build_user_message(
         user["id"],
         prompt,
         payload.get("file_ids"),
         payload.get("csv_id"),
-        payload.get("skill_ids"),
+        selected_skills,
     )
     _persist_user_prompt(user["id"], session_id, prompt)
     client = _client()
@@ -981,7 +1068,12 @@ async def complete_session(request: Request, session_id: str, payload: dict = Bo
         elif event == "error":
             error_text = str(event_payload.get("message", "")).strip()
 
-    recorder = _session_aware_on_event_factory(user["id"], session_id)(emit)
+    recorder = _session_aware_on_event_factory(
+        user["id"],
+        session_id,
+        skill_notice=_skill_notice(selected_skills),
+        auto_competitive_pdf=marketing_skills.requires_pdf_deliverable(selected_skills),
+    )(emit)
     token = db.CURRENT_USER_ID.set(user["id"])
     try:
         await asyncio.to_thread(run_orchestrator, client, conversation, user_message, recorder)

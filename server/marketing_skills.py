@@ -7,6 +7,7 @@ from marketing_agent.config import PROJECT_ROOT
 
 SKILLS_DIR = PROJECT_ROOT / "skills"
 MAX_SKILL_TEXT_CHARS = 18_000
+PDF_DELIVERABLE_SKILLS = {"competitive-positioning-brief"}
 
 
 def _read(path: Path, limit: int = MAX_SKILL_TEXT_CHARS) -> str:
@@ -44,9 +45,19 @@ def list_skills() -> list[dict]:
                 "name": name,
                 "description": description,
                 "structure": ["SKILL.md", "scripts", "references", "assets"],
+                "requires_pdf": skill_dir.name in PDF_DELIVERABLE_SKILLS,
             }
         )
     return out
+
+
+def selected_skill_names(skill_ids: list[str]) -> list[str]:
+    skills = {skill["id"]: skill["name"] for skill in list_skills()}
+    return [skills[sid] for sid in skill_ids if sid in skills]
+
+
+def requires_pdf_deliverable(skill_ids: list[str]) -> bool:
+    return any(sid in PDF_DELIVERABLE_SKILLS for sid in skill_ids)
 
 
 def build_skill_addendum(skill_ids: list[str]) -> str:
@@ -70,5 +81,6 @@ def build_skill_addendum(skill_ids: list[str]) -> str:
         "\n\n[Selected marketing SOP skills]\n"
         "Follow the selected SOP skill(s) below when producing the answer. "
         "If required inputs are missing, ask concise clarifying questions before making strong assumptions.\n\n"
+        "If a selected skill requires a PDF deliverable, the final answer must include a generated PDF artifact.\n\n"
         + "\n\n---\n\n".join(chunks)
     )[:MAX_SKILL_TEXT_CHARS]

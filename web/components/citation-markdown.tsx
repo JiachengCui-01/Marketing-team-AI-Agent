@@ -169,6 +169,11 @@ function CitationLine({ segment }: { segment: Extract<Segment, { kind: "citation
 function MarkdownBody({ children, inline = false }: { children: string; inline?: boolean }) {
   const components = {
     ...(inline ? { p: ({ children }: { children?: ReactNode }) => <>{children}</> } : {}),
+    table: ({ children }: { children?: ReactNode }) => (
+      <div className="markdown-table-scroll">
+        <table>{children}</table>
+      </div>
+    ),
     a: ({ href, children }: { href?: string; children?: ReactNode }) => {
       const source = sourceFromHref(href, children);
       return source ? <CitationCapsules sources={[source]} /> : <>{children}</>;

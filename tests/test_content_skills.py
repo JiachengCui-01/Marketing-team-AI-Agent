@@ -5,6 +5,7 @@ from unittest import mock
 
 from marketing_agent.agents import content_agent
 from marketing_agent.agents.content_skills import select_content_skill
+from server import marketing_skills
 
 
 class ContentSkillTests(unittest.TestCase):
@@ -46,6 +47,13 @@ class ContentSkillTests(unittest.TestCase):
         self.assertIn("Platform skill: Xiaohongshu", captured["user_message"])
         self.assertIn("Selected platform skill: xiaohongshu", captured["user_message"])
         self.assertNotIn("Twitter/X", captured["system"])
+
+    def test_competitive_skill_requires_pdf_deliverable(self) -> None:
+        skills = {skill["id"]: skill for skill in marketing_skills.list_skills()}
+
+        self.assertTrue(skills["competitive-positioning-brief"]["requires_pdf"])
+        self.assertFalse(skills["product-launch-campaign"]["requires_pdf"])
+        self.assertTrue(marketing_skills.requires_pdf_deliverable(["competitive-positioning-brief"]))
 
 
 if __name__ == "__main__":

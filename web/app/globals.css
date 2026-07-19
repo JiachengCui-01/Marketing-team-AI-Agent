@@ -297,6 +297,7 @@ html, body {
 }
 
 /* Markdown polish inside chat bubbles */
+.prose-chat { min-width: 0; overflow-wrap: anywhere; }
 .prose-chat h1 { font-size: 1.5rem; font-weight: 700; margin: 0.75rem 0 0.5rem; }
 .prose-chat h2 { font-size: 1.25rem; font-weight: 600; margin: 0.75rem 0 0.5rem; }
 .prose-chat h3 { font-size: 1.1rem; font-weight: 600; margin: 0.5rem 0; }
@@ -309,7 +310,14 @@ html, body {
 .prose-chat pre { background: rgb(var(--bg-subtle)); padding: 0.75rem; border-radius: 8px; overflow-x: auto; margin: 0.75rem 0; }
 .prose-chat pre code { background: transparent; padding: 0; }
 .prose-chat blockquote { border-left: 3px solid rgb(var(--accent)); padding-left: 0.75rem; color: rgb(var(--fg-muted)); margin: 0.5rem 0; }
-.prose-chat table { border-collapse: collapse; margin: 0.75rem 0; font-size: 0.9em; }
+.prose-chat .markdown-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0.75rem 0;
+  border: 1px solid rgb(var(--border));
+  border-radius: 8px;
+}
+.prose-chat table { min-width: max-content; border-collapse: collapse; margin: 0; font-size: 0.9em; }
 .prose-chat th, .prose-chat td { border: 1px solid rgb(var(--border)); padding: 0.4rem 0.6rem; text-align: left; }
 .prose-chat th { background: rgb(var(--bg-subtle)); font-weight: 600; }
 .prose-chat hr { border: 0; border-top: 1px solid rgb(var(--border)); margin: 1rem 0; }

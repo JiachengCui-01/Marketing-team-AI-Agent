@@ -2,6 +2,7 @@
 
 Recommended sections:
 
+- PDF cover title and brief context
 - Audience and buying situation
 - Competitor set
 - Table of key claims, evidence, and uncertainty

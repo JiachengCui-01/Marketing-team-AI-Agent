@@ -4,6 +4,7 @@ Use this skill when the user needs a competitor comparison, differentiation narr
 
 ## What This Skill Produces
 
+- A PDF competitive positioning brief as the final deliverable
 - Competitive landscape summary
 - Differentiation pillars and proof points
 - Competitor-by-competitor comparison
@@ -19,6 +20,7 @@ Use this skill when the user needs a competitor comparison, differentiation narr
 
 ## Output Rules
 
+- Always produce a downloadable PDF document for the final competitive positioning brief.
 - Do not invent competitor facts when sources or user materials are missing.
 - Mark unverifiable claims as assumptions.
 - Prefer decision-useful comparisons over broad market summaries.

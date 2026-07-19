@@ -44,7 +44,7 @@ export function MessageBubble({
   return (
     <div
       className={cn(
-        "flex gap-3 animate-fade-in transition-all duration-300",
+        "flex min-w-0 gap-3 animate-fade-in transition-all duration-300",
         isUser ? "flex-row-reverse" : "flex-row",
       )}
     >
@@ -68,7 +68,7 @@ export function MessageBubble({
 
       <div
         className={cn(
-          "max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-relaxed transition-all duration-300",
+          "min-w-0 max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-relaxed transition-all duration-300",
           isUser
             ? "bg-accent text-accent-fg rounded-tr-sm shadow-lg shadow-accent/25 hover:shadow-xl hover:shadow-accent/35"
             : "bg-bg-elevated text-fg border border-border rounded-tl-sm shadow-sm hover:shadow-md hover:border-accent/30",
