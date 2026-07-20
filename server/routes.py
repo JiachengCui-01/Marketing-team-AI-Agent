@@ -18,7 +18,7 @@ from marketing_agent.orchestrator import run_orchestrator
 from marketing_agent.tools import image_gen
 from marketing_agent.tools.pdf_tool import generate_pdf
 
-from . import auth, db, image_processing, image_serve, marketing_skills, news, sessions, uploads
+from . import auth, db, image_processing, image_serve, marketing_skills, memory, news, sessions, uploads
 from .streaming import orchestrator_event_stream, to_sse
 
 router = APIRouter(prefix="/api")
@@ -115,6 +115,67 @@ def avatar_lookup(account: str) -> dict:
     if user is None:
         return {"exists": False, "avatar": None, "username": None}
     return {"exists": True, "avatar": user.get("avatar"), "username": user.get("username")}
+
+
+# ---------- memory ----------
+
+def _memory_values(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        raw = value
+    else:
+        raw = str(value).replace("，", ",").replace("\n", ",").split(",")
+    out: list[str] = []
+    for item in raw:
+        text = str(item).strip()
+        if text and text not in out:
+            out.append(text)
+        if len(out) >= 12:
+            break
+    return out
+
+
+def _normalize_marketing_profile(profile: dict | None) -> dict:
+    profile = profile or {}
+    normalized: dict[str, list[str]] = {}
+    aliases = {
+        "industry": ["industries"],
+        "target_customers": ["audiences"],
+        "tone_preferences": ["tones"],
+        "report_format_preferences": ["deliverables"],
+    }
+    for key in memory.MARKETING_PROFILE_FIELDS:
+        values = _memory_values(profile.get(key))
+        for alias in aliases.get(key, []):
+            values = [*values, *[item for item in _memory_values(profile.get(alias)) if item not in values]]
+        normalized[key] = values
+    return normalized
+
+
+@router.get("/memory/marketing")
+def get_marketing_memory(request: Request) -> dict:
+    user = auth.require_user(request)
+    rec = db.get_user_marketing_memory(user["id"])
+    profile = _normalize_marketing_profile((rec or {}).get("profile") or {})
+    return {"profile": profile, "updated_at": (rec or {}).get("updated_at")}
+
+
+@router.put("/memory/marketing")
+def save_marketing_memory(request: Request, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    raw_profile = payload.get("profile") if isinstance(payload.get("profile"), dict) else payload
+    profile = _normalize_marketing_profile(raw_profile)
+    profile = {key: value for key, value in profile.items() if value}
+    rec = db.upsert_user_marketing_memory(user["id"], profile)
+    return {"profile": _normalize_marketing_profile(rec["profile"]), "updated_at": rec["updated_at"]}
+
+
+@router.delete("/memory/marketing")
+def clear_marketing_memory(request: Request) -> dict:
+    user = auth.require_user(request)
+    db.delete_user_marketing_memory(user["id"])
+    return {"profile": _normalize_marketing_profile({}), "updated_at": None}
 
 
 # ---------- news ----------
@@ -899,6 +960,7 @@ def _persist_user_prompt(user_id: str, session_id: str, prompt: str) -> None:
     if not last or last["role"] != "user" or last["content"] != prompt:
         db.add_message(session_id, "user", prompt)
     db.update_session(session_id, user_id=user_id, name=_derive_name(session_id, prompt), touch=True)
+    memory.update_long_term_marketing_memory(user_id, prompt)
 
 
 def _pdf_sections_from_markdown(text: str, output_language: str = "en") -> list[dict]:
@@ -989,6 +1051,7 @@ def _session_aware_on_event_factory(
                         inner_emit("error", {"message": f"PDF generation failed: {exc}"})
                 if final_text:
                     db.add_message(session_id, "assistant", final_text)
+                    memory.update_long_term_marketing_memory(user_id, final_text)
             elif event == "error":
                 message = str(payload.get("message", "")).strip()
                 if message:
@@ -1032,7 +1095,7 @@ async def stream_session(
     skill_ids: str | None = None,
 ):
     user = auth.require_user(request)
-    conversation = sessions.get(session_id, user["id"])
+    conversation = sessions.prepare_for_turn(session_id, user["id"])
     if conversation is None:
         raise HTTPException(404, "Session not found.")
     if not prompt.strip():
@@ -1066,7 +1129,7 @@ async def stream_session(
 @router.post("/sessions/{session_id}/complete")
 async def complete_session(request: Request, session_id: str, payload: dict = Body(...)) -> dict:
     user = auth.require_user(request)
-    conversation = sessions.get(session_id, user["id"])
+    conversation = sessions.prepare_for_turn(session_id, user["id"])
     if conversation is None:
         raise HTTPException(404, "Session not found.")
     prompt = str(payload.get("prompt") or "").strip()

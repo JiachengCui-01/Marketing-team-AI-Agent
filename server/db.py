@@ -89,6 +89,24 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, id);
 
+CREATE TABLE IF NOT EXISTS session_memory_summaries (
+    session_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    source_message_count INTEGER NOT NULL,
+    updated_at REAL NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_session_memory_user ON session_memory_summaries(user_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS user_marketing_memory (
+    user_id TEXT PRIMARY KEY,
+    profile_json TEXT NOT NULL,
+    updated_at REAL NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS artifacts (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -524,10 +542,95 @@ def list_messages(session_id: str) -> list[dict]:
     _ensure()
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT role, content, created_at FROM messages WHERE session_id = ? ORDER BY id ASC",
+            "SELECT id, role, content, created_at FROM messages WHERE session_id = ? ORDER BY id ASC",
             (session_id,),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ---------- memory ----------
+
+def get_session_memory_summary(session_id: str, user_id: str) -> dict | None:
+    _ensure()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT session_id, user_id, summary, source_message_count, updated_at "
+            "FROM session_memory_summaries WHERE session_id = ? AND user_id = ?",
+            (session_id, user_id),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def upsert_session_memory_summary(
+    session_id: str,
+    user_id: str,
+    summary: str,
+    source_message_count: int,
+) -> dict:
+    _ensure()
+    now = time.time()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO session_memory_summaries
+                (session_id, user_id, summary, source_message_count, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET
+                summary = excluded.summary,
+                source_message_count = excluded.source_message_count,
+                updated_at = excluded.updated_at
+            """,
+            (session_id, user_id, summary, source_message_count, now),
+        )
+    return {
+        "session_id": session_id,
+        "user_id": user_id,
+        "summary": summary,
+        "source_message_count": source_message_count,
+        "updated_at": now,
+    }
+
+
+def get_user_marketing_memory(user_id: str) -> dict | None:
+    _ensure()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT user_id, profile_json, updated_at FROM user_marketing_memory WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    data = dict(row)
+    try:
+        data["profile"] = json.loads(data.get("profile_json") or "{}")
+    except (ValueError, TypeError):
+        data["profile"] = {}
+    return data
+
+
+def upsert_user_marketing_memory(user_id: str, profile: dict) -> dict:
+    _ensure()
+    now = time.time()
+    payload = json.dumps(profile, ensure_ascii=False, sort_keys=True)
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO user_marketing_memory (user_id, profile_json, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                profile_json = excluded.profile_json,
+                updated_at = excluded.updated_at
+            """,
+            (user_id, payload, now),
+        )
+    return {"user_id": user_id, "profile": profile, "profile_json": payload, "updated_at": now}
+
+
+def delete_user_marketing_memory(user_id: str) -> bool:
+    _ensure()
+    with _connect() as conn:
+        cur = conn.execute("DELETE FROM user_marketing_memory WHERE user_id = ?", (user_id,))
+        return cur.rowcount > 0
 
 
 # ---------- artifacts ----------
@@ -1010,6 +1113,8 @@ def reset_for_tests() -> None:
                         DROP TABLE IF EXISTS news_configs;
                         DROP TABLE IF EXISTS uploads;
                         DROP TABLE IF EXISTS artifacts;
+                        DROP TABLE IF EXISTS user_marketing_memory;
+                        DROP TABLE IF EXISTS session_memory_summaries;
                         DROP TABLE IF EXISTS messages;
                         DROP TABLE IF EXISTS sessions;
                         DROP TABLE IF EXISTS groups;

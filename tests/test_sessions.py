@@ -50,6 +50,37 @@ class SessionStoreTests(unittest.TestCase):
         self.assertEqual(rehydrated.messages[0]["role"], "user")
         self.assertEqual(rehydrated.messages[0]["content"], "hello")
 
+    def test_prepare_for_turn_compresses_old_messages(self) -> None:
+        user_id = self.create_user()
+        session_id = sessions.create(user_id)
+        for idx in range(18):
+            db.add_message(session_id, "user", f"write campaign copy round {idx}")
+            db.add_message(session_id, "assistant", f"draft output round {idx}")
+
+        conv = sessions.prepare_for_turn(session_id, user_id)
+        assert conv is not None
+        serialized = "\n".join(str(m["content"]) for m in conv.messages)
+        self.assertIn("Conversation summary", serialized)
+        self.assertIn("round 17", serialized)
+        self.assertLess(len(conv.messages), 36)
+
+    def test_prepare_for_turn_injects_marketing_profile(self) -> None:
+        user_id = self.create_user()
+        session_id = sessions.create(user_id)
+        db.upsert_user_marketing_memory(
+            user_id,
+            {
+                "channels": ["Little Red Book"],
+                "audiences": ["Consumer lifestyle audiences"],
+                "deliverables": ["Marketing copy"],
+            },
+        )
+
+        conv = sessions.prepare_for_turn(session_id, user_id)
+        assert conv is not None
+        self.assertIn("Long-term enterprise marketing profile", conv.messages[0]["content"])
+        self.assertIn("Little Red Book", conv.messages[0]["content"])
+
     def test_group_delete_cascades_sessions(self) -> None:
         user_id = self.create_user()
         group = db.create_group(user_id, "Campaign A")

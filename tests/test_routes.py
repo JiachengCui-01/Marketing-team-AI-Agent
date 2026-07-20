@@ -124,6 +124,37 @@ class RouteTests(unittest.TestCase):
         response = self.client.get("/api/sessions")
         self.assertEqual(response.status_code, 401)
 
+    def test_marketing_memory_can_be_managed(self) -> None:
+        empty = self.client.get("/api/memory/marketing", headers=self.headers)
+        self.assertEqual(empty.status_code, 200, empty.text)
+        self.assertEqual(empty.json()["profile"]["industry"], [])
+
+        saved = self.client.put(
+            "/api/memory/marketing",
+            headers=self.headers,
+            json={
+                "profile": {
+                    "role_title": ["Marketing lead"],
+                    "industry": ["B2B SaaS"],
+                    "channels": "LinkedIn\nEmail",
+                    "target_customers": ["Enterprise buyers"],
+                }
+            },
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        body = saved.json()
+        self.assertEqual(body["profile"]["industry"], ["B2B SaaS"])
+        self.assertEqual(body["profile"]["channels"], ["LinkedIn", "Email"])
+
+        other_headers = self._register("memory-other@example.com")
+        other = self.client.get("/api/memory/marketing", headers=other_headers)
+        self.assertEqual(other.status_code, 200, other.text)
+        self.assertEqual(other.json()["profile"]["industry"], [])
+
+        cleared = self.client.delete("/api/memory/marketing", headers=self.headers)
+        self.assertEqual(cleared.status_code, 200, cleared.text)
+        self.assertEqual(cleared.json()["profile"]["channels"], [])
+
     def test_session_create_delete(self) -> None:
         created = self.client.post("/api/sessions", headers=self.headers)
         self.assertEqual(created.status_code, 200)

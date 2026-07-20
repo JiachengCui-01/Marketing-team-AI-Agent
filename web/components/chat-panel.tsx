@@ -139,11 +139,11 @@ export function ChatPanel({
 
   const empty = messages.length === 0;
   const selectedSkills = skills.filter((skill) => selectedSkillIds.includes(skill.id));
-  const clarifySteps = clarifyPrimary ? getClarifyFollowupSteps(clarifyPrimary.id, locale) : [];
+  const clarifySteps = clarifyPrimary ? getClarifyFollowupSteps(clarifyPrimary.id, locale, clarifyBaseText || input) : [];
   const clarifyCurrentStep = clarifyPrimary ? clarifySteps[clarifyStepIndex] : null;
   const clarifySuggestions = clarifyReady
     ? getClarifyFinalSuggestions(locale)
-    : clarifyCurrentStep?.suggestions ?? getClarifySuggestions(input, locale);
+    : clarifyCurrentStep?.suggestions ?? getClarifySuggestions(clarifyBaseText || input, locale);
   const clarifyTitle = clarifyReady
     ? locale === "zh" ? "信息基本完备" : "Ready to proceed"
     : clarifyCurrentStep?.title ?? copy.clarifyTitle;
@@ -290,7 +290,7 @@ export function ChatPanel({
     setClarifyDraft("");
 
     if (!clarifyPrimary) {
-      const steps = getClarifyFollowupSteps(suggestion.id, locale);
+      const steps = getClarifyFollowupSteps(suggestion.id, locale, clarifyBaseText || input);
       setClarifyPrimary(suggestion);
       setClarifySelections([]);
       setClarifyStepIndex(0);
@@ -688,11 +688,60 @@ function missingMarketingSlots(text: string, locale: "zh" | "en"): string[] {
   return out;
 }
 
+function analyzeMarketingPrompt(text: string) {
+  const compact = text.replace(/\s+/g, "").toLowerCase();
+  const isMarketingGeneration =
+    /营销|文案|种草|推广|宣传|广告|海报|社媒|小红书|公众号|朋友圈|短视频|邮件|linkedin|post|copy|campaign|ad|social/.test(compact) &&
+    /写|生成|编写|创作|出一|做|produce|write|generate|create|draft/.test(compact);
+  const hasPlatform =
+    /平台|渠道|小红书|抖音|公众号|朋友圈|视频号|微博|知乎|b站|邮件|官网|社群|私域|linkedin|twitter|xhs|instagram|facebook|tiktok|youtube|newsletter|email/.test(compact);
+  const hasAudience =
+    /受众|人群|用户|客户|消费者|女生|男性|女性|学生|白领|宝妈|决策者|企业|b2b|b2c|audience|customer|user|buyer|persona|segment/.test(compact);
+  const hasTone =
+    /语气|语调|风格|调性|口吻|专业|亲切|活泼|高级|年轻|正式|幽默|tone|voice|style|professional|friendly|formal|playful/.test(compact);
+  const hasFormat =
+    /字数|标题|正文|cta|行动号召|格式|篇幅|长度|条|篇|版本|hashtag|话题|caption|headline|body|length|format/.test(compact);
+  const hasProductDetail =
+    /卖点|亮点|功能|价格|材质|面料|颜色|尺码|版型|显瘦|舒适|透气|百搭|系列|品牌|feature|benefit|price|material|brand/.test(compact);
+
+  const category =
+    /服装|衣服|女装|男装|穿搭|裙|裤|外套|衬衫|t恤|鞋|包|apparel|fashion|outfit/.test(compact)
+      ? "apparel"
+      : /saas|b2b|企业|客户|系统|平台|软件|工具|解决方案|crm|ai/.test(compact)
+        ? "b2b"
+        : "general";
+
+  let productLabel = "这个产品/服务";
+  if (category === "apparel") productLabel = "这款服装新品";
+  else if (category === "b2b") productLabel = "这个企业产品";
+
+  const productMatch =
+    text.match(/(?:为|给|围绕|推广|宣传)([^，。,.!?！？\n]{2,24}?)(?:写|生成|编写|创作|做|的)/) ||
+    text.match(/([^，。,.!?！？\n]{2,20}?)(?:营销文案|推广文案|种草文案|宣传文案|广告文案)/);
+  if (productMatch?.[1]) {
+    productLabel = productMatch[1].replace(/^(公司|我们|新推出的|推出的)/, "").trim() || productLabel;
+  }
+
+  return {
+    isMarketingGeneration,
+    category,
+    productLabel,
+    hasPlatform,
+    hasAudience,
+    hasTone,
+    hasFormat,
+    hasProductDetail,
+  };
+}
+
 function getClarifySuggestions(text: string, locale: "zh" | "en"): ClarifySuggestion[] {
   const compact = text.replace(/\s+/g, "").toLowerCase();
   const isZh = locale === "zh";
   const isAnalysis = /分析|总结|复盘|analy[sz]e|summari[sz]e|review/.test(compact);
   const isPlan = /策划|计划|规划|方案|plan|campaign|strategy/.test(compact);
+
+  const dynamicMarketing = buildDynamicMarketingEntrySuggestions(text, locale);
+  if (dynamicMarketing) return dynamicMarketing;
 
   const other: ClarifySuggestion = isZh
     ? {
@@ -831,6 +880,217 @@ function getClarifySuggestions(text: string, locale: "zh" | "en"): ClarifySugges
   ];
 }
 
+function buildDynamicMarketingEntrySuggestions(text: string, locale: "zh" | "en"): ClarifySuggestion[] | null {
+  const profile = analyzeMarketingPrompt(text);
+  if (!profile.isMarketingGeneration) return null;
+  const other = makeOtherSuggestion(locale);
+  const isZh = locale === "zh";
+  const product = profile.productLabel;
+
+  if (profile.category === "apparel") {
+    return [
+      makeSuggestion(
+        "xhs-seeding",
+        isZh ? "小红书种草文案" : "Little Red Book seeding copy",
+        isZh ? `适合把${product}写成生活方式种草` : `Frame ${product} as lifestyle seeding content`,
+        isZh
+          ? `方向：小红书种草文案。平台：小红书。围绕${product}做生活方式种草，后续补齐受众、穿搭场景、语气和 CTA。`
+          : `Direction: Little Red Book seeding copy. Platform: Little Red Book. Build lifestyle content around ${product}, then clarify audience, usage scene, tone, and CTA.`,
+      ),
+      makeSuggestion(
+        "short-video-script",
+        isZh ? "短视频口播脚本" : "Short video script",
+        isZh ? `适合把${product}做成口播/镜头脚本` : `Turn ${product} into a spoken or shot-by-shot script`,
+        isZh
+          ? `方向：短视频口播脚本。围绕${product}输出开场钩子、镜头/口播、卖点节奏和 CTA。`
+          : `Direction: short video script. Produce hook, voiceover or shots, benefit pacing, and CTA for ${product}.`,
+      ),
+      makeSuggestion(
+        "private-conversion",
+        isZh ? "私域转化文案" : "Owned-channel conversion copy",
+        isZh ? `适合社群/朋友圈推动咨询或下单` : `Use owned channels to drive inquiries or purchase`,
+        isZh
+          ? `方向：私域转化文案。围绕${product}输出适合朋友圈/社群的转化型表达、利益点和行动引导。`
+          : `Direction: owned-channel conversion copy. Write conversion-focused copy, benefits, and CTA for ${product}.`,
+      ),
+      other,
+    ];
+  }
+
+  if (profile.category === "b2b") {
+    return [
+      makeSuggestion(
+        "linkedin-b2b",
+        isZh ? "LinkedIn 专业帖" : "LinkedIn B2B post",
+        isZh ? `适合面向企业客户介绍${product}` : `Introduce ${product} to business buyers`,
+        isZh
+          ? `方向：LinkedIn 专业帖。围绕${product}输出面向企业客户的痛点、价值主张、可信表达和 CTA。`
+          : `Direction: LinkedIn B2B post. Cover pain points, value proposition, credible proof, and CTA for ${product}.`,
+      ),
+      makeSuggestion(
+        "sales-email",
+        isZh ? "销售/培育邮件" : "Sales or nurture email",
+        isZh ? `适合转化线索或唤醒客户` : `Convert leads or re-engage prospects`,
+        isZh
+          ? `方向：销售/培育邮件。围绕${product}输出邮件主题、正文结构、价值点和下一步行动。`
+          : `Direction: sales or nurture email. Produce subject, body structure, value points, and next action for ${product}.`,
+      ),
+      makeSuggestion(
+        "solution-brief",
+        isZh ? "解决方案简版介绍" : "Solution brief",
+        isZh ? `适合官网/销售材料的简明介绍` : `A concise website or sales-material description`,
+        isZh
+          ? `方向：解决方案简版介绍。围绕${product}输出适合官网或销售材料的结构化介绍。`
+          : `Direction: solution brief. Produce a structured website or sales-material description for ${product}.`,
+      ),
+      other,
+    ];
+  }
+
+  return [
+    makeSuggestion(
+      "social-copy",
+      isZh ? "社媒发布文案" : "Social publishing copy",
+      isZh ? `为${product}生成可直接发布的内容` : `Create publishable content for ${product}`,
+      isZh
+        ? `方向：社媒发布文案。围绕${product}补齐平台、受众、语气、篇幅和 CTA 后生成。`
+        : `Direction: social publishing copy. Clarify platform, audience, tone, length, and CTA for ${product}.`,
+    ),
+    makeSuggestion(
+      "campaign-angle",
+      isZh ? "营销切入角度" : "Campaign angle",
+      isZh ? `先确定传播角度再生成内容` : `Choose the communication angle before drafting`,
+      isZh
+        ? `方向：营销切入角度。先为${product}确定传播角度，再输出对应内容。`
+        : `Direction: campaign angle. Define the communication angle for ${product}, then draft the content.`,
+    ),
+    makeSuggestion(
+      "conversion-copy",
+      isZh ? "转化型文案" : "Conversion copy",
+      isZh ? `突出卖点和行动引导` : `Emphasize benefits and next action`,
+      isZh
+        ? `方向：转化型文案。围绕${product}突出卖点、信任感和行动引导。`
+        : `Direction: conversion copy. Emphasize benefits, trust, and next action for ${product}.`,
+    ),
+    other,
+  ];
+}
+
+function buildDynamicMarketingFollowupSteps(
+  text: string,
+  locale: "zh" | "en",
+  primaryId: string,
+): ClarifyStep[] {
+  const profile = analyzeMarketingPrompt(text);
+  if (!profile.isMarketingGeneration) return [];
+  const isZh = locale === "zh";
+  const product = profile.productLabel;
+  const other = makeOtherSuggestion(locale);
+  const steps: ClarifyStep[] = [];
+  const primaryAddsPlatform = [
+    "xhs-seeding",
+    "short-video-script",
+    "private-conversion",
+    "linkedin-b2b",
+    "sales-email",
+    "solution-brief",
+  ].includes(primaryId);
+
+  if (!profile.hasAudience) {
+    const apparelOptions = [
+      makeSuggestion(
+        "audience-commuter",
+        isZh ? "通勤白领/职场女性" : "Commuting professionals",
+        isZh ? "强调舒适、显瘦、好搭配" : "Emphasize comfort, flattering fit, and easy styling",
+        isZh ? "目标受众：通勤白领/职场女性，强调舒适、显瘦和好搭配。" : "Audience: commuting professionals; emphasize comfort, flattering fit, and easy styling.",
+      ),
+      makeSuggestion(
+        "audience-young",
+        isZh ? "年轻学生/初入职场" : "Students or early-career buyers",
+        isZh ? "强调性价比、出片、日常百搭" : "Emphasize value, photogenic looks, and daily versatility",
+        isZh ? "目标受众：年轻学生/初入职场人群，强调性价比、出片和日常百搭。" : "Audience: students or early-career buyers; emphasize value, photogenic looks, and everyday versatility.",
+      ),
+      makeSuggestion(
+        "audience-light-mature",
+        isZh ? "轻熟精致女性" : "Polished modern women",
+        isZh ? "强调质感、版型、场合适配" : "Emphasize texture, fit, and occasion fit",
+        isZh ? "目标受众：轻熟精致女性，强调质感、版型和场合适配。" : "Audience: polished modern women; emphasize texture, fit, and occasion fit.",
+      ),
+      other,
+    ];
+    const b2bOptions = [
+      makeSuggestion("audience-founder", isZh ? "创始人/管理层" : "Founders or executives", isZh ? "强调增长、效率和确定性" : "Emphasize growth, efficiency, and certainty", isZh ? "目标受众：创始人/管理层，强调增长、效率和确定性。" : "Audience: founders or executives; emphasize growth, efficiency, and certainty."),
+      makeSuggestion("audience-marketing", isZh ? "市场/运营负责人" : "Marketing or ops leaders", isZh ? "强调执行效率和可衡量结果" : "Emphasize execution efficiency and measurable outcomes", isZh ? "目标受众：市场/运营负责人，强调执行效率和可衡量结果。" : "Audience: marketing or operations leaders; emphasize execution efficiency and measurable outcomes."),
+      makeSuggestion("audience-sales", isZh ? "销售团队/BD" : "Sales or BD teams", isZh ? "强调线索、话术和转化" : "Emphasize leads, talking points, and conversion", isZh ? "目标受众：销售团队/BD，强调线索、话术和转化。" : "Audience: sales or BD teams; emphasize leads, talking points, and conversion."),
+      other,
+    ];
+    steps.push({
+      id: "dynamic-audience",
+      title: isZh ? `${product}主要想打动谁？` : `Who should ${product} speak to?`,
+      body: isZh ? "我会根据受众调整卖点顺序、措辞和 CTA。" : "I will adapt the benefit order, wording, and CTA to the audience.",
+      suggestions: profile.category === "b2b" ? b2bOptions : apparelOptions,
+    });
+  }
+
+  if (!profile.hasPlatform && !primaryAddsPlatform) {
+    steps.push({
+      id: "dynamic-platform",
+      title: isZh ? "这条内容优先发布在哪里？" : "Where will this be published first?",
+      body: isZh ? "不同平台会影响开头钩子、篇幅和表达密度。" : "The platform changes hook, length, and density.",
+      suggestions: [
+        makeSuggestion("platform-xhs", isZh ? "小红书" : "Little Red Book", isZh ? "种草感、生活方式、标签更重要" : "Lifestyle seeding, relatability, and tags matter", isZh ? "发布平台：小红书，使用种草感、生活方式表达和标签。" : "Platform: Little Red Book; use lifestyle seeding, relatability, and tags."),
+        makeSuggestion("platform-short-video", isZh ? "短视频平台" : "Short video", isZh ? "需要钩子、口播和镜头节奏" : "Needs hook, voiceover, and shot pacing", isZh ? "发布平台：短视频平台，输出钩子、口播和镜头节奏。" : "Platform: short video; include hook, voiceover, and shot pacing."),
+        makeSuggestion("platform-owned", isZh ? "朋友圈/社群" : "Owned channels", isZh ? "更偏信任、转化和行动引导" : "Trust, conversion, and action matter more", isZh ? "发布平台：朋友圈/社群，偏信任转化和行动引导。" : "Platform: owned channels; emphasize trust, conversion, and action."),
+        other,
+      ],
+    });
+  }
+
+  if (profile.category === "apparel" && !profile.hasProductDetail) {
+    steps.push({
+      id: "dynamic-selling-point",
+      title: isZh ? "这款服装最该突出哪个卖点？" : "Which apparel benefit matters most?",
+      body: isZh ? "卖点会决定文案的主钩子和正文展开顺序。" : "The benefit will determine the main hook and body structure.",
+      suggestions: [
+        makeSuggestion("fit", isZh ? "版型显瘦/修饰身材" : "Flattering fit", isZh ? "突出视觉效果和穿着自信" : "Highlight look and confidence", isZh ? "核心卖点：版型显瘦/修饰身材，突出视觉效果和穿着自信。" : "Core benefit: flattering fit; emphasize visual effect and confidence."),
+        makeSuggestion("comfort", isZh ? "舒适透气/适合日常" : "Comfort and daily wear", isZh ? "突出长时间穿着体验" : "Highlight all-day wearability", isZh ? "核心卖点：舒适透气/适合日常，突出长时间穿着体验。" : "Core benefit: comfort and daily wearability."),
+        makeSuggestion("style", isZh ? "百搭出片/场景多" : "Versatile and photogenic", isZh ? "突出通勤、约会、周末等场景" : "Highlight work, dates, weekends, and styling", isZh ? "核心卖点：百搭出片/场景多，突出通勤、约会、周末等穿搭场景。" : "Core benefit: versatile and photogenic; highlight work, dates, weekend styling."),
+        other,
+      ],
+    });
+  }
+
+  if (!profile.hasTone) {
+    steps.push({
+      id: "dynamic-tone",
+      title: isZh ? "想要什么语气和风格？" : "What tone should it use?",
+      body: isZh ? "语气会影响标题钩子、情绪浓度和销售感强弱。" : "Tone changes the hook, emotional intensity, and sales feel.",
+      suggestions: [
+        makeSuggestion("tone-seeding", isZh ? "真实种草感" : "Authentic recommendation", isZh ? "像亲身体验后的自然分享" : "Feels like a real personal recommendation", isZh ? "语气风格：真实种草感，像亲身体验后的自然分享。" : "Tone: authentic recommendation, like a real personal experience."),
+        makeSuggestion("tone-refined", isZh ? "精致高级感" : "Refined and premium", isZh ? "更克制，突出质感和审美" : "More restrained, focused on quality and taste", isZh ? "语气风格：精致高级感，更克制，突出质感和审美。" : "Tone: refined and premium, restrained and quality-focused."),
+        makeSuggestion("tone-conversion", isZh ? "强转化/促单" : "Conversion-focused", isZh ? "卖点明确，行动引导更强" : "Clear benefits and stronger CTA", isZh ? "语气风格：强转化/促单，卖点明确，行动引导更强。" : "Tone: conversion-focused with clear benefits and stronger CTA."),
+        other,
+      ],
+    });
+  }
+
+  if (!profile.hasFormat) {
+    steps.push({
+      id: "dynamic-format",
+      title: isZh ? "最终要输出成什么形态？" : "What final shape should it take?",
+      body: isZh ? "我会按这个形态控制长度、结构和 CTA。" : "I will use this to control length, structure, and CTA.",
+      suggestions: [
+        makeSuggestion("format-one", isZh ? "1 条可直接发布" : "One publish-ready piece", isZh ? "标题 + 正文 + CTA + 话题" : "Title, body, CTA, and tags", isZh ? "交付形式：1 条可直接发布内容，包含标题、正文、CTA 和话题标签。" : "Deliverable: one publish-ready piece with title, body, CTA, and tags."),
+        makeSuggestion("format-three", isZh ? "3 个不同角度版本" : "Three angle variants", isZh ? "便于 A/B 测试或挑选" : "Useful for A/B testing or selection", isZh ? "交付形式：3 个不同角度版本，便于 A/B 测试或挑选。" : "Deliverable: three angle variants for A/B testing or selection."),
+        makeSuggestion("format-script", isZh ? "短视频脚本" : "Short video script", isZh ? "钩子 + 镜头/口播 + CTA" : "Hook, shots/voiceover, CTA", isZh ? "交付形式：短视频脚本，包含钩子、镜头/口播和 CTA。" : "Deliverable: short video script with hook, shots/voiceover, and CTA."),
+        other,
+      ],
+    });
+  }
+
+  return steps.slice(0, 3);
+}
+
 function getClarifyFinalSuggestions(locale: "zh" | "en"): ClarifySuggestion[] {
   if (locale === "zh") {
     return [
@@ -877,9 +1137,11 @@ function getClarifyStepLabel(
   return locale === "zh" ? `追问 ${stepIndex + 1}/${totalSteps}` : `Question ${stepIndex + 1}/${totalSteps}`;
 }
 
-function getClarifyFollowupSteps(primaryId: string, locale: "zh" | "en"): ClarifyStep[] {
+function getClarifyFollowupSteps(primaryId: string, locale: "zh" | "en", prompt = ""): ClarifyStep[] {
   const isZh = locale === "zh";
   const other = makeOtherSuggestion(locale);
+  const dynamicMarketing = buildDynamicMarketingFollowupSteps(prompt, locale, primaryId);
+  if (dynamicMarketing.length > 0) return dynamicMarketing;
 
   if (primaryId === "competitor") {
     return [

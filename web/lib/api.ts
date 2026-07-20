@@ -139,6 +139,24 @@ export type MessageArtifact = {
   mime: string;
 };
 
+export type MarketingMemoryProfile = {
+  role_title: string[];
+  industry: string[];
+  company_brand: string[];
+  products: string[];
+  target_customers: string[];
+  channels: string[];
+  tone_preferences: string[];
+  report_format_preferences: string[];
+  kpi_data_preferences: string[];
+  other_preferences: string[];
+};
+
+export type MarketingMemoryResponse = {
+  profile: MarketingMemoryProfile;
+  updated_at: number | null;
+};
+
 // ---------- auth ----------
 
 export async function registerUser(payload: ProfilePayload): Promise<{ token: string; user: UserProfile }> {
@@ -201,6 +219,31 @@ export async function lookupAvatar(account: string): Promise<{ exists: boolean; 
   const url = new URL(`${API_BASE}/api/auth/avatar`, urlBase());
   url.searchParams.set("account", account);
   const res = await fetch(url);
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return res.json();
+}
+
+export async function getMarketingMemory(): Promise<MarketingMemoryResponse> {
+  const res = await fetch(`${API_BASE}/api/memory/marketing`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return res.json();
+}
+
+export async function saveMarketingMemory(profile: Partial<MarketingMemoryProfile>): Promise<MarketingMemoryResponse> {
+  const res = await fetch(`${API_BASE}/api/memory/marketing`, {
+    method: "PUT",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ profile }),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return res.json();
+}
+
+export async function clearMarketingMemory(): Promise<MarketingMemoryResponse> {
+  const res = await fetch(`${API_BASE}/api/memory/marketing`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(await parseJsonError(res));
   return res.json();
 }

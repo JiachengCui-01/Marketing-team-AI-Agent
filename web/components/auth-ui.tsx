@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Modal } from "@/components/modal";
 import {
+  Brain,
   Check,
   ChevronDown,
   HelpCircle,
@@ -13,17 +14,22 @@ import {
   Settings,
   ShieldAlert,
   Sparkles,
+  Trash2,
   UserRound,
   UserRoundCog,
   WalletCards,
 } from "lucide-react";
 import {
+  clearMarketingMemory,
   deleteMe,
+  getMarketingMemory,
   loginUser,
   lookupAvatar,
   registerUser,
+  saveMarketingMemory,
   setAuthToken,
   updateMe,
+  type MarketingMemoryProfile,
   type ProfilePayload,
   type UserProfile,
 } from "@/lib/api";
@@ -604,12 +610,52 @@ function RememberedList({
   );
 }
 
+const MARKETING_MEMORY_KEYS: (keyof MarketingMemoryProfile)[] = [
+  "role_title",
+  "industry",
+  "company_brand",
+  "products",
+  "target_customers",
+  "channels",
+  "tone_preferences",
+  "report_format_preferences",
+  "kpi_data_preferences",
+  "other_preferences",
+];
+
+const EMPTY_MARKETING_MEMORY = Object.fromEntries(MARKETING_MEMORY_KEYS.map((key) => [key, ""])) as Record<keyof MarketingMemoryProfile, string>;
+
+function memoryToForm(profile?: Partial<MarketingMemoryProfile>): Record<keyof MarketingMemoryProfile, string> {
+  return Object.fromEntries(
+    MARKETING_MEMORY_KEYS.map((key) => [key, (profile?.[key] ?? []).join("\n")]),
+  ) as Record<keyof MarketingMemoryProfile, string>;
+}
+
+function formToMemory(form: Record<keyof MarketingMemoryProfile, string>): Partial<MarketingMemoryProfile> {
+  return Object.fromEntries(
+    MARKETING_MEMORY_KEYS.map((key) => [
+      key,
+      form[key]
+        .split(/\n|,|，/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ]),
+  ) as Partial<MarketingMemoryProfile>;
+}
+
 function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose: () => void }) {
   const { locale, setLocale, t } = useI18n();
   const { theme, setTheme, resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+  const [memoryForm, setMemoryForm] = useState<Record<keyof MarketingMemoryProfile, string>>(EMPTY_MARKETING_MEMORY);
+  const [memoryLoading, setMemoryLoading] = useState(true);
+  const [memorySaving, setMemorySaving] = useState(false);
+  const [memoryError, setMemoryError] = useState<string | null>(null);
+  const [memorySaved, setMemorySaved] = useState(false);
+  const [confirmClearMemory, setConfirmClearMemory] = useState(false);
   const languageRef = useRef<HTMLDivElement>(null);
   const themeRef = useRef<HTMLDivElement>(null);
+  const memoryRef = useRef<HTMLDivElement>(null);
   const activeTheme = mounted ? (theme === "system" ? resolvedTheme : theme) ?? "light" : "light";
   const labels =
     locale === "zh"
@@ -618,6 +664,26 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
           languageBody: "选择界面显示语言。",
           themeGroup: "主题外观",
           themeBody: "选择工作台视觉主题。",
+          memoryGroup: "长期记忆",
+          memoryBody: "查看和修改自动总结出的企业营销用户画像。",
+          memoryHint: "每行一个偏好或事实，系统会在后续对话中优先参考这些信息。",
+          memoryAuto: "聊天中识别到的高相关营销信息会自动沉淀到这里，你也可以手动修正。",
+          memorySave: "保存长期记忆",
+          memoryClear: "清空长期记忆",
+          memoryClearTitle: "清空长期记忆？",
+          memoryClearBody: "清空后，当前账号已保存的企业营销画像会被删除，后续对话需要重新积累。",
+          memorySaved: "已保存",
+          loading: "加载中...",
+          roleTitle: "角色 / 职位",
+          industry: "所属行业",
+          companyBrand: "公司 / 品牌",
+          products: "主要产品",
+          targetCustomers: "目标客户",
+          channels: "常用渠道",
+          tonePreferences: "内容语气偏好",
+          reportFormatPreferences: "报告格式偏好",
+          kpiDataPreferences: "KPI / 数据口径偏好",
+          otherPreferences: "其他长期偏好",
           light: "明亮",
           dark: "暗色",
           aurora: "极光",
@@ -628,6 +694,26 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
           languageBody: "Choose the interface language.",
           themeGroup: "Appearance",
           themeBody: "Choose the workspace visual theme.",
+          memoryGroup: "Long-Term Memory",
+          memoryBody: "View and edit the enterprise marketing profile summarized from chats.",
+          memoryHint: "Use one fact or preference per line. Future chats will use these details first.",
+          memoryAuto: "Highly relevant marketing context can be captured from chat automatically, and you can correct it here.",
+          memorySave: "Save memory",
+          memoryClear: "Clear memory",
+          memoryClearTitle: "Clear long-term memory?",
+          memoryClearBody: "This deletes the saved enterprise marketing profile for this account. Future chats will rebuild it over time.",
+          memorySaved: "Saved",
+          loading: "Loading...",
+          roleTitle: "Role / title",
+          industry: "Industry",
+          companyBrand: "Company / brand",
+          products: "Main products",
+          targetCustomers: "Target customers",
+          channels: "Common channels",
+          tonePreferences: "Tone preferences",
+          reportFormatPreferences: "Report format preferences",
+          kpiDataPreferences: "KPI / data definitions",
+          otherPreferences: "Other long-term preferences",
           light: "Light",
           dark: "Dark",
           aurora: "Aurora",
@@ -636,7 +722,20 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
   const navItems = [
     { label: labels.languageGroup, icon: Languages, target: languageRef },
     { label: labels.themeGroup, icon: Palette, target: themeRef },
+    { label: labels.memoryGroup, icon: Brain, target: memoryRef },
   ];
+  const memoryFields = [
+    { key: "role_title", label: labels.roleTitle },
+    { key: "industry", label: labels.industry },
+    { key: "company_brand", label: labels.companyBrand },
+    { key: "products", label: labels.products },
+    { key: "target_customers", label: labels.targetCustomers },
+    { key: "channels", label: labels.channels },
+    { key: "tone_preferences", label: labels.tonePreferences },
+    { key: "report_format_preferences", label: labels.reportFormatPreferences },
+    { key: "kpi_data_preferences", label: labels.kpiDataPreferences },
+    { key: "other_preferences", label: labels.otherPreferences },
+  ] as { key: keyof MarketingMemoryProfile; label: string }[];
   const themes = [
     { id: "light", label: labels.light, preview: "theme-preview-light" },
     { id: "dark", label: labels.dark, preview: "theme-preview-dark" },
@@ -645,6 +744,25 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
   ] as const;
 
   useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setMemoryLoading(true);
+    setMemoryError(null);
+    getMarketingMemory()
+      .then((res) => {
+        if (!cancelled) setMemoryForm(memoryToForm(res.profile));
+      })
+      .catch((err) => {
+        if (!cancelled) setMemoryError(localizeError(err, locale));
+      })
+      .finally(() => {
+        if (!cancelled) setMemoryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [locale, userAccount]);
 
   function scrollTo(ref: React.RefObject<HTMLDivElement>) {
     ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -658,6 +776,41 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
   function chooseTheme(next: UserTheme) {
     saveUserTheme(userAccount, next);
     setTheme(next);
+  }
+
+  function updateMemoryField(key: keyof MarketingMemoryProfile, value: string) {
+    setMemorySaved(false);
+    setMemoryForm((old) => ({ ...old, [key]: value }));
+  }
+
+  async function saveMemory() {
+    setMemorySaving(true);
+    setMemoryError(null);
+    setMemorySaved(false);
+    try {
+      const res = await saveMarketingMemory(formToMemory(memoryForm));
+      setMemoryForm(memoryToForm(res.profile));
+      setMemorySaved(true);
+    } catch (err) {
+      setMemoryError(localizeError(err, locale));
+    } finally {
+      setMemorySaving(false);
+    }
+  }
+
+  async function clearMemory() {
+    setMemorySaving(true);
+    setMemoryError(null);
+    try {
+      await clearMarketingMemory();
+      setMemoryForm(EMPTY_MARKETING_MEMORY);
+      setMemorySaved(false);
+      setConfirmClearMemory(false);
+    } catch (err) {
+      setMemoryError(localizeError(err, locale));
+    } finally {
+      setMemorySaving(false);
+    }
   }
 
   return (
@@ -746,8 +899,65 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
               })}
             </div>
           </section>
+
+          <section ref={memoryRef} className="rounded-xl border border-border bg-bg/70 p-4 scroll-mt-2">
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold">{labels.memoryGroup}</p>
+                <p className="mt-1 text-xs text-fg-subtle">{labels.memoryBody}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                {memorySaved ? <span className="rounded-full bg-accent/10 px-2 py-1 text-[11px] font-medium text-accent">{labels.memorySaved}</span> : null}
+                <button
+                  type="button"
+                  onClick={() => setConfirmClearMemory(true)}
+                  disabled={memorySaving || memoryLoading}
+                  className="btn-ghost border border-border px-3 py-1.5 text-xs disabled:opacity-40"
+                >
+                  <Trash2 size={13} />
+                  {labels.memoryClear}
+                </button>
+              </div>
+            </div>
+            <div className="rounded-lg border border-border/70 bg-bg-subtle/55 px-3 py-2 text-xs text-fg-muted">
+              <p>{labels.memoryAuto}</p>
+              <p className="mt-1">{labels.memoryHint}</p>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              {memoryFields.map((field) => (
+                <label key={field.key} className={cn("block text-xs font-medium text-fg-muted", field.key === "other_preferences" ? "md:col-span-2" : "")}>
+                  {field.label}
+                  <textarea
+                    value={memoryForm[field.key]}
+                    onChange={(e) => updateMemoryField(field.key, e.target.value)}
+                    rows={field.key === "other_preferences" ? 3 : 2}
+                    disabled={memoryLoading}
+                    placeholder={memoryLoading ? labels.loading : field.label}
+                    className="mt-1 w-full resize-none rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none placeholder:text-fg-subtle focus:border-accent disabled:opacity-60"
+                  />
+                </label>
+              ))}
+            </div>
+            {memoryError ? <p className="mt-3 text-xs text-danger">{memoryError}</p> : null}
+            <div className="mt-4 flex justify-end">
+              <button type="button" onClick={saveMemory} disabled={memorySaving || memoryLoading} className="btn-accent px-4 py-2 text-sm disabled:cursor-not-allowed">
+                <Check size={15} />
+                {memorySaving ? t.saving : labels.memorySave}
+              </button>
+            </div>
+          </section>
         </div>
       </div>
+      {confirmClearMemory ? (
+        <ConfirmDialog
+          title={labels.memoryClearTitle}
+          body={labels.memoryClearBody}
+          confirmLabel={labels.memoryClear}
+          danger
+          onCancel={() => setConfirmClearMemory(false)}
+          onConfirm={clearMemory}
+        />
+      ) : null}
     </Modal>
   );
 }

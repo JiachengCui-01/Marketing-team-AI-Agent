@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 from marketing_agent.conversation import Conversation
 
-from . import db
+from . import db, memory
 
 
 @dataclass
@@ -28,6 +28,8 @@ def _hydrate(session_id: str, user_id: str | None = None) -> Conversation | None
     """Load message history from SQLite into a fresh Conversation."""
     if db.get_session(session_id, user_id) is None:
         return None
+    if user_id is not None:
+        return memory.build_conversation(session_id, user_id)
     conv = Conversation()
     for row in db.list_messages(session_id):
         content = row["content"]
@@ -60,6 +62,21 @@ def get(session_id: str, user_id: str | None = None) -> Conversation | None:
     with _CACHE_LOCK:
         _CACHE[session_id] = StoredSession(conv)
         return _CACHE[session_id].conversation
+
+
+def prepare_for_turn(session_id: str, user_id: str) -> Conversation | None:
+    """Rebuild a compact working context before a model call.
+
+    The full transcript remains in SQLite. The in-memory Conversation is a
+    budgeted view with long-term profile, compressed older history, and recent
+    turns.
+    """
+    conv = memory.build_conversation(session_id, user_id)
+    if conv is None:
+        return None
+    with _CACHE_LOCK:
+        _CACHE[session_id] = StoredSession(conv)
+        return conv
 
 
 def delete(session_id: str, user_id: str | None = None) -> bool:
