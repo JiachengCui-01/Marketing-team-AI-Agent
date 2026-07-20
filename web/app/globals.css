@@ -237,17 +237,16 @@ html, body {
       0 14px 34px -26px rgb(var(--accent) / 0.5),
       0 8px 18px -16px rgb(0 0 0 / 0.35);
   }
-  .clarify-choice {
-    @apply rounded-xl border px-3 py-2 text-left transition-all duration-150 ease-macos disabled:opacity-60;
+  .clarify-choice-row {
+    @apply rounded-xl border px-2.5 py-2 transition-all duration-150 ease-macos;
     background: rgb(var(--bg) / 0.62);
     border-color: rgb(var(--border) / 0.78);
   }
-  .clarify-choice:hover,
-  .clarify-choice-active {
+  .clarify-choice-row:hover,
+  .clarify-choice-row-active {
     border-color: rgb(var(--accent) / 0.42);
     background: rgb(var(--accent) / 0.08);
     box-shadow: 0 8px 18px -16px rgb(var(--accent) / 0.5);
-    transform: translateY(-1px);
   }
   /* Ghost icon/label button: bg + color shift on hover, subtle press. */
   .btn-ghost {

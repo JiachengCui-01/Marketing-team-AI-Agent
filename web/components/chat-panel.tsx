@@ -34,6 +34,13 @@ type ClarifySuggestion = {
   custom?: boolean;
 };
 
+type ClarifyStep = {
+  id: string;
+  title: string;
+  body: string;
+  suggestions: ClarifySuggestion[];
+};
+
 export function ChatPanel({
   messages,
   input,
@@ -82,6 +89,10 @@ export function ChatPanel({
   const [clarifyOpen, setClarifyOpen] = useState(false);
   const [clarifyDraft, setClarifyDraft] = useState("");
   const [clarifyCustom, setClarifyCustom] = useState(false);
+  const [clarifyPrimary, setClarifyPrimary] = useState<ClarifySuggestion | null>(null);
+  const [clarifySelections, setClarifySelections] = useState<ClarifySuggestion[]>([]);
+  const [clarifyStepIndex, setClarifyStepIndex] = useState(0);
+  const [clarifyReady, setClarifyReady] = useState(false);
   const skillButtonRef = useRef<HTMLButtonElement>(null);
   const workspaceUploadMapRef = useRef<Map<string, string>>(new Map());
 
@@ -125,7 +136,19 @@ export function ChatPanel({
 
   const empty = messages.length === 0;
   const selectedSkills = skills.filter((skill) => selectedSkillIds.includes(skill.id));
-  const clarifySuggestions = getClarifySuggestions(input, locale);
+  const clarifySteps = clarifyPrimary ? getClarifyFollowupSteps(clarifyPrimary.id, locale) : [];
+  const clarifyCurrentStep = clarifyPrimary ? clarifySteps[clarifyStepIndex] : null;
+  const clarifySuggestions = clarifyReady
+    ? getClarifyFinalSuggestions(locale)
+    : clarifyCurrentStep?.suggestions ?? getClarifySuggestions(input, locale);
+  const clarifyTitle = clarifyReady
+    ? locale === "zh" ? "信息基本完备" : "Ready to proceed"
+    : clarifyCurrentStep?.title ?? copy.clarifyTitle;
+  const clarifyBody = clarifyReady
+    ? locale === "zh"
+      ? "我已经获得了足够的信息，可以开始执行。你也可以继续补充其它要求后再执行。"
+      : "I have enough context to proceed. You can also add more requirements before starting."
+    : clarifyCurrentStep?.body ?? copy.clarifyBody;
 
   useEffect(() => {
     if (!workspaceHandle) return;
@@ -213,37 +236,105 @@ export function ChatPanel({
       setClarifyOpen(true);
       setClarifyCustom(false);
       setClarifyDraft("");
+      setClarifyPrimary(null);
+      setClarifySelections([]);
+      setClarifyStepIndex(0);
+      setClarifyReady(false);
       return;
     }
     if (looksAmbiguous(text) && clarifyOpen) return;
     onSend(text);
+    resetClarify();
+  }
+
+  function resetClarify() {
     setClarifyDraft("");
     setClarifyOpen(false);
     setClarifyCustom(false);
+    setClarifyPrimary(null);
+    setClarifySelections([]);
+    setClarifyStepIndex(0);
+    setClarifyReady(false);
   }
 
   function sendClarified(detail: string) {
     const text = input.trim();
-    const extra = detail.trim();
+    const details = [
+      clarifyPrimary?.detail,
+      ...clarifySelections.map((item) => item.detail),
+      detail,
+    ].filter(Boolean);
+    const extra = details.join("\n").trim();
     const prefix = locale === "zh" ? "补充信息" : "Additional context";
     onSend(extra ? `${text}\n\n${prefix}: ${extra}` : text);
-    setClarifyDraft("");
-    setClarifyOpen(false);
-    setClarifyCustom(false);
+    resetClarify();
   }
 
   function chooseClarifySuggestion(suggestion: ClarifySuggestion) {
+    if (clarifyReady && suggestion.id === "execute") {
+      sendClarified("");
+      return;
+    }
     if (suggestion.custom) {
       setClarifyCustom(true);
       return;
     }
-    sendClarified(suggestion.detail);
+    setClarifyCustom(false);
+    setClarifyDraft("");
+
+    if (!clarifyPrimary) {
+      const steps = getClarifyFollowupSteps(suggestion.id, locale);
+      setClarifyPrimary(suggestion);
+      setClarifySelections([]);
+      setClarifyStepIndex(0);
+      setClarifyReady(steps.length === 0);
+      return;
+    }
+
+    const nextSelections = [...clarifySelections, suggestion];
+    setClarifySelections(nextSelections);
+    if (clarifyStepIndex + 1 >= clarifySteps.length) {
+      setClarifyReady(true);
+    } else {
+      setClarifyStepIndex((index) => index + 1);
+    }
   }
 
   function closeClarify() {
-    setClarifyOpen(false);
-    setClarifyCustom(false);
+    resetClarify();
+  }
+
+  function submitCustomClarify() {
+    const extra = clarifyDraft.trim();
+    if (!extra) return;
+    const customSuggestion: ClarifySuggestion = {
+      id: `custom-${Date.now()}`,
+      title: locale === "zh" ? "其它补充" : "Other context",
+      description: extra,
+      detail: extra,
+    };
+
+    if (clarifyReady) {
+      sendClarified(extra);
+      return;
+    }
+
+    if (!clarifyPrimary) {
+      setClarifyPrimary(customSuggestion);
+      setClarifySelections([]);
+      setClarifyStepIndex(0);
+      setClarifyReady(true);
+    } else {
+      const nextSelections = [...clarifySelections, customSuggestion];
+      setClarifySelections(nextSelections);
+      if (clarifyStepIndex + 1 >= clarifySteps.length) {
+        setClarifyReady(true);
+      } else {
+        setClarifyStepIndex((index) => index + 1);
+      }
+    }
     setClarifyDraft("");
+    setClarifyCustom(false);
   }
 
   return (
@@ -285,18 +376,22 @@ export function ChatPanel({
         <div className="max-w-3xl mx-auto px-4 py-2">
           {clarifyOpen ? (
             <ClarifyInlinePrompt
-              title={copy.clarifyTitle}
-              body={copy.clarifyBody}
+              title={clarifyTitle}
+              body={clarifyBody}
               placeholder={copy.clarifyPlaceholder}
               continueLabel={copy.continueSend}
+              confirmLabel={locale === "zh" ? "确定" : "OK"}
               cancelLabel={t.cancel}
               suggestions={clarifySuggestions}
+              selections={[clarifyPrimary, ...clarifySelections].filter(Boolean) as ClarifySuggestion[]}
+              ready={clarifyReady}
+              stepLabel={getClarifyStepLabel(clarifyPrimary, clarifyStepIndex, clarifySteps.length, locale)}
               customOpen={clarifyCustom}
               customDraft={clarifyDraft}
               busy={busy}
               onChoose={chooseClarifySuggestion}
               onDraftChange={setClarifyDraft}
-              onCustomSubmit={() => sendClarified(clarifyDraft)}
+              onCustomSubmit={submitCustomClarify}
               onClose={closeClarify}
             />
           ) : null}
@@ -400,8 +495,12 @@ function ClarifyInlinePrompt({
   body,
   placeholder,
   continueLabel,
+  confirmLabel,
   cancelLabel,
   suggestions,
+  selections,
+  ready,
+  stepLabel,
   customOpen,
   customDraft,
   busy,
@@ -414,8 +513,12 @@ function ClarifyInlinePrompt({
   body: string;
   placeholder: string;
   continueLabel: string;
+  confirmLabel: string;
   cancelLabel: string;
   suggestions: ClarifySuggestion[];
+  selections: ClarifySuggestion[];
+  ready: boolean;
+  stepLabel: string;
   customOpen: boolean;
   customDraft: string;
   busy: boolean;
@@ -431,6 +534,9 @@ function ClarifyInlinePrompt({
           <div className="flex items-center gap-2 text-sm font-semibold text-fg">
             <Sparkles size={15} className="text-accent" />
             <span>{title}</span>
+            <span className="rounded-full border border-accent/20 bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent">
+              {stepLabel}
+            </span>
           </div>
           <p className="mt-1 text-xs leading-relaxed text-fg-muted">{body}</p>
         </div>
@@ -438,45 +544,68 @@ function ClarifyInlinePrompt({
           <X size={14} />
         </button>
       </div>
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        {suggestions.map((suggestion) => (
-          <button
-            key={suggestion.id}
-            type="button"
-            onClick={() => onChoose(suggestion)}
-            disabled={busy}
-            className={`clarify-choice ${suggestion.custom && customOpen ? "clarify-choice-active" : ""}`}
-          >
-            <span className="block text-xs font-semibold text-fg">{suggestion.title}</span>
-            <span className="mt-0.5 block text-[11px] leading-snug text-fg-muted">
-              {suggestion.description}
+      {selections.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {selections.map((item) => (
+            <span key={item.id} className="rounded-full border border-border/70 bg-bg/55 px-2 py-1 text-[11px] text-fg-muted">
+              {item.title}
             </span>
-          </button>
-        ))}
-      </div>
-      {customOpen ? (
-        <div className="mt-3 rounded-xl border border-border/70 bg-bg-elevated/65 p-2">
-          <textarea
-            value={customDraft}
-            onChange={(e) => onDraftChange(e.target.value)}
-            placeholder={placeholder}
-            className="min-h-20 w-full resize-none rounded-lg border border-border bg-bg/80 px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:outline-none focus:ring-2 focus:ring-accent/25"
-          />
-          <div className="mt-2 flex justify-end gap-2">
-            <button type="button" onClick={onClose} className="btn-ghost px-3 py-2 text-xs">
-              {cancelLabel}
-            </button>
-            <button
-              type="button"
-              onClick={onCustomSubmit}
-              disabled={busy || !customDraft.trim()}
-              className="btn-accent px-3 py-2 text-xs disabled:cursor-not-allowed"
-            >
-              {continueLabel}
-            </button>
-          </div>
+          ))}
         </div>
       ) : null}
+      <div className="mt-3 space-y-1.5">
+        {suggestions.map((suggestion) => {
+          const isCustomActive = suggestion.custom && customOpen;
+          return (
+            <div
+              key={suggestion.id}
+              className={`clarify-choice-row ${isCustomActive ? "clarify-choice-row-active" : ""}`}
+            >
+              <button
+                type="button"
+                onClick={() => onChoose(suggestion)}
+                disabled={busy}
+                className="flex min-w-0 flex-1 items-center gap-3 text-left disabled:opacity-60"
+              >
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-accent/25 text-[10px] font-semibold text-accent">
+                  {suggestion.custom ? "+" : "›"}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-xs font-semibold text-fg">{suggestion.title}</span>
+                  <span className="block truncate text-[11px] leading-snug text-fg-muted">
+                    {suggestion.description}
+                  </span>
+                </span>
+              </button>
+              {isCustomActive ? (
+                <div className="mt-2 flex gap-2 pl-8">
+                  <input
+                    value={customDraft}
+                    onChange={(e) => onDraftChange(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        onCustomSubmit();
+                      }
+                    }}
+                    placeholder={placeholder}
+                    className="min-w-0 flex-1 rounded-lg border border-border bg-bg/80 px-3 py-2 text-xs text-fg placeholder:text-fg-subtle focus:outline-none focus:ring-2 focus:ring-accent/25"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={onCustomSubmit}
+                    disabled={busy || !customDraft.trim()}
+                    className="btn-accent shrink-0 px-3 py-2 text-xs disabled:cursor-not-allowed"
+                  >
+                    {ready ? continueLabel : confirmLabel}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -629,6 +758,207 @@ function getClarifySuggestions(text: string, locale: "zh" | "en"): ClarifySugges
         },
     other,
   ];
+}
+
+function getClarifyFinalSuggestions(locale: "zh" | "en"): ClarifySuggestion[] {
+  if (locale === "zh") {
+    return [
+      {
+        id: "execute",
+        title: "信息完备，开始执行",
+        description: "按已选择的方向和补充信息生成结果",
+        detail: "",
+      },
+      {
+        id: "other",
+        title: "其它",
+        description: "继续手动补充额外要求后再执行",
+        detail: "",
+        custom: true,
+      },
+    ];
+  }
+  return [
+    {
+      id: "execute",
+      title: "Ready, start",
+      description: "Run with the selected direction and collected context",
+      detail: "",
+    },
+    {
+      id: "other",
+      title: "Other",
+      description: "Add more custom requirements before starting",
+      detail: "",
+      custom: true,
+    },
+  ];
+}
+
+function getClarifyStepLabel(
+  primary: ClarifySuggestion | null,
+  stepIndex: number,
+  totalSteps: number,
+  locale: "zh" | "en",
+) {
+  if (!primary) return locale === "zh" ? "选择方向" : "Choose direction";
+  if (stepIndex >= totalSteps) return locale === "zh" ? "确认执行" : "Confirm";
+  return locale === "zh" ? `追问 ${stepIndex + 1}/${totalSteps}` : `Question ${stepIndex + 1}/${totalSteps}`;
+}
+
+function getClarifyFollowupSteps(primaryId: string, locale: "zh" | "en"): ClarifyStep[] {
+  const isZh = locale === "zh";
+  const other = makeOtherSuggestion(locale);
+
+  if (primaryId === "competitor") {
+    return [
+      {
+        id: "competitor-scope",
+        title: isZh ? "先确定竞品范围" : "Define the competitor set",
+        body: isZh
+          ? "你希望我围绕哪类竞品展开？选择一个最贴近的范围。"
+          : "Which competitor scope should I use? Pick the closest option.",
+        suggestions: [
+          makeSuggestion("direct", isZh ? "直接竞品" : "Direct competitors", isZh ? "同类产品/服务逐项对比" : "Compare similar products or services", isZh ? "竞品范围：直接竞品，重点比较同类产品/服务。" : "Competitor scope: direct competitors; focus on comparable products or services."),
+          makeSuggestion("alternatives", isZh ? "替代方案" : "Alternatives", isZh ? "用户可能选择的替代路径" : "Other ways customers solve the problem", isZh ? "竞品范围：替代方案，重点分析用户可能选择的其它解决路径。" : "Competitor scope: alternatives; analyze other ways customers solve the problem."),
+          makeSuggestion("benchmark", isZh ? "行业标杆" : "Market leaders", isZh ? "选择头部品牌做标杆参考" : "Benchmark against category leaders", isZh ? "竞品范围：行业标杆，重点参考头部品牌做法。" : "Competitor scope: market leaders; benchmark against category leaders."),
+          other,
+        ],
+      },
+      {
+        id: "competitor-output",
+        title: isZh ? "你更需要哪种产出？" : "What output do you need?",
+        body: isZh
+          ? "不同产出会影响分析颗粒度和表达方式。"
+          : "The deliverable changes the depth and wording of the analysis.",
+        suggestions: [
+          makeSuggestion("battlecard", isZh ? "销售 Battlecard" : "Sales battlecard", isZh ? "便于销售应对客户比较" : "Help sales handle customer comparisons", isZh ? "交付形式：销售 battlecard，强调对比话术、反驳点和销售建议。" : "Output: sales battlecard with comparison talking points, rebuttals, and sales guidance."),
+          makeSuggestion("brief", isZh ? "策略简报" : "Strategy brief", isZh ? "用于内部判断和方向选择" : "For internal decisions and prioritization", isZh ? "交付形式：策略简报，强调竞争格局、机会判断和行动建议。" : "Output: strategy brief focused on landscape, opportunities, and actions."),
+          makeSuggestion("content", isZh ? "营销内容素材" : "Marketing content", isZh ? "转化成可发布内容方向" : "Turn analysis into content angles", isZh ? "交付形式：营销内容素材，强调可发布选题、卖点表达和内容角度。" : "Output: marketing content angles, value propositions, and publishable topics."),
+          other,
+        ],
+      },
+      {
+        id: "competitor-depth",
+        title: isZh ? "分析深度要到哪里？" : "How deep should it go?",
+        body: isZh
+          ? "选择分析深度，我会据此控制篇幅和证据要求。"
+          : "Choose depth so I can tune length and evidence requirements.",
+        suggestions: [
+          makeSuggestion("quick", isZh ? "快速判断" : "Quick read", isZh ? "短结论和关键建议优先" : "Short conclusions and key actions", isZh ? "分析深度：快速判断，优先输出短结论和关键建议。" : "Depth: quick read; prioritize concise conclusions and key actions."),
+          makeSuggestion("standard", isZh ? "标准分析" : "Standard analysis", isZh ? "完整结构和清晰依据" : "Full structure with clear rationale", isZh ? "分析深度：标准分析，输出完整结构、依据和建议。" : "Depth: standard analysis with structure, rationale, and recommendations."),
+          makeSuggestion("deep", isZh ? "深度报告" : "Deep report", isZh ? "适合沉淀成报告或 PDF" : "Suitable for a report or PDF", isZh ? "分析深度：深度报告，适合沉淀成正式报告或 PDF。" : "Depth: deep report suitable for a formal report or PDF."),
+          other,
+        ],
+      },
+    ];
+  }
+
+  if (primaryId === "data") {
+    return [
+      {
+        id: "data-source",
+        title: isZh ? "数据来源是什么？" : "What data source should I use?",
+        body: isZh ? "如果已有文件，可以先说明数据类型或直接上传。" : "If you have a file, describe the data type or attach it.",
+        suggestions: [
+          makeSuggestion("uploaded", isZh ? "已上传/工作区数据" : "Uploaded/workspace data", isZh ? "基于现有文件分析" : "Analyze available files", isZh ? "数据来源：基于已上传或工作区文件分析。" : "Data source: use uploaded or workspace files."),
+          makeSuggestion("campaign", isZh ? "投放/活动数据" : "Campaign data", isZh ? "关注投放表现和转化" : "Focus on performance and conversion", isZh ? "数据来源：投放或活动数据，重点关注表现和转化。" : "Data source: campaign data; focus on performance and conversion."),
+          makeSuggestion("manual", isZh ? "文字描述数据" : "Described data", isZh ? "用户会用文字提供口径" : "Use user-provided definitions", isZh ? "数据来源：用户文字描述的数据和口径。" : "Data source: user-described data and definitions."),
+          other,
+        ],
+      },
+      {
+        id: "data-goal",
+        title: isZh ? "最想回答什么问题？" : "What question should it answer?",
+        body: isZh ? "选一个分析目标，我会据此组织指标和结论。" : "Pick an analysis goal so I can structure metrics and findings.",
+        suggestions: [
+          makeSuggestion("why", isZh ? "为什么变化" : "Why it changed", isZh ? "寻找涨跌原因和影响因素" : "Find drivers of movement", isZh ? "分析目标：解释指标变化原因和影响因素。" : "Analysis goal: explain metric movement and drivers."),
+          makeSuggestion("performance", isZh ? "表现评估" : "Performance readout", isZh ? "判断好坏和优先级" : "Assess performance and priorities", isZh ? "分析目标：评估表现好坏并给出优先级。" : "Analysis goal: evaluate performance and priorities."),
+          makeSuggestion("next", isZh ? "下一步建议" : "Next actions", isZh ? "直接产出行动建议" : "Produce practical recommendations", isZh ? "分析目标：产出下一步行动建议。" : "Analysis goal: produce practical next actions."),
+          other,
+        ],
+      },
+    ];
+  }
+
+  if (primaryId === "launch" || primaryId === "content-calendar") {
+    return [
+      {
+        id: "plan-goal",
+        title: isZh ? "这次方案的核心目标是什么？" : "What is the core goal?",
+        body: isZh ? "先定目标，后续渠道、内容和 KPI 才能对齐。" : "Goal first, then channels, content, and KPIs can align.",
+        suggestions: [
+          makeSuggestion("awareness", isZh ? "提升认知" : "Awareness", isZh ? "让更多目标用户知道" : "Reach more target users", isZh ? "核心目标：提升认知，扩大目标用户触达。" : "Core goal: awareness and reach."),
+          makeSuggestion("leads", isZh ? "获客转化" : "Lead generation", isZh ? "收集线索或促进咨询" : "Collect leads or inquiries", isZh ? "核心目标：获客转化，收集线索或促进咨询。" : "Core goal: lead generation and inquiries."),
+          makeSuggestion("activation", isZh ? "用户激活" : "Activation", isZh ? "推动试用、购买或复购" : "Drive trials, purchases, or repeat use", isZh ? "核心目标：用户激活，推动试用、购买或复购。" : "Core goal: activation, trials, purchases, or repeat use."),
+          other,
+        ],
+      },
+      {
+        id: "plan-channel",
+        title: isZh ? "优先面向哪个渠道？" : "Which channel is primary?",
+        body: isZh ? "选择主渠道后，我会匹配内容形式和节奏。" : "With a primary channel, I can match formats and cadence.",
+        suggestions: [
+          makeSuggestion("social", isZh ? "社媒平台" : "Social channels", isZh ? "小红书/LinkedIn/公众号等" : "LinkedIn, newsletters, social posts", isZh ? "主渠道：社媒平台，按平台内容形式组织。" : "Primary channel: social platforms; structure by content format."),
+          makeSuggestion("private", isZh ? "私域/社群" : "Owned/community", isZh ? "社群、邮件、企微等" : "Email, community, owned channels", isZh ? "主渠道：私域或社群，强调转化链路和持续触达。" : "Primary channel: owned/community; emphasize conversion path and repeated touchpoints."),
+          makeSuggestion("multi", isZh ? "多渠道整合" : "Integrated channels", isZh ? "线上线下组合推进" : "Coordinate multiple channels", isZh ? "主渠道：多渠道整合，按阶段组合线上线下触点。" : "Primary channel: integrated channels across stages."),
+          other,
+        ],
+      },
+    ];
+  }
+
+  return [
+    {
+      id: "generic-target",
+      title: isZh ? "目标受众是谁？" : "Who is the audience?",
+      body: isZh ? "先确定对象，生成内容才会更贴近真实场景。" : "Define the audience so the output fits the actual use case.",
+      suggestions: [
+        makeSuggestion("b2b", isZh ? "B2B 决策者" : "B2B decision-makers", isZh ? "面向企业客户和采购决策" : "Enterprise buyers and decision-makers", isZh ? "目标受众：B2B 决策者或企业客户。" : "Audience: B2B decision-makers or enterprise buyers."),
+        makeSuggestion("operators", isZh ? "运营/市场团队" : "Marketing/operators", isZh ? "面向内部执行团队" : "Internal execution teams", isZh ? "目标受众：运营、市场或内部执行团队。" : "Audience: marketing, operations, or internal execution teams."),
+        makeSuggestion("consumers", isZh ? "普通消费者" : "Consumers", isZh ? "面向 C 端用户" : "Consumer-facing audience", isZh ? "目标受众：普通消费者或 C 端用户。" : "Audience: consumers or end users."),
+        other,
+      ],
+    },
+    {
+      id: "generic-format",
+      title: isZh ? "希望最终是什么形式？" : "What final format do you want?",
+      body: isZh ? "选择交付形式后，我会按对应结构输出。" : "Choose the deliverable so I can use the right structure.",
+      suggestions: [
+        makeSuggestion("copy", isZh ? "可直接发布的文案" : "Publishable copy", isZh ? "短内容、标题、正文和 CTA" : "Short copy, title, body, CTA", isZh ? "交付形式：可直接发布的文案，包含标题、正文和 CTA。" : "Format: publishable copy with title, body, and CTA."),
+        makeSuggestion("outline", isZh ? "结构化方案" : "Structured plan", isZh ? "分模块给出策略和步骤" : "Modular strategy and steps", isZh ? "交付形式：结构化方案，分模块给出策略和步骤。" : "Format: structured plan with modules and steps."),
+        makeSuggestion("doc", isZh ? "完整文档" : "Full document", isZh ? "适合沉淀成报告或附件" : "Suitable for report or artifact", isZh ? "交付形式：完整文档，适合沉淀成报告或附件。" : "Format: full document suitable for a report or artifact."),
+        other,
+      ],
+    },
+  ];
+}
+
+function makeSuggestion(
+  id: string,
+  title: string,
+  description: string,
+  detail: string,
+): ClarifySuggestion {
+  return { id, title, description, detail };
+}
+
+function makeOtherSuggestion(locale: "zh" | "en"): ClarifySuggestion {
+  return locale === "zh"
+    ? {
+        id: "other",
+        title: "其它",
+        description: "自己输入补充内容",
+        detail: "",
+        custom: true,
+      }
+    : {
+        id: "other",
+        title: "Other",
+        description: "Type your own context",
+        detail: "",
+        custom: true,
+      };
 }
 
 function SkillPickerPopover({
