@@ -107,6 +107,13 @@ CREATE TABLE IF NOT EXISTS user_marketing_memory (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS user_memory_settings (
+    user_id TEXT PRIMARY KEY,
+    long_term_enabled INTEGER NOT NULL DEFAULT 1,
+    updated_at REAL NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS user_marketing_memory_evidence (
     user_id TEXT NOT NULL,
     field TEXT NOT NULL,
@@ -645,6 +652,37 @@ def delete_user_marketing_memory(user_id: str) -> bool:
         return cur.rowcount > 0
 
 
+def get_user_memory_settings(user_id: str) -> dict:
+    _ensure()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT user_id, long_term_enabled, updated_at FROM user_memory_settings WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+    if row is None:
+        return {"user_id": user_id, "long_term_enabled": True, "updated_at": None}
+    data = dict(row)
+    data["long_term_enabled"] = bool(data.get("long_term_enabled"))
+    return data
+
+
+def set_user_memory_enabled(user_id: str, enabled: bool) -> dict:
+    _ensure()
+    now = time.time()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO user_memory_settings (user_id, long_term_enabled, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                long_term_enabled = excluded.long_term_enabled,
+                updated_at = excluded.updated_at
+            """,
+            (user_id, 1 if enabled else 0, now),
+        )
+    return {"user_id": user_id, "long_term_enabled": enabled, "updated_at": now}
+
+
 def list_user_marketing_memory_evidence(user_id: str) -> list[dict]:
     _ensure()
     with _connect() as conn:
@@ -1161,6 +1199,7 @@ def reset_for_tests() -> None:
                         DROP TABLE IF EXISTS artifacts;
                         DROP TABLE IF EXISTS user_marketing_memory_evidence;
                         DROP TABLE IF EXISTS user_marketing_memory;
+                        DROP TABLE IF EXISTS user_memory_settings;
                         DROP TABLE IF EXISTS session_memory_summaries;
                         DROP TABLE IF EXISTS messages;
                         DROP TABLE IF EXISTS sessions;

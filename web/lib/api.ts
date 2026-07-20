@@ -154,6 +154,7 @@ export type MarketingMemoryProfile = {
 
 export type MarketingMemoryResponse = {
   profile: MarketingMemoryProfile;
+  enabled: boolean;
   updated_at: number | null;
 };
 
@@ -234,6 +235,16 @@ export async function saveMarketingMemory(profile: Partial<MarketingMemoryProfil
     method: "PUT",
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ profile }),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return res.json();
+}
+
+export async function updateMarketingMemorySettings(enabled: boolean): Promise<MarketingMemoryResponse> {
+  const res = await fetch(`${API_BASE}/api/memory/marketing`, {
+    method: "PATCH",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ enabled }),
   });
   if (!res.ok) throw new Error(await parseJsonError(res));
   return res.json();

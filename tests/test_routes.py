@@ -128,6 +128,7 @@ class RouteTests(unittest.TestCase):
         empty = self.client.get("/api/memory/marketing", headers=self.headers)
         self.assertEqual(empty.status_code, 200, empty.text)
         self.assertEqual(empty.json()["profile"]["industry"], [])
+        self.assertTrue(empty.json()["enabled"])
 
         saved = self.client.put(
             "/api/memory/marketing",
@@ -154,6 +155,14 @@ class RouteTests(unittest.TestCase):
         cleared = self.client.delete("/api/memory/marketing", headers=self.headers)
         self.assertEqual(cleared.status_code, 200, cleared.text)
         self.assertEqual(cleared.json()["profile"]["channels"], [])
+
+        disabled = self.client.patch("/api/memory/marketing", headers=self.headers, json={"enabled": False})
+        self.assertEqual(disabled.status_code, 200, disabled.text)
+        self.assertFalse(disabled.json()["enabled"])
+
+        loaded = self.client.get("/api/memory/marketing", headers=self.headers)
+        self.assertEqual(loaded.status_code, 200, loaded.text)
+        self.assertFalse(loaded.json()["enabled"])
 
     def test_session_create_delete(self) -> None:
         created = self.client.post("/api/sessions", headers=self.headers)

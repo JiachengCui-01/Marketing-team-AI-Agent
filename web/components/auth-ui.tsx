@@ -29,6 +29,7 @@ import {
   saveMarketingMemory,
   setAuthToken,
   updateMe,
+  updateMarketingMemorySettings,
   type MarketingMemoryProfile,
   type ProfilePayload,
   type UserProfile,
@@ -693,6 +694,7 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
   const [memorySaving, setMemorySaving] = useState(false);
   const [memoryError, setMemoryError] = useState<string | null>(null);
   const [memorySaved, setMemorySaved] = useState(false);
+  const [memoryEnabled, setMemoryEnabled] = useState(true);
   const [confirmClearMemory, setConfirmClearMemory] = useState(false);
   const languageRef = useRef<HTMLDivElement>(null);
   const themeRef = useRef<HTMLDivElement>(null);
@@ -709,6 +711,8 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
           memoryBody: "查看和修改自动总结出的企业营销用户画像。",
           memoryHint: "每行一个偏好或事实，系统会在后续对话中优先参考这些信息。",
           memoryAuto: "聊天中识别到的高相关营销信息会自动沉淀到这里，你也可以手动修正。",
+          memoryEnabled: "自动总结长期记忆",
+          memoryEnabledBody: "开启后，系统会在多次对话中逐步沉淀企业营销画像。",
           memorySave: "保存长期记忆",
           memoryClear: "清空长期记忆",
           memoryClearTitle: "清空长期记忆？",
@@ -739,6 +743,8 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
           memoryBody: "View and edit the enterprise marketing profile summarized from chats.",
           memoryHint: "Use one fact or preference per line. Future chats will use these details first.",
           memoryAuto: "Highly relevant marketing context can be captured from chat automatically, and you can correct it here.",
+          memoryEnabled: "Auto-summarize long-term memory",
+          memoryEnabledBody: "When enabled, the system gradually builds the enterprise marketing profile across chats.",
           memorySave: "Save memory",
           memoryClear: "Clear memory",
           memoryClearTitle: "Clear long-term memory?",
@@ -792,7 +798,10 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
     setMemoryError(null);
     getMarketingMemory()
       .then((res) => {
-        if (!cancelled) setMemoryForm(memoryToForm(res.profile, locale));
+        if (!cancelled) {
+          setMemoryForm(memoryToForm(res.profile, locale));
+          setMemoryEnabled(res.enabled);
+        }
       })
       .catch((err) => {
         if (!cancelled) setMemoryError(localizeError(err, locale));
@@ -836,6 +845,19 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
       setMemoryError(localizeError(err, locale));
     } finally {
       setMemorySaving(false);
+    }
+  }
+
+  async function toggleMemoryEnabled() {
+    const next = !memoryEnabled;
+    setMemoryEnabled(next);
+    setMemoryError(null);
+    try {
+      const res = await updateMarketingMemorySettings(next);
+      setMemoryEnabled(res.enabled);
+    } catch (err) {
+      setMemoryEnabled(!next);
+      setMemoryError(localizeError(err, locale));
     }
   }
 
@@ -963,6 +985,30 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
             <div className="rounded-lg border border-border/70 bg-bg-subtle/55 px-3 py-2 text-xs text-fg-muted">
               <p>{labels.memoryAuto}</p>
               <p className="mt-1">{labels.memoryHint}</p>
+            </div>
+            <div className="mt-3 flex items-center justify-between gap-4 rounded-xl border border-border bg-bg-elevated/70 px-3 py-3">
+              <div>
+                <p className="text-xs font-semibold text-fg">{labels.memoryEnabled}</p>
+                <p className="mt-1 text-[11px] text-fg-subtle">{labels.memoryEnabledBody}</p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={memoryEnabled}
+                onClick={toggleMemoryEnabled}
+                disabled={memorySaving || memoryLoading}
+                className={cn(
+                  "relative h-7 w-12 shrink-0 rounded-full border transition-all duration-200 ease-macos disabled:opacity-50",
+                  memoryEnabled ? "border-accent bg-accent shadow-sm shadow-accent/30" : "border-border bg-bg-subtle",
+                )}
+              >
+                <span
+                  className={cn(
+                    "absolute top-0.5 h-6 w-6 rounded-full bg-white shadow-md transition-transform duration-200 ease-macos",
+                    memoryEnabled ? "translate-x-[22px]" : "translate-x-0.5",
+                  )}
+                />
+              </button>
             </div>
             <div className="mt-4 grid gap-3 md:grid-cols-2">
               {memoryFields.map((field) => (

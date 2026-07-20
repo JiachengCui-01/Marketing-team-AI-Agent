@@ -157,25 +157,39 @@ def _normalize_marketing_profile(profile: dict | None) -> dict:
 def get_marketing_memory(request: Request) -> dict:
     user = auth.require_user(request)
     rec = db.get_user_marketing_memory(user["id"])
+    settings = db.get_user_memory_settings(user["id"])
     profile = _normalize_marketing_profile((rec or {}).get("profile") or {})
-    return {"profile": profile, "updated_at": (rec or {}).get("updated_at")}
+    return {"profile": profile, "enabled": settings["long_term_enabled"], "updated_at": (rec or {}).get("updated_at")}
 
 
 @router.put("/memory/marketing")
 def save_marketing_memory(request: Request, payload: dict = Body(...)) -> dict:
     user = auth.require_user(request)
+    if "enabled" in payload:
+        db.set_user_memory_enabled(user["id"], bool(payload.get("enabled")))
     raw_profile = payload.get("profile") if isinstance(payload.get("profile"), dict) else payload
     profile = _normalize_marketing_profile(raw_profile)
     profile = {key: value for key, value in profile.items() if value}
     rec = db.upsert_user_marketing_memory(user["id"], profile)
-    return {"profile": _normalize_marketing_profile(rec["profile"]), "updated_at": rec["updated_at"]}
+    settings = db.get_user_memory_settings(user["id"])
+    return {"profile": _normalize_marketing_profile(rec["profile"]), "enabled": settings["long_term_enabled"], "updated_at": rec["updated_at"]}
+
+
+@router.patch("/memory/marketing")
+def update_marketing_memory_settings(request: Request, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    enabled = bool(payload.get("enabled"))
+    db.set_user_memory_enabled(user["id"], enabled)
+    rec = db.get_user_marketing_memory(user["id"])
+    return {"profile": _normalize_marketing_profile((rec or {}).get("profile") or {}), "enabled": enabled, "updated_at": (rec or {}).get("updated_at")}
 
 
 @router.delete("/memory/marketing")
 def clear_marketing_memory(request: Request) -> dict:
     user = auth.require_user(request)
     db.delete_user_marketing_memory(user["id"])
-    return {"profile": _normalize_marketing_profile({}), "updated_at": None}
+    settings = db.get_user_memory_settings(user["id"])
+    return {"profile": _normalize_marketing_profile({}), "enabled": settings["long_term_enabled"], "updated_at": None}
 
 
 # ---------- news ----------

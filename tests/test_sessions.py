@@ -102,6 +102,17 @@ class SessionStoreTests(unittest.TestCase):
         self.assertIn("Long-term enterprise marketing profile", conv.messages[0]["content"])
         self.assertIn("Little Red Book", conv.messages[0]["content"])
 
+    def test_long_term_memory_can_be_disabled(self) -> None:
+        user_id = self.create_user()
+        db.set_user_memory_enabled(user_id, False)
+        prompt = "write XHS marketing copy for a SaaS product"
+
+        for _ in range(memory.LONG_TERM_EVIDENCE_THRESHOLD + 1):
+            memory.update_long_term_marketing_memory(user_id, prompt)
+
+        self.assertIsNone(db.get_user_marketing_memory(user_id))
+        self.assertEqual(db.list_user_marketing_memory_evidence(user_id), [])
+
     def test_long_term_memory_extracts_structured_profile_fields(self) -> None:
         user_id = self.create_user()
         prompt = (

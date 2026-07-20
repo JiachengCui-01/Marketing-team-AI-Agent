@@ -65,6 +65,8 @@ def build_conversation(session_id: str, user_id: str) -> Conversation | None:
 
 
 def update_long_term_marketing_memory(user_id: str, *texts: str) -> dict | None:
+    if not db.get_user_memory_settings(user_id).get("long_term_enabled", True):
+        return None
     current = (db.get_user_marketing_memory(user_id) or {}).get("profile") or {}
     structured = _extract_structured_observations(texts)
     observations = {
