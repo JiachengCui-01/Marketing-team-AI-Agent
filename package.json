@@ -1,0 +1,8 @@
+{
+  "name": "marketing-team-ai-agent",
+  "version": "0.2.0",
+  "private": true,
+  "dependencies": {
+    "next": "14.2.18"
+  }
+}
