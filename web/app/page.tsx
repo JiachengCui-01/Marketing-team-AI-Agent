@@ -271,6 +271,34 @@ export default function HomePage() {
     return id;
   }, [activeId, activeKey, store]);
 
+  const handleClarificationRequest = useCallback(
+    async (prompt: string, assistantText: string) => {
+      const text = prompt.trim();
+      if (!text || busy) return;
+      setInput("");
+      let sid: string;
+      try {
+        sid = await ensureSession();
+      } catch (e) {
+        if (activeId) {
+          setSessionMessages(activeId, (m) => [
+            ...m,
+            { id: newId(), role: "assistant", content: `${t.failedToStartSession}: ${String(e)}` },
+          ]);
+        }
+        return;
+      }
+      setTraceBySession((current) => ({ ...current, [sid]: [] }));
+      setSessionMessages(sid, (m) => [
+        ...m,
+        { id: newId(), role: "user", content: text },
+        { id: newId(), role: "assistant", content: assistantText },
+      ]);
+      store.touch();
+    },
+    [activeId, busy, ensureSession, setSessionMessages, store, t],
+  );
+
   const handleSend = useCallback(async (override?: string) => {
     const text = (override ?? input).trim();
     if (!text || busy) return;
@@ -651,6 +679,7 @@ export default function HomePage() {
             onRemoveAttached={(id) =>
               setAttached((a) => a.filter((f) => f.file_id !== id))
             }
+            onClarificationRequest={handleClarificationRequest}
             onPreviewUpload={onPreviewUpload}
             onPreviewArtifact={onPreviewArtifact}
             onDownloadArtifact={

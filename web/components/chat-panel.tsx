@@ -50,6 +50,7 @@ export function ChatPanel({
   attached,
   onAttach,
   onRemoveAttached,
+  onClarificationRequest,
   onPreviewUpload,
   onPreviewArtifact,
   onDownloadArtifact,
@@ -68,6 +69,7 @@ export function ChatPanel({
   attached: UploadResponse[];
   onAttach: (f: UploadResponse) => void;
   onRemoveAttached: (fileId: string) => void;
+  onClarificationRequest?: (prompt: string, assistantText: string) => void;
   onPreviewUpload: (f: UploadResponse) => void;
   onPreviewArtifact: (a: MessageArtifact) => void;
   onDownloadArtifact?: (a: MessageArtifact) => void;
@@ -93,6 +95,7 @@ export function ChatPanel({
   const [clarifySelections, setClarifySelections] = useState<ClarifySuggestion[]>([]);
   const [clarifyStepIndex, setClarifyStepIndex] = useState(0);
   const [clarifyReady, setClarifyReady] = useState(false);
+  const [clarifyBaseText, setClarifyBaseText] = useState("");
   const skillButtonRef = useRef<HTMLButtonElement>(null);
   const workspaceUploadMapRef = useRef<Map<string, string>>(new Map());
 
@@ -240,6 +243,9 @@ export function ChatPanel({
       setClarifySelections([]);
       setClarifyStepIndex(0);
       setClarifyReady(false);
+      setClarifyBaseText(text);
+      setInput("");
+      onClarificationRequest?.(text, buildClarificationReply(text, locale));
       return;
     }
     if (looksAmbiguous(text) && clarifyOpen) return;
@@ -255,10 +261,11 @@ export function ChatPanel({
     setClarifySelections([]);
     setClarifyStepIndex(0);
     setClarifyReady(false);
+    setClarifyBaseText("");
   }
 
   function sendClarified(detail: string) {
-    const text = input.trim();
+    const text = clarifyBaseText.trim() || input.trim();
     const details = [
       clarifyPrimary?.detail,
       ...clarifySelections.map((item) => item.detail),
@@ -614,7 +621,71 @@ function looksAmbiguous(text: string): boolean {
   const compact = text.replace(/\s+/g, "");
   const broad = /^(帮我)?(写|做|生成|分析|总结|策划|优化)(一下|一个|一份)?[。.!！?？]*$/;
   const englishBroad = /^(write|make|generate|analyze|summarize|plan|optimize)(\s+it|\s+this)?[.!?]*$/i;
-  return compact.length <= 8 || broad.test(compact) || englishBroad.test(text.trim());
+  return (
+    compact.length <= 8 ||
+    broad.test(compact) ||
+    englishBroad.test(text.trim()) ||
+    isUnderSpecifiedMarketingTask(text)
+  );
+}
+
+function isUnderSpecifiedMarketingTask(text: string): boolean {
+  const compact = text.replace(/\s+/g, "").toLowerCase();
+  const normalized = text.toLowerCase();
+  const isMarketingGeneration =
+    /营销|文案|种草|推广|宣传|广告|海报|社媒|小红书|公众号|朋友圈|短视频|邮件|linkedin|post|copy|campaign|ad|social/.test(compact) &&
+    /写|生成|编写|创作|出一|做|produce|write|generate|create|draft/.test(compact);
+  if (!isMarketingGeneration) return false;
+
+  const hasPlatform =
+    /平台|渠道|小红书|抖音|公众号|朋友圈|视频号|微博|知乎|b站|邮件|官网|社群|私域|linkedin|twitter|xhs|instagram|facebook|tiktok|youtube|newsletter|email/.test(compact);
+  const hasAudience =
+    /受众|人群|用户|客户|消费者|女生|男性|女性|学生|白领|宝妈|决策者|企业|b2b|b2c|audience|customer|user|buyer|persona|segment/.test(compact);
+  const hasTone =
+    /语气|语调|风格|调性|口吻|专业|亲切|活泼|高级|年轻|正式|幽默|tone|voice|style|professional|friendly|formal|playful/.test(compact);
+  const hasFormat =
+    /字数|标题|正文|cta|行动号召|格式|篇幅|长度|条|篇|版本|hashtag|话题|caption|headline|body|length|format/.test(compact);
+  const hasProductDetail =
+    /卖点|亮点|功能|价格|材质|颜色|尺码|款式|系列|品牌|产品|服务|feature|benefit|price|material|brand|product/.test(compact);
+
+  const filledSlots = [hasPlatform, hasAudience, hasTone, hasFormat, hasProductDetail].filter(Boolean).length;
+  if (filledSlots < 3) return true;
+
+  return (
+    /文案|copy|post|caption/.test(normalized) &&
+    !hasPlatform &&
+    (!hasAudience || !hasTone || !hasFormat)
+  );
+}
+
+function buildClarificationReply(text: string, locale: "zh" | "en"): string {
+  const missing = missingMarketingSlots(text, locale);
+  if (locale === "zh") {
+    const items = missing.length ? missing.join("、") : "目标、受众、渠道或交付格式";
+    return `这个任务我可以做，但为了避免直接套默认假设，我还需要补齐：**${items}**。\n\n请选择下面最接近的方向，我会继续追问必要信息；信息足够后再开始执行。`;
+  }
+  const items = missing.length ? missing.join(", ") : "goal, audience, channel, or output format";
+  return `I can do this, but to avoid relying on default assumptions, I still need: **${items}**.\n\nChoose the closest option below. I will ask only the necessary follow-up questions, then start once the brief is complete.`;
+}
+
+function missingMarketingSlots(text: string, locale: "zh" | "en"): string[] {
+  const compact = text.replace(/\s+/g, "").toLowerCase();
+  const zh = locale === "zh";
+  const hasPlatform =
+    /平台|渠道|小红书|抖音|公众号|朋友圈|视频号|微博|知乎|b站|邮件|官网|社群|私域|linkedin|twitter|xhs|instagram|facebook|tiktok|youtube|newsletter|email/.test(compact);
+  const hasAudience =
+    /受众|人群|用户|客户|消费者|女生|男性|女性|学生|白领|宝妈|决策者|企业|b2b|b2c|audience|customer|user|buyer|persona|segment/.test(compact);
+  const hasTone =
+    /语气|语调|风格|调性|口吻|专业|亲切|活泼|高级|年轻|正式|幽默|tone|voice|style|professional|friendly|formal|playful/.test(compact);
+  const hasFormat =
+    /字数|标题|正文|cta|行动号召|格式|篇幅|长度|条|篇|版本|hashtag|话题|caption|headline|body|length|format/.test(compact);
+
+  const out: string[] = [];
+  if (!hasPlatform) out.push(zh ? "平台/渠道" : "platform/channel");
+  if (!hasAudience) out.push(zh ? "目标受众" : "target audience");
+  if (!hasTone) out.push(zh ? "语气/风格" : "tone/style");
+  if (!hasFormat) out.push(zh ? "字数/格式/CTA" : "length/format/CTA");
+  return out;
 }
 
 function getClarifySuggestions(text: string, locale: "zh" | "en"): ClarifySuggestion[] {
