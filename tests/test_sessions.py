@@ -4,6 +4,7 @@ import unittest
 
 from server import db, sessions
 from server import auth
+from server import memory
 
 
 class SessionStoreTests(unittest.TestCase):
@@ -80,6 +81,61 @@ class SessionStoreTests(unittest.TestCase):
         assert conv is not None
         self.assertIn("Long-term enterprise marketing profile", conv.messages[0]["content"])
         self.assertIn("Little Red Book", conv.messages[0]["content"])
+
+    def test_long_term_memory_requires_repeated_evidence(self) -> None:
+        user_id = self.create_user()
+        session_id = sessions.create(user_id)
+        prompt = "write XHS marketing copy for a SaaS product"
+
+        memory.update_long_term_marketing_memory(user_id, prompt)
+        memory.update_long_term_marketing_memory(user_id, prompt)
+        self.assertIsNone(db.get_user_marketing_memory(user_id))
+
+        memory.update_long_term_marketing_memory(user_id, prompt)
+        stored = db.get_user_marketing_memory(user_id)
+        self.assertIsNotNone(stored)
+        assert stored is not None
+        self.assertIn("Little Red Book", stored["profile"]["channels"])
+
+        conv = sessions.prepare_for_turn(session_id, user_id)
+        assert conv is not None
+        self.assertIn("Long-term enterprise marketing profile", conv.messages[0]["content"])
+        self.assertIn("Little Red Book", conv.messages[0]["content"])
+
+    def test_long_term_memory_extracts_structured_profile_fields(self) -> None:
+        user_id = self.create_user()
+        prompt = (
+            "我的职位是增长负责人。所属行业是消费电子。公司是星环科技。主要产品是AI手机。"
+            "目标客户是科技尝鲜人群。常用渠道是小红书。语气偏好是真实种草。"
+            "报告格式偏好是结论先行。KPI是曝光和转化率。其他偏好是少用夸张表达。"
+        )
+
+        for _ in range(memory.LONG_TERM_EVIDENCE_THRESHOLD):
+            memory.update_long_term_marketing_memory(user_id, prompt)
+
+        stored = db.get_user_marketing_memory(user_id)
+        self.assertIsNotNone(stored)
+        assert stored is not None
+        profile = stored["profile"]
+        self.assertIn("增长负责人", profile["role_title"])
+        self.assertIn("消费电子", profile["industry"])
+        self.assertIn("星环科技", profile["company_brand"])
+        self.assertIn("AI手机", profile["products"])
+        self.assertIn("科技尝鲜人群", profile["target_customers"])
+        self.assertIn("小红书", profile["channels"])
+        self.assertIn("真实种草", profile["tone_preferences"])
+        self.assertIn("结论先行", profile["report_format_preferences"])
+        self.assertIn("曝光和转化率", profile["kpi_data_preferences"])
+        self.assertIn("少用夸张表达", profile["other_preferences"])
+
+    def test_memory_block_keeps_current_request_priority(self) -> None:
+        user_id = self.create_user()
+        session_id = sessions.create(user_id)
+        db.upsert_user_marketing_memory(user_id, {"channels": ["Little Red Book"]})
+
+        conv = sessions.prepare_for_turn(session_id, user_id)
+        assert conv is not None
+        self.assertIn("the current request takes priority", conv.messages[0]["content"])
 
     def test_group_delete_cascades_sessions(self) -> None:
         user_id = self.create_user()

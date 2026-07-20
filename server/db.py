@@ -107,6 +107,18 @@ CREATE TABLE IF NOT EXISTS user_marketing_memory (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS user_marketing_memory_evidence (
+    user_id TEXT NOT NULL,
+    field TEXT NOT NULL,
+    value TEXT NOT NULL,
+    count INTEGER NOT NULL,
+    first_seen_at REAL NOT NULL,
+    last_seen_at REAL NOT NULL,
+    PRIMARY KEY (user_id, field, value),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_user_marketing_memory_evidence_user ON user_marketing_memory_evidence(user_id, last_seen_at);
+
 CREATE TABLE IF NOT EXISTS artifacts (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -633,6 +645,40 @@ def delete_user_marketing_memory(user_id: str) -> bool:
         return cur.rowcount > 0
 
 
+def list_user_marketing_memory_evidence(user_id: str) -> list[dict]:
+    _ensure()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT user_id, field, value, count, first_seen_at, last_seen_at "
+            "FROM user_marketing_memory_evidence WHERE user_id = ? ORDER BY field ASC, count DESC, last_seen_at DESC",
+            (user_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def add_user_marketing_memory_evidence(user_id: str, observations: dict[str, list[str]]) -> list[dict]:
+    _ensure()
+    now = time.time()
+    with _connect() as conn:
+        for field, values in observations.items():
+            for raw in values:
+                value = str(raw).strip()
+                if not value:
+                    continue
+                conn.execute(
+                    """
+                    INSERT INTO user_marketing_memory_evidence
+                        (user_id, field, value, count, first_seen_at, last_seen_at)
+                    VALUES (?, ?, ?, 1, ?, ?)
+                    ON CONFLICT(user_id, field, value) DO UPDATE SET
+                        count = count + 1,
+                        last_seen_at = excluded.last_seen_at
+                    """,
+                    (user_id, field, value, now, now),
+                )
+    return list_user_marketing_memory_evidence(user_id)
+
+
 # ---------- artifacts ----------
 
 def add_artifact(
@@ -1113,6 +1159,7 @@ def reset_for_tests() -> None:
                         DROP TABLE IF EXISTS news_configs;
                         DROP TABLE IF EXISTS uploads;
                         DROP TABLE IF EXISTS artifacts;
+                        DROP TABLE IF EXISTS user_marketing_memory_evidence;
                         DROP TABLE IF EXISTS user_marketing_memory;
                         DROP TABLE IF EXISTS session_memory_summaries;
                         DROP TABLE IF EXISTS messages;

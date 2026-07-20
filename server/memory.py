@@ -18,6 +18,7 @@ RECENT_MESSAGE_WINDOW = 12
 CONTEXT_TOKEN_BUDGET = 24000
 SUMMARY_CHAR_BUDGET = 3200
 RECENT_MESSAGE_CHAR_CAP = 5000
+LONG_TERM_EVIDENCE_THRESHOLD = 3
 
 MARKETING_PROFILE_FIELDS = {
     "role_title": "Role/title",
@@ -65,32 +66,45 @@ def build_conversation(session_id: str, user_id: str) -> Conversation | None:
 
 def update_long_term_marketing_memory(user_id: str, *texts: str) -> dict | None:
     current = (db.get_user_marketing_memory(user_id) or {}).get("profile") or {}
+    structured = _extract_structured_observations(texts)
+    observations = {
+        "role_title": _extract_values(texts, _ROLE_PATTERNS),
+        "industry": _extract_values(texts, _INDUSTRY_PATTERNS),
+        "company_brand": _extract_values(texts, _COMPANY_PATTERNS),
+        "products": _extract_values(texts, _PRODUCT_PATTERNS),
+        "target_customers": _extract_values(texts, _AUDIENCE_PATTERNS),
+        "channels": _extract_values(texts, _CHANNEL_PATTERNS),
+        "tone_preferences": _extract_values(texts, _TONE_PATTERNS),
+        "report_format_preferences": _extract_values(texts, _DELIVERABLE_PATTERNS),
+        "kpi_data_preferences": _extract_values(texts, _KPI_PATTERNS),
+        "other_preferences": [],
+    }
+    for key, values in structured.items():
+        observations[key] = _merge_list(observations.get(key), values)
+    observations = {key: values for key, values in observations.items() if values}
+    if not observations:
+        return None
+
+    evidence = db.add_user_marketing_memory_evidence(user_id, observations)
+    promoted: dict[str, list[str]] = {}
+    for row in evidence:
+        if int(row.get("count") or 0) >= LONG_TERM_EVIDENCE_THRESHOLD:
+            promoted.setdefault(str(row["field"]), []).append(str(row["value"]))
+
     profile = {
-        "role_title": _merge_list(current.get("role_title"), _extract_values(texts, _ROLE_PATTERNS)),
-        "industry": _merge_list(
-            current.get("industry") or current.get("industries"),
-            _extract_values(texts, _INDUSTRY_PATTERNS),
-        ),
-        "company_brand": _merge_list(current.get("company_brand"), _extract_values(texts, _COMPANY_PATTERNS)),
-        "products": _merge_list(current.get("products"), _extract_values(texts, _PRODUCT_PATTERNS)),
-        "target_customers": _merge_list(
-            current.get("target_customers") or current.get("audiences"),
-            _extract_values(texts, _AUDIENCE_PATTERNS),
-        ),
-        "channels": _merge_list(current.get("channels"), _extract_values(texts, _CHANNEL_PATTERNS)),
-        "tone_preferences": _merge_list(
-            current.get("tone_preferences") or current.get("tones"),
-            _extract_values(texts, _TONE_PATTERNS),
-        ),
-        "report_format_preferences": _merge_list(
-            current.get("report_format_preferences") or current.get("deliverables"),
-            _extract_values(texts, _DELIVERABLE_PATTERNS),
-        ),
-        "kpi_data_preferences": _merge_list(current.get("kpi_data_preferences"), _extract_values(texts, _KPI_PATTERNS)),
-        "other_preferences": _merge_list(current.get("other_preferences"), []),
+        "role_title": _merge_list(current.get("role_title"), promoted.get("role_title")),
+        "industry": _merge_list(current.get("industry") or current.get("industries"), promoted.get("industry")),
+        "company_brand": _merge_list(current.get("company_brand"), promoted.get("company_brand")),
+        "products": _merge_list(current.get("products"), promoted.get("products")),
+        "target_customers": _merge_list(current.get("target_customers") or current.get("audiences"), promoted.get("target_customers")),
+        "channels": _merge_list(current.get("channels"), promoted.get("channels")),
+        "tone_preferences": _merge_list(current.get("tone_preferences") or current.get("tones"), promoted.get("tone_preferences")),
+        "report_format_preferences": _merge_list(current.get("report_format_preferences") or current.get("deliverables"), promoted.get("report_format_preferences")),
+        "kpi_data_preferences": _merge_list(current.get("kpi_data_preferences"), promoted.get("kpi_data_preferences")),
+        "other_preferences": _merge_list(current.get("other_preferences"), promoted.get("other_preferences")),
     }
     profile = {key: value for key, value in profile.items() if value}
-    if not profile:
+    if not profile or profile == current:
         return None
     return db.upsert_user_marketing_memory(user_id, profile)
 
@@ -206,6 +220,7 @@ def _format_profile(profile: dict) -> str:
             lines.append(f"- {label}: {', '.join(_as_list(values)[:8])}")
     if not lines:
         return ""
+    lines.insert(0, "Use this profile only to fill missing context. If it conflicts with the current user request, the current request takes priority.")
     return _memory_block("Long-term enterprise marketing profile", "\n".join(lines))
 
 
@@ -228,7 +243,7 @@ def _looks_like_deliverable(text: str) -> bool:
 
 def _merge_list(existing: Any, discovered: list[str], limit: int = 12) -> list[str]:
     out: list[str] = []
-    for value in [*_as_list(existing), *discovered]:
+    for value in [*_as_list(existing), *_as_list(discovered)]:
         item = str(value).strip()
         if item and item not in out:
             out.append(item)
@@ -254,6 +269,59 @@ def _extract_values(texts: tuple[str, ...], patterns: list[tuple[str, str]]) -> 
         if re.search(pattern, compact, re.IGNORECASE) and label not in found:
             found.append(label)
     return found
+
+
+def _extract_structured_observations(texts: tuple[str, ...]) -> dict[str, list[str]]:
+    haystack = "\n".join(text for text in texts if text)
+    specs = {
+        "role_title": [
+            r"(?:我的职位是|职位是|我是|我担任|我负责|role is|title is)\s*[:：]?\s*([^，。,.!?！？；;\n]{2,40})",
+        ],
+        "industry": [
+            r"(?:所属行业是|行业是|我们行业是|industry is)\s*[:：]?\s*([^，。,.!?！？；;\n]{2,40})",
+        ],
+        "company_brand": [
+            r"(?:公司(?:/品牌)?是|公司叫|品牌是|品牌叫|company is|brand is)\s*[:：]?\s*([^，。,.!?！？；;\n]{2,50})",
+        ],
+        "products": [
+            r"(?:主要产品是|产品是|主营产品是|我们卖|我们做|product is|products are)\s*[:：]?\s*([^，。,.!?！？；;\n]{2,60})",
+        ],
+        "target_customers": [
+            r"(?:目标客户是|目标用户是|目标受众是|受众是|人群是|target customers are|audience is)\s*[:：]?\s*([^，。,.!?！？；;\n]{2,80})",
+        ],
+        "channels": [
+            r"(?:常用渠道是|主要渠道是|渠道是|发布在|投放在|平台是|channel is|channels are)\s*[:：]?\s*([^，。,.!?！？；;\n]{2,60})",
+        ],
+        "tone_preferences": [
+            r"(?:语气偏好是|内容语气是|语气是|风格是|调性是|tone is|voice is)\s*[:：]?\s*([^，。,.!?！？；;\n]{2,60})",
+        ],
+        "report_format_preferences": [
+            r"(?:报告格式偏好是|报告格式是|输出格式是|交付格式是|format is|report format is)\s*[:：]?\s*([^，。,.!?！？；;\n]{2,80})",
+        ],
+        "kpi_data_preferences": [
+            r"(?:KPI(?:/数据口径)?偏好是|数据口径是|指标口径是|KPI是|metric definition is|kpi is)\s*[:：]?\s*([^，。,.!?！？；;\n]{2,80})",
+        ],
+        "other_preferences": [
+            r"(?:长期偏好是|其他偏好是|偏好是|我习惯|我希望以后|prefer)\s*[:：]?\s*([^，。,.!?！？；;\n]{2,100})",
+        ],
+    }
+    out: dict[str, list[str]] = {}
+    for field, patterns in specs.items():
+        values: list[str] = []
+        for pattern in patterns:
+            for match in re.finditer(pattern, haystack, re.IGNORECASE):
+                value = _clean_observation_value(match.group(1))
+                if value and value not in values:
+                    values.append(value)
+        if values:
+            out[field] = values[:6]
+    return out
+
+
+def _clean_observation_value(value: str) -> str:
+    cleaned = re.sub(r"\s+", " ", value).strip(" ：:，,。.;；")
+    cleaned = re.sub(r"^(需要|希望|偏好|使用|采用)", "", cleaned).strip(" ：:，,。.;；")
+    return _clip(cleaned, 80) if len(cleaned) >= 2 else ""
 
 
 _INDUSTRY_PATTERNS = [

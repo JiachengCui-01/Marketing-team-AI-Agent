@@ -625,9 +625,50 @@ const MARKETING_MEMORY_KEYS: (keyof MarketingMemoryProfile)[] = [
 
 const EMPTY_MARKETING_MEMORY = Object.fromEntries(MARKETING_MEMORY_KEYS.map((key) => [key, ""])) as Record<keyof MarketingMemoryProfile, string>;
 
-function memoryToForm(profile?: Partial<MarketingMemoryProfile>): Record<keyof MarketingMemoryProfile, string> {
+const MEMORY_VALUE_LABELS: Record<string, { zh: string; en: string }> = {
+  "Marketing or business owner": { zh: "营销或业务负责人", en: "Marketing or business owner" },
+  "Marketing / growth / operations": { zh: "市场 / 增长 / 运营", en: "Marketing / growth / operations" },
+  "Sales / business development": { zh: "销售 / 商务拓展", en: "Sales / business development" },
+  "Fashion/apparel": { zh: "服装 / 时尚", en: "Fashion/apparel" },
+  "B2B SaaS / enterprise services": { zh: "B2B SaaS / 企业服务", en: "B2B SaaS / enterprise services" },
+  "Education/training": { zh: "教育 / 培训", en: "Education/training" },
+  "Consumer goods / ecommerce": { zh: "消费品 / 电商", en: "Consumer goods / ecommerce" },
+  "Company/brand context discussed": { zh: "已讨论公司 / 品牌背景", en: "Company/brand context discussed" },
+  "Apparel products": { zh: "服装类产品", en: "Apparel products" },
+  "Software / SaaS product": { zh: "软件 / SaaS 产品", en: "Software / SaaS product" },
+  "Education product": { zh: "教育类产品", en: "Education product" },
+  "B2B decision makers": { zh: "B2B 决策者", en: "B2B decision makers" },
+  "Marketing / growth / sales teams": { zh: "市场 / 增长 / 销售团队", en: "Marketing / growth / sales teams" },
+  "Consumer lifestyle audiences": { zh: "消费生活方式人群", en: "Consumer lifestyle audiences" },
+  "Little Red Book": { zh: "小红书", en: "Little Red Book" },
+  LinkedIn: { zh: "LinkedIn / 领英", en: "LinkedIn" },
+  "WeChat / owned channels": { zh: "微信 / 私域渠道", en: "WeChat / owned channels" },
+  "Short video": { zh: "短视频", en: "Short video" },
+  "Email/newsletter": { zh: "邮件 / Newsletter", en: "Email/newsletter" },
+  Professional: { zh: "专业正式", en: "Professional" },
+  "Authentic and friendly": { zh: "真实亲切", en: "Authentic and friendly" },
+  "Premium/refined": { zh: "高级精致", en: "Premium/refined" },
+  "Playful/young": { zh: "年轻活泼", en: "Playful/young" },
+  "Marketing copy": { zh: "营销文案", en: "Marketing copy" },
+  "Report/brief": { zh: "报告 / 简报", en: "Report/brief" },
+  "Campaign plan": { zh: "营销方案 / 活动计划", en: "Campaign plan" },
+  Email: { zh: "邮件", en: "Email" },
+  "Video script": { zh: "视频脚本", en: "Video script" },
+  "Performance and conversion metrics": { zh: "表现与转化指标", en: "Performance and conversion metrics" },
+  "Reach and engagement metrics": { zh: "曝光与互动指标", en: "Reach and engagement metrics" },
+};
+
+function localizeMemoryValue(value: string, locale: "zh" | "en"): string {
+  const normalized = value.trim();
+  const direct = MEMORY_VALUE_LABELS[normalized];
+  if (direct) return direct[locale];
+  const reverse = Object.values(MEMORY_VALUE_LABELS).find((item) => item.zh === normalized || item.en === normalized);
+  return reverse ? reverse[locale] : normalized;
+}
+
+function memoryToForm(profile: Partial<MarketingMemoryProfile> | undefined, locale: "zh" | "en"): Record<keyof MarketingMemoryProfile, string> {
   return Object.fromEntries(
-    MARKETING_MEMORY_KEYS.map((key) => [key, (profile?.[key] ?? []).join("\n")]),
+    MARKETING_MEMORY_KEYS.map((key) => [key, (profile?.[key] ?? []).map((value) => localizeMemoryValue(value, locale)).join("\n")]),
   ) as Record<keyof MarketingMemoryProfile, string>;
 }
 
@@ -751,7 +792,7 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
     setMemoryError(null);
     getMarketingMemory()
       .then((res) => {
-        if (!cancelled) setMemoryForm(memoryToForm(res.profile));
+        if (!cancelled) setMemoryForm(memoryToForm(res.profile, locale));
       })
       .catch((err) => {
         if (!cancelled) setMemoryError(localizeError(err, locale));
@@ -789,7 +830,7 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
     setMemorySaved(false);
     try {
       const res = await saveMarketingMemory(formToMemory(memoryForm));
-      setMemoryForm(memoryToForm(res.profile));
+      setMemoryForm(memoryToForm(res.profile, locale));
       setMemorySaved(true);
     } catch (err) {
       setMemoryError(localizeError(err, locale));

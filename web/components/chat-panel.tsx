@@ -708,7 +708,8 @@ function missingMarketingSlots(text: string, locale: "zh" | "en", memory?: Parti
   return out;
 }
 
-function detectMarketingPlatform(compact: string): "xhs" | "linkedin" | "email" | "short-video" | "owned" | null {
+function detectMarketingPlatform(compact: string): "xhs" | "linkedin" | "email" | "short-video" | "owned" | "other-social" | null {
+  if (/知乎|微博|b站|bilibili|instagram|facebook|twitter|threads/.test(compact)) return "other-social";
   if (/小红书|xhs|littleredbook/.test(compact)) return "xhs";
   if (/linkedin|领英/.test(compact)) return "linkedin";
   if (/邮件|email|newsletter/.test(compact)) return "email";

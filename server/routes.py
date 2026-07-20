@@ -1051,7 +1051,6 @@ def _session_aware_on_event_factory(
                         inner_emit("error", {"message": f"PDF generation failed: {exc}"})
                 if final_text:
                     db.add_message(session_id, "assistant", final_text)
-                    memory.update_long_term_marketing_memory(user_id, final_text)
             elif event == "error":
                 message = str(payload.get("message", "")).strip()
                 if message:
