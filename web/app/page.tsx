@@ -195,14 +195,14 @@ export default function HomePage() {
     return () => window.removeEventListener("resize", clampWidths);
   }, [maxSidebarWidth]);
 
-  // Restore active session id.
+  // Start authenticated users in a temporary blank chat. A real session is
+  // created only after the first message is sent.
   useEffect(() => {
     if (!user) return;
-    const stored =
-      typeof window !== "undefined"
-        ? window.localStorage.getItem(activeKey(user))
-        : null;
-    if (stored) setActiveId(stored);
+    setActiveId(null);
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(activeKey(user));
+    }
   }, [activeKey, user]);
 
   useEffect(() => {
@@ -249,12 +249,11 @@ export default function HomePage() {
     setView("chat");
     setAttached([]);
     setPreview(null);
-    const id = await store.createSession();
-    setMessagesBySession((current) => ({ ...current, [id]: [] }));
-    setTraceBySession((current) => ({ ...current, [id]: [] }));
-    setActiveId(id);
-    window.localStorage.setItem(activeKey(), id);
-  }, [activeKey, store]);
+    setActiveId(null);
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(activeKey());
+    }
+  }, [activeKey]);
 
   const ensureSession = useCallback(async (): Promise<string> => {
     if (activeId) {

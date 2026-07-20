@@ -4,7 +4,6 @@ import {
   Check,
   ChevronDown,
   FolderOpen,
-  HelpCircle,
   Loader2,
   MessageSquare,
   Send,
@@ -17,7 +16,6 @@ import { MessageBubble, type ChatMessage, type MessageArtifact } from "./message
 import { FileUploader } from "./file-uploader";
 import { getWorkflowSkills, uploadFile, type UploadResponse, type WorkflowSkill } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
-import { Modal } from "@/components/modal";
 
 type DirectoryHandle = FileSystemDirectoryHandle & {
   values: () => AsyncIterable<FileSystemHandle>;
@@ -26,6 +24,14 @@ type DirectoryHandle = FileSystemDirectoryHandle & {
 type WorkspaceFile = {
   file: File;
   key: string;
+};
+
+type ClarifySuggestion = {
+  id: string;
+  title: string;
+  description: string;
+  detail: string;
+  custom?: boolean;
 };
 
 export function ChatPanel({
@@ -75,6 +81,7 @@ export function ChatPanel({
   const [workspaceHandle, setWorkspaceHandle] = useState<DirectoryHandle | null>(null);
   const [clarifyOpen, setClarifyOpen] = useState(false);
   const [clarifyDraft, setClarifyDraft] = useState("");
+  const [clarifyCustom, setClarifyCustom] = useState(false);
   const skillButtonRef = useRef<HTMLButtonElement>(null);
   const workspaceUploadMapRef = useRef<Map<string, string>>(new Map());
 
@@ -118,6 +125,7 @@ export function ChatPanel({
 
   const empty = messages.length === 0;
   const selectedSkills = skills.filter((skill) => selectedSkillIds.includes(skill.id));
+  const clarifySuggestions = getClarifySuggestions(input, locale);
 
   useEffect(() => {
     if (!workspaceHandle) return;
@@ -201,20 +209,41 @@ export function ChatPanel({
   function submitWithClarifyCheck() {
     const text = input.trim();
     if (!text || busy) return;
-    if (looksAmbiguous(text) && !clarifyDraft.trim()) {
+    if (looksAmbiguous(text) && !clarifyOpen) {
       setClarifyOpen(true);
+      setClarifyCustom(false);
+      setClarifyDraft("");
       return;
     }
+    if (looksAmbiguous(text) && clarifyOpen) return;
     onSend(text);
     setClarifyDraft("");
+    setClarifyOpen(false);
+    setClarifyCustom(false);
   }
 
-  function confirmClarify() {
+  function sendClarified(detail: string) {
     const text = input.trim();
-    const extra = clarifyDraft.trim();
-    onSend(extra ? `${text}\n\n补充信息：${extra}` : text);
+    const extra = detail.trim();
+    const prefix = locale === "zh" ? "补充信息" : "Additional context";
+    onSend(extra ? `${text}\n\n${prefix}: ${extra}` : text);
     setClarifyDraft("");
     setClarifyOpen(false);
+    setClarifyCustom(false);
+  }
+
+  function chooseClarifySuggestion(suggestion: ClarifySuggestion) {
+    if (suggestion.custom) {
+      setClarifyCustom(true);
+      return;
+    }
+    sendClarified(suggestion.detail);
+  }
+
+  function closeClarify() {
+    setClarifyOpen(false);
+    setClarifyCustom(false);
+    setClarifyDraft("");
   }
 
   return (
@@ -254,6 +283,23 @@ export function ChatPanel({
 
       <div className="border-t border-border bg-bg-elevated/60 backdrop-blur">
         <div className="max-w-3xl mx-auto px-4 py-2">
+          {clarifyOpen ? (
+            <ClarifyInlinePrompt
+              title={copy.clarifyTitle}
+              body={copy.clarifyBody}
+              placeholder={copy.clarifyPlaceholder}
+              continueLabel={copy.continueSend}
+              cancelLabel={t.cancel}
+              suggestions={clarifySuggestions}
+              customOpen={clarifyCustom}
+              customDraft={clarifyDraft}
+              busy={busy}
+              onChoose={chooseClarifySuggestion}
+              onDraftChange={setClarifyDraft}
+              onCustomSubmit={() => sendClarified(clarifyDraft)}
+              onClose={closeClarify}
+            />
+          ) : null}
           <div className="input-shell chat-composer-shell overflow-visible">
             <div className="chat-composer-input-row">
               <textarea
@@ -345,29 +391,91 @@ export function ChatPanel({
           </div>
         </div>
       </div>
-      {clarifyOpen ? (
-        <Modal title={copy.clarifyTitle} onClose={() => setClarifyOpen(false)}>
-          <div className="space-y-3">
-            <div className="flex gap-2 rounded-xl border border-border bg-bg p-3 text-sm text-fg-muted">
-              <HelpCircle size={16} className="mt-0.5 shrink-0 text-accent" />
-              <p>{copy.clarifyBody}</p>
-            </div>
-            <textarea
-              value={clarifyDraft}
-              onChange={(e) => setClarifyDraft(e.target.value)}
-              placeholder={copy.clarifyPlaceholder}
-              className="min-h-28 w-full resize-none rounded-xl border border-border bg-bg-elevated px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
-            />
-            <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setClarifyOpen(false)} className="btn-ghost px-3 py-2 text-sm">
-                {t.cancel}
-              </button>
-              <button type="button" onClick={confirmClarify} className="btn-accent px-3 py-2 text-sm">
-                {copy.continueSend}
-              </button>
-            </div>
+    </div>
+  );
+}
+
+function ClarifyInlinePrompt({
+  title,
+  body,
+  placeholder,
+  continueLabel,
+  cancelLabel,
+  suggestions,
+  customOpen,
+  customDraft,
+  busy,
+  onChoose,
+  onDraftChange,
+  onCustomSubmit,
+  onClose,
+}: {
+  title: string;
+  body: string;
+  placeholder: string;
+  continueLabel: string;
+  cancelLabel: string;
+  suggestions: ClarifySuggestion[];
+  customOpen: boolean;
+  customDraft: string;
+  busy: boolean;
+  onChoose: (suggestion: ClarifySuggestion) => void;
+  onDraftChange: (value: string) => void;
+  onCustomSubmit: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="clarify-inline-panel mb-2">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm font-semibold text-fg">
+            <Sparkles size={15} className="text-accent" />
+            <span>{title}</span>
           </div>
-        </Modal>
+          <p className="mt-1 text-xs leading-relaxed text-fg-muted">{body}</p>
+        </div>
+        <button type="button" onClick={onClose} className="btn-ghost h-7 w-7 shrink-0" aria-label={cancelLabel}>
+          <X size={14} />
+        </button>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        {suggestions.map((suggestion) => (
+          <button
+            key={suggestion.id}
+            type="button"
+            onClick={() => onChoose(suggestion)}
+            disabled={busy}
+            className={`clarify-choice ${suggestion.custom && customOpen ? "clarify-choice-active" : ""}`}
+          >
+            <span className="block text-xs font-semibold text-fg">{suggestion.title}</span>
+            <span className="mt-0.5 block text-[11px] leading-snug text-fg-muted">
+              {suggestion.description}
+            </span>
+          </button>
+        ))}
+      </div>
+      {customOpen ? (
+        <div className="mt-3 rounded-xl border border-border/70 bg-bg-elevated/65 p-2">
+          <textarea
+            value={customDraft}
+            onChange={(e) => onDraftChange(e.target.value)}
+            placeholder={placeholder}
+            className="min-h-20 w-full resize-none rounded-lg border border-border bg-bg/80 px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:outline-none focus:ring-2 focus:ring-accent/25"
+          />
+          <div className="mt-2 flex justify-end gap-2">
+            <button type="button" onClick={onClose} className="btn-ghost px-3 py-2 text-xs">
+              {cancelLabel}
+            </button>
+            <button
+              type="button"
+              onClick={onCustomSubmit}
+              disabled={busy || !customDraft.trim()}
+              className="btn-accent px-3 py-2 text-xs disabled:cursor-not-allowed"
+            >
+              {continueLabel}
+            </button>
+          </div>
+        </div>
       ) : null}
     </div>
   );
@@ -378,6 +486,149 @@ function looksAmbiguous(text: string): boolean {
   const broad = /^(帮我)?(写|做|生成|分析|总结|策划|优化)(一下|一个|一份)?[。.!！?？]*$/;
   const englishBroad = /^(write|make|generate|analyze|summarize|plan|optimize)(\s+it|\s+this)?[.!?]*$/i;
   return compact.length <= 8 || broad.test(compact) || englishBroad.test(text.trim());
+}
+
+function getClarifySuggestions(text: string, locale: "zh" | "en"): ClarifySuggestion[] {
+  const compact = text.replace(/\s+/g, "").toLowerCase();
+  const isZh = locale === "zh";
+  const isAnalysis = /分析|总结|复盘|analy[sz]e|summari[sz]e|review/.test(compact);
+  const isPlan = /策划|计划|规划|方案|plan|campaign|strategy/.test(compact);
+
+  const other: ClarifySuggestion = isZh
+    ? {
+        id: "other",
+        title: "其它",
+        description: "自己补充目标、对象、格式或限制条件",
+        detail: "",
+        custom: true,
+      }
+    : {
+        id: "other",
+        title: "Other",
+        description: "Add your own goal, audience, format, or constraints",
+        detail: "",
+        custom: true,
+      };
+
+  if (isAnalysis) {
+    return [
+      isZh
+        ? {
+            id: "competitor",
+            title: "竞品分析",
+            description: "对比对象、差异点、机会与可执行建议",
+            detail: "请按竞品分析 SOP 完成：明确分析对象与竞品范围，输出竞争格局、核心卖点对比、渠道/内容表现、差异化机会、风险判断和下一步行动建议。",
+          }
+        : {
+            id: "competitor",
+            title: "Competitive analysis",
+            description: "Compare players, gaps, opportunities, and actions",
+            detail: "Use a competitive analysis SOP: define the target and competitors, then cover positioning, feature/message comparison, channel/content signals, differentiation opportunities, risks, and next actions.",
+          },
+      isZh
+        ? {
+            id: "data",
+            title: "数据分析",
+            description: "基于上传数据找表现、原因和建议",
+            detail: "请按数据分析方式完成：先确认可用数据与口径，再输出关键指标、异常变化、可能原因、细分发现、结论和建议。",
+          }
+        : {
+            id: "data",
+            title: "Data analysis",
+            description: "Find performance, drivers, and recommendations from data",
+            detail: "Handle this as a data analysis task: confirm available data and definitions, then report key metrics, anomalies, likely drivers, segment findings, conclusions, and recommendations.",
+          },
+      isZh
+        ? {
+            id: "market",
+            title: "市场调研",
+            description: "梳理趋势、用户需求、机会和证据来源",
+            detail: "请按市场调研方式完成：梳理趋势背景、目标用户需求、竞品或替代方案、机会判断、证据来源和可落地建议。",
+          }
+        : {
+            id: "market",
+            title: "Market research",
+            description: "Map trends, needs, opportunities, and evidence",
+            detail: "Handle this as market research: cover trend context, user needs, competitors or alternatives, opportunity assessment, evidence sources, and practical recommendations.",
+          },
+      other,
+    ];
+  }
+
+  if (isPlan) {
+    return [
+      isZh
+        ? {
+            id: "launch",
+            title: "营销活动方案",
+            description: "目标、受众、渠道、节奏、内容与 KPI",
+            detail: "请按营销活动方案完成：明确目标、目标受众、核心信息、渠道组合、执行节奏、内容清单、预算/资源假设和 KPI。",
+          }
+        : {
+            id: "launch",
+            title: "Campaign plan",
+            description: "Goal, audience, channels, timeline, content, and KPIs",
+            detail: "Handle this as a campaign plan: define goal, audience, key message, channel mix, timeline, content list, budget/resource assumptions, and KPIs.",
+          },
+      isZh
+        ? {
+            id: "content-calendar",
+            title: "内容排期",
+            description: "主题、平台、频率、形式和交付清单",
+            detail: "请按内容排期完成：输出主题方向、平台选择、发布频率、内容形式、每条内容要点和交付清单。",
+          }
+        : {
+            id: "content-calendar",
+            title: "Content calendar",
+            description: "Themes, platforms, cadence, formats, and deliverables",
+            detail: "Handle this as a content calendar: include themes, platform choices, cadence, content formats, per-post angles, and deliverables.",
+          },
+      other,
+    ];
+  }
+
+  return [
+    isZh
+      ? {
+          id: "social-copy",
+          title: "社媒文案",
+          description: "指定平台、受众、语气和字数后生成",
+          detail: "请按社媒文案任务完成：默认面向企业营销场景，补齐平台、目标受众、核心卖点、语气、字数和 CTA 后生成。",
+        }
+      : {
+          id: "social-copy",
+          title: "Social copy",
+          description: "Generate with platform, audience, tone, and length",
+          detail: "Handle this as a social copy task: assume a business marketing context and include platform, audience, value proposition, tone, length, and CTA.",
+        },
+    isZh
+      ? {
+          id: "brief",
+          title: "营销简报",
+          description: "整理背景、目标、策略、交付物和下一步",
+          detail: "请按营销简报完成：输出背景、目标、受众、核心策略、关键信息、交付物、时间线和下一步。",
+        }
+      : {
+          id: "brief",
+          title: "Marketing brief",
+          description: "Frame context, goal, strategy, deliverables, and next steps",
+          detail: "Handle this as a marketing brief: include context, goal, audience, core strategy, key message, deliverables, timeline, and next steps.",
+        },
+    isZh
+      ? {
+          id: "report",
+          title: "报告/文档",
+          description: "输出结构化正文，可继续生成附件",
+          detail: "请按报告或文档任务完成：先给出清晰结构，再输出完整正文、重点结论、可复用小标题和后续可生成的交付物建议。",
+        }
+      : {
+          id: "report",
+          title: "Report/document",
+          description: "Produce structured content and possible artifacts",
+          detail: "Handle this as a report or document task: provide a clear structure, full draft, key conclusions, reusable headings, and suggested deliverables.",
+        },
+    other,
+  ];
 }
 
 function SkillPickerPopover({
