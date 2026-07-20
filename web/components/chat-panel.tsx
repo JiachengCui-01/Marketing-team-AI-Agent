@@ -14,7 +14,7 @@ import { createPortal } from "react-dom";
 import { useEffect, useRef, useState } from "react";
 import { MessageBubble, type ChatMessage, type MessageArtifact } from "./message";
 import { FileUploader } from "./file-uploader";
-import { getWorkflowSkills, uploadFile, type UploadResponse, type WorkflowSkill } from "@/lib/api";
+import { getMarketingMemory, getWorkflowSkills, uploadFile, type MarketingMemoryProfile, type UploadResponse, type WorkflowSkill } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
 type DirectoryHandle = FileSystemDirectoryHandle & {
@@ -40,6 +40,8 @@ type ClarifyStep = {
   body: string;
   suggestions: ClarifySuggestion[];
 };
+
+type ClarifySlot = "platform" | "audience" | "tone" | "format" | "product";
 
 export function ChatPanel({
   messages,
@@ -96,6 +98,7 @@ export function ChatPanel({
   const [clarifyStepIndex, setClarifyStepIndex] = useState(0);
   const [clarifyReady, setClarifyReady] = useState(false);
   const [clarifyBaseText, setClarifyBaseText] = useState("");
+  const [marketingMemory, setMarketingMemory] = useState<Partial<MarketingMemoryProfile> | null>(null);
   const skillButtonRef = useRef<HTMLButtonElement>(null);
   const workspaceUploadMapRef = useRef<Map<string, string>>(new Map());
 
@@ -137,21 +140,28 @@ export function ChatPanel({
     getWorkflowSkills().then(setSkills).catch(() => setSkills([]));
   }, []);
 
+  useEffect(() => {
+    getMarketingMemory()
+      .then((res) => setMarketingMemory(res.profile))
+      .catch(() => setMarketingMemory(null));
+  }, []);
+
   const empty = messages.length === 0;
   const selectedSkills = skills.filter((skill) => selectedSkillIds.includes(skill.id));
-  const clarifySteps = clarifyPrimary ? getClarifyFollowupSteps(clarifyPrimary.id, locale, clarifyBaseText || input) : [];
+  const clarifyInitialStep = !clarifyPrimary ? getInitialClarifyStep(clarifyBaseText || input, locale, marketingMemory) : null;
+  const clarifySteps = clarifyPrimary ? getClarifyFollowupSteps(clarifyPrimary.id, locale, clarifyBaseText || input, marketingMemory) : [];
   const clarifyCurrentStep = clarifyPrimary ? clarifySteps[clarifyStepIndex] : null;
   const clarifySuggestions = clarifyReady
     ? getClarifyFinalSuggestions(locale)
-    : clarifyCurrentStep?.suggestions ?? getClarifySuggestions(clarifyBaseText || input, locale);
+    : clarifyCurrentStep?.suggestions ?? clarifyInitialStep?.suggestions ?? getClarifySuggestions(clarifyBaseText || input, locale, marketingMemory);
   const clarifyTitle = clarifyReady
     ? locale === "zh" ? "信息基本完备" : "Ready to proceed"
-    : clarifyCurrentStep?.title ?? copy.clarifyTitle;
+    : clarifyCurrentStep?.title ?? clarifyInitialStep?.title ?? copy.clarifyTitle;
   const clarifyBody = clarifyReady
     ? locale === "zh"
       ? "我已经获得了足够的信息，可以开始执行。你也可以继续补充其它要求后再执行。"
       : "I have enough context to proceed. You can also add more requirements before starting."
-    : clarifyCurrentStep?.body ?? copy.clarifyBody;
+    : clarifyCurrentStep?.body ?? clarifyInitialStep?.body ?? copy.clarifyBody;
 
   useEffect(() => {
     if (!workspaceHandle) return;
@@ -235,7 +245,7 @@ export function ChatPanel({
   function submitWithClarifyCheck() {
     const text = input.trim();
     if (!text || busy) return;
-    if (looksAmbiguous(text) && !clarifyOpen) {
+    if (looksAmbiguous(text, marketingMemory) && !clarifyOpen) {
       setClarifyOpen(true);
       setClarifyCustom(false);
       setClarifyDraft("");
@@ -245,10 +255,10 @@ export function ChatPanel({
       setClarifyReady(false);
       setClarifyBaseText(text);
       setInput("");
-      onClarificationRequest?.(text, buildClarificationReply(text, locale));
+      onClarificationRequest?.(text, buildClarificationReply(text, locale, marketingMemory));
       return;
     }
-    if (looksAmbiguous(text) && clarifyOpen) return;
+    if (looksAmbiguous(text, marketingMemory) && clarifyOpen) return;
     onSend(text);
     resetClarify();
   }
@@ -617,7 +627,7 @@ function ClarifyInlinePrompt({
   );
 }
 
-function looksAmbiguous(text: string): boolean {
+function looksAmbiguous(text: string, memory?: Partial<MarketingMemoryProfile> | null): boolean {
   const compact = text.replace(/\s+/g, "");
   const broad = /^(帮我)?(写|做|生成|分析|总结|策划|优化)(一下|一个|一份)?[。.!！?？]*$/;
   const englishBroad = /^(write|make|generate|analyze|summarize|plan|optimize)(\s+it|\s+this)?[.!?]*$/i;
@@ -625,11 +635,11 @@ function looksAmbiguous(text: string): boolean {
     compact.length <= 8 ||
     broad.test(compact) ||
     englishBroad.test(text.trim()) ||
-    isUnderSpecifiedMarketingTask(text)
+    isUnderSpecifiedMarketingTask(text, memory)
   );
 }
 
-function isUnderSpecifiedMarketingTask(text: string): boolean {
+function isUnderSpecifiedMarketingTask(text: string, memory?: Partial<MarketingMemoryProfile> | null): boolean {
   const compact = text.replace(/\s+/g, "").toLowerCase();
   const normalized = text.toLowerCase();
   const isMarketingGeneration =
@@ -646,29 +656,35 @@ function isUnderSpecifiedMarketingTask(text: string): boolean {
   const hasFormat =
     /字数|标题|正文|cta|行动号召|格式|篇幅|长度|条|篇|版本|hashtag|话题|caption|headline|body|length|format/.test(compact);
   const hasProductDetail =
-    /卖点|亮点|功能|价格|材质|颜色|尺码|款式|系列|品牌|产品|服务|feature|benefit|price|material|brand|product/.test(compact);
+    /卖点|亮点|功能|价格|材质|颜色|尺码|款式|系列|品牌|产品|服务|新品|新推出|手机|ai|feature|benefit|price|material|brand|product/.test(compact);
 
-  const filledSlots = [hasPlatform, hasAudience, hasTone, hasFormat, hasProductDetail].filter(Boolean).length;
+  const remembered = memorySlots(memory);
+  const effectivePlatform = hasPlatform || remembered.hasPlatform;
+  const effectiveAudience = hasAudience || remembered.hasAudience;
+  const effectiveTone = hasTone || remembered.hasTone;
+  const effectiveFormat = hasFormat || remembered.hasFormat;
+  const effectiveProduct = hasProductDetail || remembered.hasProduct;
+  const filledSlots = [effectivePlatform, effectiveAudience, effectiveTone, effectiveFormat, effectiveProduct].filter(Boolean).length;
   if (filledSlots < 3) return true;
 
   return (
     /文案|copy|post|caption/.test(normalized) &&
-    !hasPlatform &&
-    (!hasAudience || !hasTone || !hasFormat)
+    !effectivePlatform &&
+    (!effectiveAudience || !effectiveTone || !effectiveFormat)
   );
 }
 
-function buildClarificationReply(text: string, locale: "zh" | "en"): string {
-  const missing = missingMarketingSlots(text, locale);
+function buildClarificationReply(text: string, locale: "zh" | "en", memory?: Partial<MarketingMemoryProfile> | null): string {
+  const missing = missingMarketingSlots(text, locale, memory);
   if (locale === "zh") {
     const items = missing.length ? missing.join("、") : "目标、受众、渠道或交付格式";
-    return `这个任务我可以做，但为了避免直接套默认假设，我还需要补齐：**${items}**。\n\n请选择下面最接近的方向，我会继续追问必要信息；信息足够后再开始执行。`;
+    return `这个任务我可以做，但为了避免直接套默认假设，我还需要补齐：**${items}**。\n\n请选择下面最接近的补充信息；我只会继续追问当前提问和长期记忆里还没有、但完成任务必需的内容。`;
   }
   const items = missing.length ? missing.join(", ") : "goal, audience, channel, or output format";
-  return `I can do this, but to avoid relying on default assumptions, I still need: **${items}**.\n\nChoose the closest option below. I will ask only the necessary follow-up questions, then start once the brief is complete.`;
+  return `I can do this, but to avoid relying on default assumptions, I still need: **${items}**.\n\nChoose the closest supplemental detail below. I will only ask for information that is missing from both this request and long-term memory, and necessary for the task.`;
 }
 
-function missingMarketingSlots(text: string, locale: "zh" | "en"): string[] {
+function missingMarketingSlots(text: string, locale: "zh" | "en", memory?: Partial<MarketingMemoryProfile> | null): string[] {
   const compact = text.replace(/\s+/g, "").toLowerCase();
   const zh = locale === "zh";
   const hasPlatform =
@@ -679,16 +695,54 @@ function missingMarketingSlots(text: string, locale: "zh" | "en"): string[] {
     /语气|语调|风格|调性|口吻|专业|亲切|活泼|高级|年轻|正式|幽默|tone|voice|style|professional|friendly|formal|playful/.test(compact);
   const hasFormat =
     /字数|标题|正文|cta|行动号召|格式|篇幅|长度|条|篇|版本|hashtag|话题|caption|headline|body|length|format/.test(compact);
+  const hasProductDetail =
+    /卖点|亮点|功能|价格|材质|颜色|尺码|款式|系列|品牌|产品|服务|新品|新推出|手机|ai|feature|benefit|price|material|brand|product/.test(compact);
 
+  const remembered = memorySlots(memory);
   const out: string[] = [];
-  if (!hasPlatform) out.push(zh ? "平台/渠道" : "platform/channel");
-  if (!hasAudience) out.push(zh ? "目标受众" : "target audience");
-  if (!hasTone) out.push(zh ? "语气/风格" : "tone/style");
-  if (!hasFormat) out.push(zh ? "字数/格式/CTA" : "length/format/CTA");
+  if (!(hasPlatform || remembered.hasPlatform)) out.push(zh ? "平台/渠道" : "platform/channel");
+  if (!(hasProductDetail || remembered.hasProduct)) out.push(zh ? "产品/核心卖点" : "product/core benefit");
+  if (!(hasAudience || remembered.hasAudience)) out.push(zh ? "目标受众" : "target audience");
+  if (!(hasTone || remembered.hasTone)) out.push(zh ? "语气/风格" : "tone/style");
+  if (!(hasFormat || remembered.hasFormat)) out.push(zh ? "字数/格式/CTA" : "length/format/CTA");
   return out;
 }
 
-function analyzeMarketingPrompt(text: string) {
+function detectMarketingPlatform(compact: string): "xhs" | "linkedin" | "email" | "short-video" | "owned" | null {
+  if (/小红书|xhs|littleredbook/.test(compact)) return "xhs";
+  if (/linkedin|领英/.test(compact)) return "linkedin";
+  if (/邮件|email|newsletter/.test(compact)) return "email";
+  if (/抖音|短视频|视频号|tiktok|youtube/.test(compact)) return "short-video";
+  if (/朋友圈|社群|私域/.test(compact)) return "owned";
+  return null;
+}
+
+function memoryText(memory?: Partial<MarketingMemoryProfile> | null, keys?: (keyof MarketingMemoryProfile)[]): string {
+  if (!memory) return "";
+  const selected = keys ?? Object.keys(memory) as (keyof MarketingMemoryProfile)[];
+  return selected
+    .flatMap((key) => memory[key] ?? [])
+    .join(" ")
+    .toLowerCase();
+}
+
+function memorySlots(memory?: Partial<MarketingMemoryProfile> | null) {
+  const channels = memoryText(memory, ["channels"]);
+  const audience = memoryText(memory, ["target_customers"]);
+  const tone = memoryText(memory, ["tone_preferences"]);
+  const format = memoryText(memory, ["report_format_preferences", "kpi_data_preferences"]);
+  const product = memoryText(memory, ["products", "company_brand", "industry"]);
+  return {
+    hasPlatform: !!detectMarketingPlatform(channels) || channels.length > 0,
+    hasAudience: audience.length > 0,
+    hasTone: tone.length > 0,
+    hasFormat: format.length > 0,
+    hasProduct: product.length > 0,
+    platform: detectMarketingPlatform(channels),
+  };
+}
+
+function analyzeMarketingPrompt(text: string, memory?: Partial<MarketingMemoryProfile> | null) {
   const compact = text.replace(/\s+/g, "").toLowerCase();
   const isMarketingGeneration =
     /营销|文案|种草|推广|宣传|广告|海报|社媒|小红书|公众号|朋友圈|短视频|邮件|linkedin|post|copy|campaign|ad|social/.test(compact) &&
@@ -702,12 +756,15 @@ function analyzeMarketingPrompt(text: string) {
   const hasFormat =
     /字数|标题|正文|cta|行动号召|格式|篇幅|长度|条|篇|版本|hashtag|话题|caption|headline|body|length|format/.test(compact);
   const hasProductDetail =
-    /卖点|亮点|功能|价格|材质|面料|颜色|尺码|版型|显瘦|舒适|透气|百搭|系列|品牌|feature|benefit|price|material|brand/.test(compact);
+    /卖点|亮点|功能|价格|材质|面料|颜色|尺码|版型|显瘦|舒适|透气|百搭|系列|品牌|产品|服务|新品|新推出|手机|ai|feature|benefit|price|material|brand|product/.test(compact);
+
+  const remembered = memorySlots(memory);
+  const platform = detectMarketingPlatform(compact) ?? remembered.platform;
 
   const category =
     /服装|衣服|女装|男装|穿搭|裙|裤|外套|衬衫|t恤|鞋|包|apparel|fashion|outfit/.test(compact)
       ? "apparel"
-      : /saas|b2b|企业|客户|系统|平台|软件|工具|解决方案|crm|ai/.test(compact)
+      : /saas|b2b|企业|客户|系统|平台|软件|工具|解决方案|crm/.test(compact)
         ? "b2b"
         : "general";
 
@@ -726,21 +783,33 @@ function analyzeMarketingPrompt(text: string) {
     isMarketingGeneration,
     category,
     productLabel,
-    hasPlatform,
-    hasAudience,
-    hasTone,
-    hasFormat,
-    hasProductDetail,
+    hasPlatform: hasPlatform || remembered.hasPlatform,
+    hasAudience: hasAudience || remembered.hasAudience,
+    hasTone: hasTone || remembered.hasTone,
+    hasFormat: hasFormat || remembered.hasFormat,
+    hasProductDetail: hasProductDetail || remembered.hasProduct,
+    platform,
   };
 }
 
-function getClarifySuggestions(text: string, locale: "zh" | "en"): ClarifySuggestion[] {
+function getInitialClarifyStep(
+  text: string,
+  locale: "zh" | "en",
+  memory?: Partial<MarketingMemoryProfile> | null,
+): ClarifyStep | null {
+  return buildDynamicMarketingFollowupSteps(text, locale, "initial", memory)[0] ?? null;
+}
+
+function getClarifySuggestions(text: string, locale: "zh" | "en", memory?: Partial<MarketingMemoryProfile> | null): ClarifySuggestion[] {
   const compact = text.replace(/\s+/g, "").toLowerCase();
   const isZh = locale === "zh";
   const isAnalysis = /分析|总结|复盘|analy[sz]e|summari[sz]e|review/.test(compact);
   const isPlan = /策划|计划|规划|方案|plan|campaign|strategy/.test(compact);
 
-  const dynamicMarketing = buildDynamicMarketingEntrySuggestions(text, locale);
+  const dynamicQuestion = getInitialClarifyStep(text, locale, memory);
+  if (dynamicQuestion) return dynamicQuestion.suggestions;
+
+  const dynamicMarketing = buildDynamicMarketingEntrySuggestions(text, locale, memory);
   if (dynamicMarketing) return dynamicMarketing;
 
   const other: ClarifySuggestion = isZh
@@ -880,12 +949,46 @@ function getClarifySuggestions(text: string, locale: "zh" | "en"): ClarifySugges
   ];
 }
 
-function buildDynamicMarketingEntrySuggestions(text: string, locale: "zh" | "en"): ClarifySuggestion[] | null {
-  const profile = analyzeMarketingPrompt(text);
+function buildDynamicMarketingEntrySuggestions(
+  text: string,
+  locale: "zh" | "en",
+  memory?: Partial<MarketingMemoryProfile> | null,
+): ClarifySuggestion[] | null {
+  const profile = analyzeMarketingPrompt(text, memory);
   if (!profile.isMarketingGeneration) return null;
   const other = makeOtherSuggestion(locale);
   const isZh = locale === "zh";
   const product = profile.productLabel;
+
+  if (profile.platform === "xhs") {
+    return [
+      makeSuggestion(
+        "xhs-publish-copy",
+        isZh ? "小红书营销文案" : "Little Red Book marketing copy",
+        isZh ? `围绕${product}生成可直接发布的小红书内容` : `Create publish-ready Little Red Book content for ${product}`,
+        isZh
+          ? `方向：小红书营销文案。平台：小红书。围绕${product}输出标题、正文、CTA 和话题标签，后续只补齐受众、语气和交付格式。`
+          : `Direction: Little Red Book marketing copy. Platform: Little Red Book. Produce title, body, CTA, and tags for ${product}; only clarify audience, tone, and output shape next.`,
+      ),
+      makeSuggestion(
+        "xhs-seeding",
+        isZh ? "小红书种草角度" : "Little Red Book seeding angle",
+        isZh ? "更偏体验感、场景感和真实推荐" : "More experiential, scenario-led, and recommendation-like",
+        isZh
+          ? `方向：小红书种草角度。平台：小红书。围绕${product}强化使用场景、体验感、真实推荐和评论互动引导。`
+          : `Direction: Little Red Book seeding angle. Platform: Little Red Book. Emphasize usage scenarios, experience, authentic recommendation, and comment engagement.`,
+      ),
+      makeSuggestion(
+        "xhs-conversion-copy",
+        isZh ? "小红书转化文案" : "Little Red Book conversion copy",
+        isZh ? "更强调卖点、信任感和行动引导" : "Emphasizes benefits, trust, and action",
+        isZh
+          ? `方向：小红书转化文案。平台：小红书。围绕${product}突出核心卖点、信任理由、行动引导和可收藏信息。`
+          : `Direction: Little Red Book conversion copy. Platform: Little Red Book. Highlight benefits, trust reasons, CTA, and save-worthy information.`,
+      ),
+      other,
+    ];
+  }
 
   if (profile.category === "apparel") {
     return [
@@ -976,19 +1079,35 @@ function buildDynamicMarketingEntrySuggestions(text: string, locale: "zh" | "en"
   ];
 }
 
+function answeredSlots(primaryId: string): Set<ClarifySlot> {
+  const out = new Set<ClarifySlot>();
+  if (primaryId.startsWith("platform-") || primaryId.includes("xhs") || primaryId.includes("linkedin") || primaryId.includes("email")) {
+    out.add("platform");
+  }
+  if (primaryId.startsWith("audience-") || ["b2b", "operators", "consumers"].includes(primaryId)) out.add("audience");
+  if (primaryId.startsWith("tone-")) out.add("tone");
+  if (primaryId.startsWith("format-") || ["copy", "outline", "doc"].includes(primaryId)) out.add("format");
+  if (primaryId.startsWith("product-") || ["fit", "comfort", "style"].includes(primaryId)) out.add("product");
+  return out;
+}
+
 function buildDynamicMarketingFollowupSteps(
   text: string,
   locale: "zh" | "en",
   primaryId: string,
+  memory?: Partial<MarketingMemoryProfile> | null,
 ): ClarifyStep[] {
-  const profile = analyzeMarketingPrompt(text);
+  const profile = analyzeMarketingPrompt(text, memory);
   if (!profile.isMarketingGeneration) return [];
   const isZh = locale === "zh";
   const product = profile.productLabel;
   const other = makeOtherSuggestion(locale);
   const steps: ClarifyStep[] = [];
+  const answered = answeredSlots(primaryId);
   const primaryAddsPlatform = [
+    "xhs-publish-copy",
     "xhs-seeding",
+    "xhs-conversion-copy",
     "short-video-script",
     "private-conversion",
     "linkedin-b2b",
@@ -996,7 +1115,21 @@ function buildDynamicMarketingFollowupSteps(
     "solution-brief",
   ].includes(primaryId);
 
-  if (!profile.hasAudience) {
+  if (!profile.hasProductDetail && profile.category !== "apparel" && !answered.has("product")) {
+    steps.push({
+      id: "dynamic-product",
+      title: isZh ? "这次要推广的产品或核心卖点是什么？" : "What product or core benefit should this promote?",
+      body: isZh ? "先确认产品和卖点，后面的受众、语气和 CTA 才能贴合任务。" : "Product and benefit come first, then audience, tone, and CTA can fit the task.",
+      suggestions: [
+        makeSuggestion("product-new", isZh ? "新品发布" : "New product launch", isZh ? "突出新功能、新价值和尝鲜理由" : "Highlight new features, value, and reasons to try", isZh ? "产品信息：新品发布，突出新功能、新价值和尝鲜理由。" : "Product context: new product launch; highlight new features, value, and reasons to try."),
+        makeSuggestion("product-solution", isZh ? "解决方案/服务" : "Solution or service", isZh ? "突出痛点、方案和结果" : "Highlight pain point, solution, and outcome", isZh ? "产品信息：解决方案/服务，突出用户痛点、解决方式和结果收益。" : "Product context: solution or service; highlight pain point, approach, and outcome."),
+        makeSuggestion("product-offer", isZh ? "活动/优惠" : "Campaign offer", isZh ? "突出限时权益和行动理由" : "Highlight limited-time value and reason to act", isZh ? "产品信息：活动/优惠，突出限时权益和行动理由。" : "Product context: campaign offer; highlight limited-time value and reason to act."),
+        other,
+      ],
+    });
+  }
+
+  if (!profile.hasAudience && !answered.has("audience")) {
     const apparelOptions = [
       makeSuggestion(
         "audience-commuter",
@@ -1024,15 +1157,21 @@ function buildDynamicMarketingFollowupSteps(
       makeSuggestion("audience-sales", isZh ? "销售团队/BD" : "Sales or BD teams", isZh ? "强调线索、话术和转化" : "Emphasize leads, talking points, and conversion", isZh ? "目标受众：销售团队/BD，强调线索、话术和转化。" : "Audience: sales or BD teams; emphasize leads, talking points, and conversion."),
       other,
     ];
+    const generalOptions = [
+      makeSuggestion("audience-tech", isZh ? "科技尝鲜人群" : "Tech early adopters", isZh ? "强调新功能、体验升级和新鲜感" : "Emphasize new features, upgraded experience, and novelty", isZh ? `目标受众：科技尝鲜人群，围绕${product}突出新功能、体验升级和新鲜感。` : `Audience: tech early adopters; highlight new features, upgraded experience, and novelty for ${product}.`),
+      makeSuggestion("audience-productivity", isZh ? "高效办公/学习人群" : "Productivity-focused users", isZh ? "强调效率、续航、AI 辅助和稳定体验" : "Emphasize efficiency, battery life, AI assistance, and reliability", isZh ? `目标受众：高效办公/学习人群，围绕${product}强调效率、续航、AI 辅助和稳定体验。` : `Audience: productivity-focused users; emphasize efficiency, battery life, AI assistance, and reliability for ${product}.`),
+      makeSuggestion("audience-lifestyle", isZh ? "年轻生活方式用户" : "Young lifestyle users", isZh ? "强调拍照、外观、社交表达和日常场景" : "Emphasize camera, design, social expression, and daily scenarios", isZh ? `目标受众：年轻生活方式用户，围绕${product}强调拍照、外观、社交表达和日常场景。` : `Audience: young lifestyle users; emphasize camera, design, social expression, and daily scenarios for ${product}.`),
+      other,
+    ];
     steps.push({
       id: "dynamic-audience",
       title: isZh ? `${product}主要想打动谁？` : `Who should ${product} speak to?`,
       body: isZh ? "我会根据受众调整卖点顺序、措辞和 CTA。" : "I will adapt the benefit order, wording, and CTA to the audience.",
-      suggestions: profile.category === "b2b" ? b2bOptions : apparelOptions,
+      suggestions: profile.category === "b2b" ? b2bOptions : profile.category === "apparel" ? apparelOptions : generalOptions,
     });
   }
 
-  if (!profile.hasPlatform && !primaryAddsPlatform) {
+  if (!profile.hasPlatform && !primaryAddsPlatform && !answered.has("platform")) {
     steps.push({
       id: "dynamic-platform",
       title: isZh ? "这条内容优先发布在哪里？" : "Where will this be published first?",
@@ -1046,7 +1185,7 @@ function buildDynamicMarketingFollowupSteps(
     });
   }
 
-  if (profile.category === "apparel" && !profile.hasProductDetail) {
+  if (profile.category === "apparel" && !profile.hasProductDetail && !answered.has("product")) {
     steps.push({
       id: "dynamic-selling-point",
       title: isZh ? "这款服装最该突出哪个卖点？" : "Which apparel benefit matters most?",
@@ -1060,7 +1199,7 @@ function buildDynamicMarketingFollowupSteps(
     });
   }
 
-  if (!profile.hasTone) {
+  if (!profile.hasTone && !answered.has("tone")) {
     steps.push({
       id: "dynamic-tone",
       title: isZh ? "想要什么语气和风格？" : "What tone should it use?",
@@ -1074,7 +1213,7 @@ function buildDynamicMarketingFollowupSteps(
     });
   }
 
-  if (!profile.hasFormat) {
+  if (!profile.hasFormat && !answered.has("format")) {
     steps.push({
       id: "dynamic-format",
       title: isZh ? "最终要输出成什么形态？" : "What final shape should it take?",
@@ -1137,10 +1276,15 @@ function getClarifyStepLabel(
   return locale === "zh" ? `追问 ${stepIndex + 1}/${totalSteps}` : `Question ${stepIndex + 1}/${totalSteps}`;
 }
 
-function getClarifyFollowupSteps(primaryId: string, locale: "zh" | "en", prompt = ""): ClarifyStep[] {
+function getClarifyFollowupSteps(
+  primaryId: string,
+  locale: "zh" | "en",
+  prompt = "",
+  memory?: Partial<MarketingMemoryProfile> | null,
+): ClarifyStep[] {
   const isZh = locale === "zh";
   const other = makeOtherSuggestion(locale);
-  const dynamicMarketing = buildDynamicMarketingFollowupSteps(prompt, locale, primaryId);
+  const dynamicMarketing = buildDynamicMarketingFollowupSteps(prompt, locale, primaryId, memory);
   if (dynamicMarketing.length > 0) return dynamicMarketing;
 
   if (primaryId === "competitor") {
