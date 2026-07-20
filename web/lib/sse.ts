@@ -75,8 +75,8 @@ export function openEventStream(
         }
       }
 
-      if (terminalReceived || closedByCaller) return;
       if (buffer.trim()) flushFrame(buffer);
+      if (terminalReceived || closedByCaller) return;
       if (!terminalReceived) {
         onError(new Error("Stream closed before a final response was received."));
       }
