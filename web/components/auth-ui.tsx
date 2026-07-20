@@ -711,7 +711,7 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
           memoryBody: "查看和修改自动总结出的企业营销用户画像。",
           memoryHint: "每行一个偏好或事实，系统会在后续对话中优先参考这些信息。",
           memoryAuto: "聊天中识别到的高相关营销信息会自动沉淀到这里，你也可以手动修正。",
-          memoryEnabled: "自动总结长期记忆",
+          memoryEnabled: "自动长期记忆开关",
           memoryEnabledBody: "开启后，系统会在多次对话中逐步沉淀企业营销画像。",
           memorySave: "保存长期记忆",
           memoryClear: "清空长期记忆",
@@ -743,7 +743,7 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
           memoryBody: "View and edit the enterprise marketing profile summarized from chats.",
           memoryHint: "Use one fact or preference per line. Future chats will use these details first.",
           memoryAuto: "Highly relevant marketing context can be captured from chat automatically, and you can correct it here.",
-          memoryEnabled: "Auto-summarize long-term memory",
+          memoryEnabled: "Auto memory",
           memoryEnabledBody: "When enabled, the system gradually builds the enterprise marketing profile across chats.",
           memorySave: "Save memory",
           memoryClear: "Clear memory",
@@ -971,44 +971,30 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
               </div>
               <div className="flex items-center gap-2">
                 {memorySaved ? <span className="rounded-full bg-accent/10 px-2 py-1 text-[11px] font-medium text-accent">{labels.memorySaved}</span> : null}
+                <span className="text-xs font-medium text-fg-muted">{labels.memoryEnabled}</span>
                 <button
                   type="button"
-                  onClick={() => setConfirmClearMemory(true)}
+                  role="switch"
+                  aria-checked={memoryEnabled}
+                  onClick={toggleMemoryEnabled}
                   disabled={memorySaving || memoryLoading}
-                  className="btn-ghost border border-border px-3 py-1.5 text-xs disabled:opacity-40"
+                  className={cn(
+                    "relative h-7 w-12 shrink-0 rounded-full border transition-all duration-200 ease-macos disabled:opacity-50",
+                    memoryEnabled ? "border-accent bg-accent shadow-sm shadow-accent/30" : "border-border bg-bg-subtle",
+                  )}
                 >
-                  <Trash2 size={13} />
-                  {labels.memoryClear}
+                  <span
+                    className={cn(
+                      "absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-white shadow-md transition-transform duration-200 ease-macos",
+                      memoryEnabled ? "translate-x-5" : "translate-x-0",
+                    )}
+                  />
                 </button>
               </div>
             </div>
             <div className="rounded-lg border border-border/70 bg-bg-subtle/55 px-3 py-2 text-xs text-fg-muted">
               <p>{labels.memoryAuto}</p>
               <p className="mt-1">{labels.memoryHint}</p>
-            </div>
-            <div className="mt-3 flex items-center justify-between gap-4 rounded-xl border border-border bg-bg-elevated/70 px-3 py-3">
-              <div>
-                <p className="text-xs font-semibold text-fg">{labels.memoryEnabled}</p>
-                <p className="mt-1 text-[11px] text-fg-subtle">{labels.memoryEnabledBody}</p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={memoryEnabled}
-                onClick={toggleMemoryEnabled}
-                disabled={memorySaving || memoryLoading}
-                className={cn(
-                  "relative h-7 w-12 shrink-0 rounded-full border transition-all duration-200 ease-macos disabled:opacity-50",
-                  memoryEnabled ? "border-accent bg-accent shadow-sm shadow-accent/30" : "border-border bg-bg-subtle",
-                )}
-              >
-                <span
-                  className={cn(
-                    "absolute top-0.5 h-6 w-6 rounded-full bg-white shadow-md transition-transform duration-200 ease-macos",
-                    memoryEnabled ? "translate-x-[22px]" : "translate-x-0.5",
-                  )}
-                />
-              </button>
             </div>
             <div className="mt-4 grid gap-3 md:grid-cols-2">
               {memoryFields.map((field) => (
@@ -1026,7 +1012,16 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
               ))}
             </div>
             {memoryError ? <p className="mt-3 text-xs text-danger">{memoryError}</p> : null}
-            <div className="mt-4 flex justify-end">
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmClearMemory(true)}
+                disabled={memorySaving || memoryLoading}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-danger px-4 py-2 text-sm font-medium text-white transition-all duration-150 ease-macos hover:shadow-lg hover:shadow-danger/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Trash2 size={15} />
+                {labels.memoryClear}
+              </button>
               <button type="button" onClick={saveMemory} disabled={memorySaving || memoryLoading} className="btn-accent px-4 py-2 text-sm disabled:cursor-not-allowed">
                 <Check size={15} />
                 {memorySaving ? t.saving : labels.memorySave}
