@@ -89,8 +89,17 @@ def update_long_term_marketing_memory(user_id: str, *texts: str) -> dict | None:
 
     from . import memory_extraction  # local import avoids an import cycle
 
+    # Feed existing values so the extractor can reuse a canonical form for
+    # paraphrases of the same thing (semantic de-duplication).
+    known_values: dict[str, list[str]] = {}
+    for row in db.list_user_marketing_memory_evidence(user_id):
+        field = str(row.get("field") or "")
+        value = str(row.get("value") or "").strip()
+        if field in MARKETING_PROFILE_FIELDS and value:
+            known_values.setdefault(field, []).append(value)
+
     observations = memory_extraction.extract_observations(
-        texts, use_llm=config.memory_llm_extraction_enabled()
+        texts, use_llm=config.memory_llm_extraction_enabled(), known_values=known_values
     )
     triples = [
         (obs.field, obs.value, obs.explicit)

@@ -29,7 +29,11 @@ _SYSTEM = (
     "language; do not translate or invent. Leave a field empty when unknown — never guess. "
     "Set explicit=true only for direct self-declarations (e.g. 'our product is X', "
     "'we mainly post on LinkedIn', '我的职位是…'); set explicit=false for incidental mentions "
-    "inferred from a one-off task. Do not record one-off task instructions as profile facts."
+    "inferred from a one-off task. Do not record one-off task instructions as profile facts.\n"
+    "You may be given already-known values for this user. When an extracted fact refers to the "
+    "same thing as a known value for that field — even if paraphrased, abbreviated, or a longer/"
+    "shorter form (e.g. 'AI办公Agent系统' vs 'AI办公Agent') — output that known value VERBATIM so "
+    "the counts merge. Only output a new value when it is genuinely a different thing."
 )
 
 
@@ -40,11 +44,15 @@ class Observation:
     explicit: bool
 
 
-def extract_observations(texts: Sequence[str], *, use_llm: bool) -> list[Observation]:
+def extract_observations(
+    texts: Sequence[str], *, use_llm: bool, known_values: dict[str, list[str]] | None = None
+) -> list[Observation]:
     """Return profile observations for the given text(s).
 
     Tries the LLM extractor first when enabled and a client is configured;
     otherwise (or on any failure) falls back to the deterministic heuristic.
+    ``known_values`` (existing evidence values per field) lets the LLM reuse a
+    canonical form so paraphrases of the same thing merge instead of fragmenting.
     """
     joined = "\n\n".join(text for text in texts if text).strip()
     if not joined:
@@ -54,7 +62,7 @@ def extract_observations(texts: Sequence[str], *, use_llm: bool) -> list[Observa
         client = llm.get_client()
         if client is not None:
             try:
-                observations = _llm_observations(client, joined)
+                observations = _llm_observations(client, joined, known_values or {})
                 if observations:
                     return observations
             except Exception:  # noqa: BLE001 — never let learning break a turn
@@ -69,7 +77,7 @@ def _heuristic_observations(texts: tuple[str, ...]) -> list[Observation]:
     return [Observation(field, value, explicit) for field, value, explicit in memory.heuristic_observations(texts)]
 
 
-def _llm_observations(client, joined: str) -> list[Observation]:
+def _llm_observations(client, joined: str, known_values: dict[str, list[str]]) -> list[Observation]:
     from . import memory  # local import avoids an import cycle
 
     response = client.messages.create(
@@ -78,7 +86,7 @@ def _llm_observations(client, joined: str) -> list[Observation]:
         system=_SYSTEM,
         tools=[_build_tool(memory.MARKETING_PROFILE_FIELDS)],
         tool_choice={"type": "tool", "name": _TOOL_NAME},
-        messages=[{"role": "user", "content": joined[:6000]}],
+        messages=[{"role": "user", "content": _content(joined, known_values, memory.MARKETING_PROFILE_FIELDS)}],
     )
 
     observations: list[Observation] = []
@@ -97,6 +105,20 @@ def _llm_observations(client, joined: str) -> list[Observation]:
                     continue
                 observations.append(Observation(field, value, bool(item.get("explicit"))))
     return observations
+
+
+def _content(joined: str, known_values: dict[str, list[str]], fields: dict[str, str]) -> str:
+    lines = []
+    for field, label in fields.items():
+        vals = (known_values or {}).get(field)
+        if vals:
+            lines.append(f"- {label} ({field}): {', '.join(vals)}")
+    known_block = "\n".join(lines) if lines else "(none)"
+    return (
+        f"User message:\n{joined[:6000]}\n\n"
+        f"Already-known values for this user (reuse the exact string when a fact refers to the "
+        f"same thing, even if worded differently):\n{known_block}"
+    )
 
 
 def _build_tool(fields: dict[str, str]) -> dict:

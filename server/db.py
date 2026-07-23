@@ -6,9 +6,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
+import unicodedata
 import uuid
 from collections.abc import Iterable
 from contextvars import ContextVar
@@ -727,35 +729,69 @@ def list_user_marketing_memory_evidence(user_id: str) -> list[dict]:
     return out
 
 
+def _norm_evidence_key(value: str) -> str:
+    """Normalized key for merging trivially-different phrasings of one value.
+
+    Folds case, full/half-width, whitespace and punctuation so e.g.
+    "AI 办公Agent系统" and "ai办公agent系统。" collapse to the same key. Deeper
+    paraphrase merging (e.g. "AI办公Agent系统" vs "AI办公Agent") is handled by
+    LLM canonicalization at extraction time.
+    """
+    s = unicodedata.normalize("NFKC", str(value)).casefold().strip()
+    return re.sub(r"[\s\W_]+", "", s, flags=re.UNICODE)
+
+
 def add_user_marketing_memory_evidence(
     user_id: str, observations: Iterable[tuple[str, str, bool]]
 ) -> list[dict]:
     """Record profile observations as evidence.
 
     ``observations`` is an iterable of ``(field, value, explicit)`` triples.
-    ``explicit`` marks a direct self-declaration (e.g. "our product is X"),
-    which callers may promote at a lower threshold. Repeated observations
-    increment the count and can only raise ``explicit`` (never lower it).
+    ``explicit`` marks a direct self-declaration. A new value is merged into an
+    existing evidence row when it normalizes to the same key (see
+    ``_norm_evidence_key``) so near-duplicate phrasings accumulate one count
+    instead of fragmenting; the first-seen surface form is kept as the display
+    value. Repeated observations increment the count and can only raise
+    ``explicit`` (never lower it).
     """
     _ensure()
     now = time.time()
     with _connect() as conn:
         for field, raw, explicit in observations:
             value = str(raw).strip()
+            field = str(field)
             if not field or not value:
                 continue
-            conn.execute(
-                """
-                INSERT INTO user_marketing_memory_evidence
-                    (user_id, field, value, count, explicit, first_seen_at, last_seen_at)
-                VALUES (?, ?, ?, 1, ?, ?, ?)
-                ON CONFLICT(user_id, field, value) DO UPDATE SET
-                    count = count + 1,
-                    explicit = MAX(explicit, excluded.explicit),
-                    last_seen_at = excluded.last_seen_at
-                """,
-                (user_id, str(field), value, 1 if explicit else 0, now, now),
-            )
+            key = _norm_evidence_key(value)
+            canonical: str | None = None
+            if key:
+                for row in conn.execute(
+                    "SELECT value FROM user_marketing_memory_evidence WHERE user_id = ? AND field = ?",
+                    (user_id, field),
+                ).fetchall():
+                    if _norm_evidence_key(row["value"]) == key:
+                        canonical = str(row["value"])
+                        break
+            if canonical is not None:
+                conn.execute(
+                    "UPDATE user_marketing_memory_evidence "
+                    "SET count = count + 1, explicit = MAX(explicit, ?), last_seen_at = ? "
+                    "WHERE user_id = ? AND field = ? AND value = ?",
+                    (1 if explicit else 0, now, user_id, field, canonical),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO user_marketing_memory_evidence
+                        (user_id, field, value, count, explicit, first_seen_at, last_seen_at)
+                    VALUES (?, ?, ?, 1, ?, ?, ?)
+                    ON CONFLICT(user_id, field, value) DO UPDATE SET
+                        count = count + 1,
+                        explicit = MAX(explicit, excluded.explicit),
+                        last_seen_at = excluded.last_seen_at
+                    """,
+                    (user_id, field, value, 1 if explicit else 0, now, now),
+                )
     return list_user_marketing_memory_evidence(user_id)
 
 

@@ -226,6 +226,20 @@ class SessionStoreTests(unittest.TestCase):
         self.assertEqual(len(role), 1)
         self.assertEqual(role[0], "增长负责人")
 
+    def test_evidence_merges_near_duplicate_values(self) -> None:
+        user_id = self.create_user()
+        # Same product, trivially different phrasings (case / punctuation / spacing).
+        db.add_user_marketing_memory_evidence(user_id, [("products", "AI办公Agent系统", True)])
+        db.add_user_marketing_memory_evidence(user_id, [("products", "ai办公agent系统。", True)])
+        db.add_user_marketing_memory_evidence(user_id, [("products", " AI办公Agent系统 ", False)])
+
+        rows = [r for r in db.list_user_marketing_memory_evidence(user_id) if r["field"] == "products"]
+        self.assertEqual(len(rows), 1)  # merged, not fragmented
+        self.assertEqual(rows[0]["count"], 3)
+        self.assertEqual(rows[0]["value"], "AI办公Agent系统")  # first-seen surface form kept
+        # Merged count crosses the threshold, so it is promoted.
+        self.assertIn("AI办公Agent系统", memory.derive_learned_profile(user_id).get("products", []))
+
     def test_manual_profile_overrides_learned(self) -> None:
         user_id = self.create_user()
         session_id = sessions.create(user_id)

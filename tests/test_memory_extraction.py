@@ -64,6 +64,25 @@ class MemoryExtractionTests(unittest.TestCase):
         call = client.messages.calls[0]
         self.assertEqual(call["tool_choice"], {"type": "tool", "name": "record_marketing_profile"})
 
+    def test_known_values_are_sent_for_canonicalization(self) -> None:
+        # The model reuses the known canonical form for a paraphrased mention.
+        response = _FakeResponse([
+            _FakeBlock("tool_use", "record_marketing_profile", {
+                "products": [{"value": "AI办公Agent系统", "explicit": True}],
+            }),
+        ])
+        client = _FakeClient(response)
+        with mock.patch("server.memory_extraction.llm.get_client", return_value=client):
+            observations = memory_extraction.extract_observations(
+                ["其实就是那个 AI办公Agent"],
+                use_llm=True,
+                known_values={"products": ["AI办公Agent系统"]},
+            )
+        self.assertIn(Observation("products", "AI办公Agent系统", True), observations)
+        # Known values are provided to the model so it can canonicalize.
+        content = client.messages.calls[0]["messages"][0]["content"]
+        self.assertIn("AI办公Agent系统", content)
+
     def test_falls_back_to_heuristic_without_client(self) -> None:
         with mock.patch("server.memory_extraction.llm.get_client", return_value=None):
             observations = memory_extraction.extract_observations(
