@@ -14,7 +14,7 @@ import { createPortal } from "react-dom";
 import { useEffect, useRef, useState } from "react";
 import { MessageBubble, type ChatMessage, type MessageArtifact } from "./message";
 import { FileUploader } from "./file-uploader";
-import { getMarketingMemory, getWorkflowSkills, uploadFile, type MarketingMemoryProfile, type UploadResponse, type WorkflowSkill } from "@/lib/api";
+import { getMarketingMemory, getWorkflowSkills, requestClarification, uploadFile, type ClarifyPlan, type ClarifyQuestion, type MarketingMemoryProfile, type UploadResponse, type WorkflowSkill } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
 type DirectoryHandle = FileSystemDirectoryHandle & {
@@ -98,6 +98,10 @@ export function ChatPanel({
   const [clarifyStepIndex, setClarifyStepIndex] = useState(0);
   const [clarifyReady, setClarifyReady] = useState(false);
   const [clarifyBaseText, setClarifyBaseText] = useState("");
+  // When set, clarification is driven by the LLM-generated questions instead of
+  // the client-side heuristic question tree.
+  const [clarifyServerSteps, setClarifyServerSteps] = useState<ClarifyStep[] | null>(null);
+  const [clarifyChecking, setClarifyChecking] = useState(false);
   const [marketingMemory, setMarketingMemory] = useState<Partial<MarketingMemoryProfile> | null>(null);
   const skillButtonRef = useRef<HTMLButtonElement>(null);
   const workspaceUploadMapRef = useRef<Map<string, string>>(new Map());
@@ -115,6 +119,9 @@ export function ChatPanel({
         clarifyBody: "这个问题有点宽泛。补充目标、受众、渠道或交付格式后，我能按更稳定的流程生成。",
         clarifyPlaceholder: "例如：目标用户、品牌/产品、平台、语气、字数、截止时间、需要的格式...",
         continueSend: "继续发送",
+        clarifyChecking: "分析中...",
+        clarifyServerIntro: "为了更好地完成，我先确认几点：",
+        clarifyPickAnswer: "选择或补充你的答案",
       }
     : {
         workspace: "Workspace",
@@ -128,6 +135,9 @@ export function ChatPanel({
         clarifyBody: "This request is broad. Adding goal, audience, channel, or output format helps produce a steadier result.",
         clarifyPlaceholder: "e.g. audience, product, platform, tone, length, deadline, desired format...",
         continueSend: "Continue",
+        clarifyChecking: "Analyzing...",
+        clarifyServerIntro: "To do this well, let me confirm a few things:",
+        clarifyPickAnswer: "Pick or type your answer",
       };
 
   useEffect(() => {
@@ -148,9 +158,14 @@ export function ChatPanel({
 
   const empty = messages.length === 0;
   const selectedSkills = skills.filter((skill) => selectedSkillIds.includes(skill.id));
-  const clarifyInitialStep = !clarifyPrimary ? getInitialClarifyStep(clarifyBaseText || input, locale, marketingMemory) : null;
-  const clarifySteps = clarifyPrimary ? getClarifyFollowupSteps(clarifyPrimary.id, locale, clarifyBaseText || input, marketingMemory) : [];
-  const clarifyCurrentStep = clarifyPrimary ? clarifySteps[clarifyStepIndex] : null;
+  const serverMode = clarifyServerSteps !== null;
+  const clarifyInitialStep = !serverMode && !clarifyPrimary ? getInitialClarifyStep(clarifyBaseText || input, locale, marketingMemory) : null;
+  const clarifySteps = serverMode
+    ? clarifyServerSteps
+    : clarifyPrimary
+    ? getClarifyFollowupSteps(clarifyPrimary.id, locale, clarifyBaseText || input, marketingMemory)
+    : [];
+  const clarifyCurrentStep = serverMode || clarifyPrimary ? clarifySteps[clarifyStepIndex] : null;
   const clarifySuggestions = clarifyReady
     ? getClarifyFinalSuggestions(locale)
     : clarifyCurrentStep?.suggestions ?? clarifyInitialStep?.suggestions ?? getClarifySuggestions(clarifyBaseText || input, locale, marketingMemory);
@@ -162,6 +177,11 @@ export function ChatPanel({
       ? "我已经获得了足够的信息，可以开始执行。你也可以继续补充其它要求后再执行。"
       : "I have enough context to proceed. You can also add more requirements before starting."
     : clarifyCurrentStep?.body ?? clarifyInitialStep?.body ?? copy.clarifyBody;
+  const clarifyStepLabelText = serverMode
+    ? clarifyReady
+      ? locale === "zh" ? "确认执行" : "Confirm"
+      : `${locale === "zh" ? "追问" : "Question"} ${Math.min(clarifyStepIndex + 1, clarifySteps.length)}/${clarifySteps.length}`
+    : getClarifyStepLabel(clarifyPrimary, clarifyStepIndex, clarifySteps.length, locale);
 
   useEffect(() => {
     if (!workspaceHandle) return;
@@ -242,25 +262,74 @@ export function ChatPanel({
     }
   }
 
-  function submitWithClarifyCheck() {
+  async function submitWithClarifyCheck() {
     const text = input.trim();
-    if (!text || busy) return;
-    if (looksAmbiguous(text, marketingMemory) && !clarifyOpen) {
-      setClarifyOpen(true);
-      setClarifyCustom(false);
-      setClarifyDraft("");
-      setClarifyPrimary(null);
-      setClarifySelections([]);
-      setClarifyStepIndex(0);
-      setClarifyReady(false);
-      setClarifyBaseText(text);
-      setInput("");
-      onClarificationRequest?.(text, buildClarificationReply(text, locale, marketingMemory));
+    if (!text || busy || clarifyChecking || clarifyOpen) return;
+
+    // Chit-chat / non-task messages skip clarification entirely (no LLM round-trip).
+    if (!looksLikeTask(text)) {
+      onSend(text);
+      resetClarify();
       return;
     }
-    if (looksAmbiguous(text, marketingMemory) && clarifyOpen) return;
+
+    // Ask the model whether — and what — to clarify.
+    setClarifyChecking(true);
+    let plan: ClarifyPlan | null = null;
+    try {
+      plan = await requestClarification(text, locale);
+    } catch {
+      plan = null;
+    }
+    setClarifyChecking(false);
+
+    if (plan && plan.source === "llm") {
+      if (plan.needs_clarification && plan.questions.length > 0) {
+        openServerClarify(text, mapServerQuestions(plan.questions, locale, copy.clarifyPickAnswer));
+        return;
+      }
+      // Model judged the request clear enough — run it directly.
+      onSend(text);
+      resetClarify();
+      return;
+    }
+
+    // LLM unavailable or errored — fall back to the heuristic flow.
+    if (looksAmbiguous(text, marketingMemory)) {
+      openHeuristicClarify(text);
+      return;
+    }
     onSend(text);
     resetClarify();
+  }
+
+  function openServerClarify(text: string, steps: ClarifyStep[]) {
+    setClarifyServerSteps(steps);
+    setClarifyOpen(true);
+    setClarifyCustom(false);
+    setClarifyDraft("");
+    setClarifyPrimary(null);
+    setClarifySelections([]);
+    setClarifyStepIndex(0);
+    setClarifyReady(steps.length === 0);
+    setClarifyBaseText(text);
+    setInput("");
+    const intro = `${copy.clarifyServerIntro}\n${steps.map((s) => `- ${s.title}`).join("\n")}`;
+    onClarificationRequest?.(text, intro);
+  }
+
+  function openHeuristicClarify(text: string) {
+    setClarifyServerSteps(null);
+    setClarifyOpen(true);
+    setClarifyCustom(false);
+    setClarifyDraft("");
+    setClarifyPrimary(null);
+    setClarifySelections([]);
+    setClarifyStepIndex(0);
+    setClarifyReady(false);
+    setClarifyBaseText(text);
+    setInput("");
+    onClarificationRequest?.(text, buildClarificationReply(text, locale, marketingMemory));
   }
 
   function resetClarify() {
@@ -272,6 +341,8 @@ export function ChatPanel({
     setClarifyStepIndex(0);
     setClarifyReady(false);
     setClarifyBaseText("");
+    setClarifyServerSteps(null);
+    setClarifyChecking(false);
   }
 
   function sendClarified(detail: string) {
@@ -299,7 +370,8 @@ export function ChatPanel({
     setClarifyCustom(false);
     setClarifyDraft("");
 
-    if (!clarifyPrimary) {
+    // Heuristic mode: the first choice picks a direction (the "primary").
+    if (!serverMode && !clarifyPrimary) {
       const steps = getClarifyFollowupSteps(suggestion.id, locale, clarifyBaseText || input);
       setClarifyPrimary(suggestion);
       setClarifySelections([]);
@@ -324,11 +396,14 @@ export function ChatPanel({
   function submitCustomClarify() {
     const extra = clarifyDraft.trim();
     if (!extra) return;
+    // In server mode, tag the custom answer with the current question for a clean Q→A summary.
+    const sep = locale === "zh" ? "：" : ": ";
+    const detail = serverMode && clarifyCurrentStep ? `${clarifyCurrentStep.title}${sep}${extra}` : extra;
     const customSuggestion: ClarifySuggestion = {
       id: `custom-${Date.now()}`,
       title: locale === "zh" ? "其它补充" : "Other context",
       description: extra,
-      detail: extra,
+      detail,
     };
 
     if (clarifyReady) {
@@ -336,7 +411,7 @@ export function ChatPanel({
       return;
     }
 
-    if (!clarifyPrimary) {
+    if (!serverMode && !clarifyPrimary) {
       setClarifyPrimary(customSuggestion);
       setClarifySelections([]);
       setClarifyStepIndex(0);
@@ -402,7 +477,7 @@ export function ChatPanel({
               suggestions={clarifySuggestions}
               selections={[clarifyPrimary, ...clarifySelections].filter(Boolean) as ClarifySuggestion[]}
               ready={clarifyReady}
-              stepLabel={getClarifyStepLabel(clarifyPrimary, clarifyStepIndex, clarifySteps.length, locale)}
+              stepLabel={clarifyStepLabelText}
               customOpen={clarifyCustom}
               customDraft={clarifyDraft}
               busy={busy}
@@ -487,13 +562,19 @@ export function ChatPanel({
               ) : workspaceFileIds.length > 0 ? (
                 <span className="text-[11px] text-fg-subtle">{copy.workspaceSynced(workspaceFileIds.length)}</span>
               ) : null}
+              {clarifyChecking ? (
+                <span className="ml-auto mr-1 inline-flex items-center gap-1 text-[11px] text-fg-subtle">
+                  <Loader2 size={12} className="animate-spin" />
+                  {copy.clarifyChecking}
+                </span>
+              ) : null}
               <button
                 onClick={submitWithClarifyCheck}
-                disabled={busy || !input.trim()}
-                className="btn-accent ml-auto h-8 w-8 disabled:cursor-not-allowed"
+                disabled={busy || clarifyChecking || !input.trim()}
+                className={`btn-accent h-8 w-8 disabled:cursor-not-allowed${clarifyChecking ? "" : " ml-auto"}`}
                 aria-label={t.send}
               >
-                {busy ? (
+                {busy || clarifyChecking ? (
                   <Loader2 size={15} className="animate-spin text-feature-content transition-all duration-300" />
                 ) : (
                   <Send size={15} className="transition-all duration-200 group-hover:scale-110" />
@@ -1437,6 +1518,39 @@ function makeOtherSuggestion(locale: "zh" | "en"): ClarifySuggestion {
         detail: "",
         custom: true,
       };
+}
+
+// Broad pre-gate: only spend an LLM round-trip on prompts that look like an
+// actual task (generation / analysis / planning). Greetings and short replies
+// go straight through.
+function looksLikeTask(text: string): boolean {
+  const compact = text.replace(/\s+/g, "");
+  if (compact.length < 4) return false;
+  const taskVerb = /写|做|生成|编写|创作|出一|制作|分析|总结|复盘|策划|规划|方案|优化|设计|撰写|起草|润色|改写|produce|write|generate|create|draft|analyz|analys|summar|plan|optimi|design|review|rewrite/i;
+  const taskNoun = /营销|文案|种草|推广|宣传|广告|海报|社媒|小红书|公众号|朋友圈|短视频|邮件|活动|报告|方案|brief|linkedin|post|copy|campaign|report|email|social/i;
+  return taskVerb.test(text) || taskNoun.test(text);
+}
+
+// Map the LLM-planned questions onto the existing ClarifyStep/ClarifySuggestion
+// UI structures so the inline panel renders them unchanged. Each option's
+// `detail` carries a "question: answer" line for a clean final summary.
+function mapServerQuestions(
+  questions: ClarifyQuestion[],
+  locale: "zh" | "en",
+  pickAnswerLabel: string,
+): ClarifyStep[] {
+  const sep = locale === "zh" ? "：" : ": ";
+  return questions.map((q, qi) => {
+    const qid = q.id || `q${qi + 1}`;
+    const suggestions: ClarifySuggestion[] = q.options.map((opt, oi) => ({
+      id: `${qid}-opt${oi}`,
+      title: opt.label,
+      description: opt.value && opt.value !== opt.label ? opt.value : "",
+      detail: `${q.question}${sep}${opt.value || opt.label}`,
+    }));
+    if (q.allow_custom) suggestions.push(makeOtherSuggestion(locale));
+    return { id: qid, title: q.question, body: pickAnswerLabel, suggestions };
+  });
 }
 
 function SkillPickerPopover({

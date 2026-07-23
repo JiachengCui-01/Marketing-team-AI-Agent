@@ -18,7 +18,7 @@ from marketing_agent.orchestrator import run_orchestrator
 from marketing_agent.tools import image_gen
 from marketing_agent.tools.pdf_tool import generate_pdf
 
-from . import auth, db, image_processing, image_serve, llm, marketing_skills, memory, news, sessions, uploads
+from . import auth, clarify, db, image_processing, image_serve, llm, marketing_skills, memory, news, sessions, uploads
 from .streaming import orchestrator_event_stream, to_sse
 
 logger = logging.getLogger(__name__)
@@ -224,6 +224,19 @@ def get_marketing_memory_evidence(request: Request) -> dict:
             "last_seen_at": row.get("last_seen_at"),
         })
     return {"evidence": items, "threshold": threshold}
+
+
+# ---------- clarification ----------
+
+@router.post("/clarify")
+def plan_clarification(request: Request, payload: dict = Body(...)) -> dict:
+    """Decide whether/what to ask the user before running a task (LLM-driven)."""
+    user = auth.require_user(request)
+    prompt = str(payload.get("prompt") or "").strip()
+    locale = "en" if str(payload.get("locale") or "zh").lower().startswith("en") else "zh"
+    if not prompt:
+        return {"needs_clarification": False, "questions": [], "source": "empty"}
+    return clarify.plan_clarification(user["id"], prompt, locale)
 
 
 # ---------- news ----------

@@ -11,6 +11,9 @@ MODEL_ID = "claude-opus-4-8"
 # learning never pays Opus rates.
 MEMORY_EXTRACTION_MODEL = "claude-haiku-4-5-20251001"
 
+# Cheap, fast model used to plan clarifying questions before a task runs.
+CLARIFY_MODEL = "claude-haiku-4-5-20251001"
+
 _FALSEY = {"0", "false", "no", "off", ""}
 
 
@@ -22,6 +25,16 @@ def memory_llm_extraction_enabled() -> bool:
     degrades to heuristics whenever no API key/client is available.
     """
     return os.environ.get("MARKETING_AGENT_MEMORY_LLM", "1").strip().lower() not in _FALSEY
+
+
+def clarify_llm_enabled() -> bool:
+    """Whether the LLM-driven clarification planner is enabled (default: on).
+
+    Set ``MARKETING_AGENT_CLARIFY_LLM=0`` to disable it; the frontend then
+    falls back to its heuristic clarification flow. Also degrades gracefully
+    whenever no API key/client is available.
+    """
+    return os.environ.get("MARKETING_AGENT_CLARIFY_LLM", "1").strip().lower() not in _FALSEY
 
 # Max output token caps. Streaming is enabled in the loop, so these can be generous.
 ORCHESTRATOR_MAX_TOKENS = 16000

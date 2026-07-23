@@ -177,6 +177,21 @@ export type MarketingMemoryEvidenceResponse = {
   threshold: number;
 };
 
+export type ClarifyOption = { label: string; value: string };
+export type ClarifyQuestion = {
+  id: string;
+  question: string;
+  options: ClarifyOption[];
+  allow_custom: boolean;
+};
+export type ClarifyPlan = {
+  needs_clarification: boolean;
+  questions: ClarifyQuestion[];
+  // "llm" when the model produced the plan; anything else (unavailable/disabled/
+  // error/empty) means the caller should fall back to its heuristic flow.
+  source: string;
+};
+
 // ---------- auth ----------
 
 export async function registerUser(payload: ProfilePayload): Promise<{ token: string; user: UserProfile }> {
@@ -280,6 +295,16 @@ export async function clearMarketingMemory(): Promise<MarketingMemoryResponse> {
 
 export async function getMarketingMemoryEvidence(): Promise<MarketingMemoryEvidenceResponse> {
   const res = await fetch(`${API_BASE}/api/memory/marketing/evidence`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return res.json();
+}
+
+export async function requestClarification(prompt: string, locale: "zh" | "en"): Promise<ClarifyPlan> {
+  const res = await fetch(`${API_BASE}/api/clarify`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ prompt, locale }),
+  });
   if (!res.ok) throw new Error(await parseJsonError(res));
   return res.json();
 }

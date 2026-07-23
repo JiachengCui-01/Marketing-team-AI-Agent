@@ -18,6 +18,7 @@ class RouteTests(unittest.TestCase):
         os.environ["ANTHROPIC_API_KEY"] = "test-key"
         # Deterministic heuristic extraction; never call the model in tests.
         os.environ["MARKETING_AGENT_MEMORY_LLM"] = "0"
+        os.environ["MARKETING_AGENT_CLARIFY_LLM"] = "0"
         self.upload_tmp = tempfile.TemporaryDirectory()
         self.old_upload_dir = uploads.UPLOAD_DIR
         uploads.UPLOAD_DIR = Path(self.upload_tmp.name)
@@ -197,6 +198,25 @@ class RouteTests(unittest.TestCase):
         # And the learned profile reflects the promoted value.
         learned = self.client.get("/api/memory/marketing", headers=self.headers).json()["learned"]
         self.assertIn("牙科诊所预约系统", learned["products"])
+
+    def test_clarify_endpoint(self) -> None:
+        # Unauthenticated is rejected.
+        anon = self.client.post("/api/clarify", json={"prompt": "写文案"})
+        self.assertEqual(anon.status_code, 401)
+
+        # With LLM disabled the endpoint still returns a well-formed plan.
+        resp = self.client.post("/api/clarify", headers=self.headers, json={"prompt": "帮我写点东西", "locale": "zh"})
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        self.assertIn("needs_clarification", body)
+        self.assertIn("questions", body)
+        self.assertFalse(body["needs_clarification"])
+        self.assertEqual(body["source"], "disabled")
+
+        # Empty prompt short-circuits.
+        empty = self.client.post("/api/clarify", headers=self.headers, json={"prompt": "   "})
+        self.assertEqual(empty.status_code, 200, empty.text)
+        self.assertFalse(empty.json()["needs_clarification"])
 
     def test_session_create_delete(self) -> None:
         created = self.client.post("/api/sessions", headers=self.headers)
