@@ -718,11 +718,12 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
           memoryAuto: "聊天中识别到的高相关营销信息会自动沉淀到这里，你也可以手动修正。",
           memoryEnabled: "自动长期记忆开关",
           memoryEnabledBody: "开启后，系统会在多次对话中逐步沉淀企业营销画像。",
-          memorySave: "保存长期记忆",
-          memoryClear: "清空长期记忆",
-          memoryClearTitle: "清空长期记忆？",
-          memoryClearBody: "清空后，当前账号已保存的企业营销画像会被删除，后续对话需要重新积累。",
+          memorySave: "保存手动记忆",
+          memoryClear: "清空手动记忆",
+          memoryClearTitle: "清空手动填写的长期记忆？",
+          memoryClearBody: "仅清空你手动填写的企业营销画像，自动学习到的内容不受影响。",
           memorySaved: "已保存",
+          memoryManualTitle: "手动填写的画像",
           memoryLearnedTitle: "自动学习到的画像",
           memoryLearnedBody: "系统从历次对话中自动沉淀的信息（只读）。手动填写的内容会覆盖这里的对应字段。",
           memoryLearnedEmpty: "暂无自动学习到的内容，多聊几次后会自动积累。",
@@ -759,11 +760,12 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
           memoryAuto: "Highly relevant marketing context can be captured from chat automatically, and you can correct it here.",
           memoryEnabled: "Auto memory",
           memoryEnabledBody: "When enabled, the system gradually builds the enterprise marketing profile across chats.",
-          memorySave: "Save memory",
-          memoryClear: "Clear memory",
-          memoryClearTitle: "Clear long-term memory?",
-          memoryClearBody: "This deletes the saved enterprise marketing profile for this account. Future chats will rebuild it over time.",
+          memorySave: "Save manual memory",
+          memoryClear: "Clear manual memory",
+          memoryClearTitle: "Clear manually-entered memory?",
+          memoryClearBody: "This only clears the profile you filled in manually. Auto-learned memory is not affected.",
           memorySaved: "Saved",
+          memoryManualTitle: "Manual profile",
           memoryLearnedTitle: "Auto-learned profile",
           memoryLearnedBody: "Details the system captured from past chats (read-only). Anything you fill in manually overrides the matching field here.",
           memoryLearnedEmpty: "Nothing learned yet — it builds up automatically as you chat more.",
@@ -855,16 +857,6 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
     };
   }, [locale, userAccount]);
 
-  async function refreshMemoryEvidence() {
-    try {
-      const res = await getMarketingMemoryEvidence();
-      setMemoryEvidence(res.evidence);
-      setMemoryThreshold(res.threshold);
-    } catch {
-      /* non-critical */
-    }
-  }
-
   function scrollTo(ref: React.RefObject<HTMLDivElement>) {
     ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -893,8 +885,7 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
       setMemoryForm(memoryToForm(res.profile, locale));
       setMemoryLearned(res.learned ?? {});
       setMemorySaved(true);
-      // A manual save resets the evidence ledger server-side.
-      await refreshMemoryEvidence();
+      // Saving the manual profile does not affect auto-learned memory/evidence.
     } catch (err) {
       setMemoryError(localizeError(err, locale));
     } finally {
@@ -922,8 +913,8 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
     try {
       const res = await clearMarketingMemory();
       setMemoryForm(EMPTY_MARKETING_MEMORY);
+      // Clearing the manual profile leaves auto-learned memory/evidence intact.
       setMemoryLearned(res.learned ?? {});
-      setMemoryEvidence([]);
       setMemorySaved(false);
       setConfirmClearMemory(false);
     } catch (err) {
@@ -1049,27 +1040,8 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
                 </button>
               </div>
             </div>
-            <div className="rounded-lg border border-border/70 bg-bg-subtle/55 px-3 py-2 text-xs text-fg-muted">
-              <p>{labels.memoryAuto}</p>
-              <p className="mt-1">{labels.memoryHint}</p>
-            </div>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              {memoryFields.map((field) => (
-                <label key={field.key} className={cn("block text-xs font-medium text-fg-muted", field.key === "other_preferences" ? "md:col-span-2" : "")}>
-                  {field.label}
-                  <textarea
-                    value={memoryForm[field.key]}
-                    onChange={(e) => updateMemoryField(field.key, e.target.value)}
-                    rows={field.key === "other_preferences" ? 3 : 2}
-                    disabled={memoryLoading}
-                    placeholder={memoryLoading ? labels.loading : field.label}
-                    className="mt-1 w-full resize-none rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none placeholder:text-fg-subtle focus:border-accent disabled:opacity-60"
-                  />
-                </label>
-              ))}
-            </div>
             {!memoryLoading ? (
-              <div className="mt-4 rounded-lg border border-border/70 bg-bg-subtle/40 p-3">
+              <div className="rounded-lg border border-border/70 bg-bg-subtle/40 p-3">
                 <p className="text-xs font-semibold text-fg-muted">{labels.memoryLearnedTitle}</p>
                 <p className="mt-0.5 text-[11px] text-fg-subtle">{labels.memoryLearnedBody}</p>
                 {learnedEntries.length === 0 ? (
@@ -1120,6 +1092,25 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
                 ) : null}
               </div>
             ) : null}
+            <div className="mt-4">
+              <p className="text-xs font-semibold text-fg-muted">{labels.memoryManualTitle}</p>
+              <p className="mt-0.5 text-[11px] text-fg-subtle">{labels.memoryHint}</p>
+            </div>
+            <div className="mt-2 grid gap-3 md:grid-cols-2">
+              {memoryFields.map((field) => (
+                <label key={field.key} className={cn("block text-xs font-medium text-fg-muted", field.key === "other_preferences" ? "md:col-span-2" : "")}>
+                  {field.label}
+                  <textarea
+                    value={memoryForm[field.key]}
+                    onChange={(e) => updateMemoryField(field.key, e.target.value)}
+                    rows={1}
+                    disabled={memoryLoading}
+                    placeholder={memoryLoading ? labels.loading : field.label}
+                    className="mt-1 w-full resize-none rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none placeholder:text-fg-subtle focus:border-accent disabled:opacity-60"
+                  />
+                </label>
+              ))}
+            </div>
             {memoryError ? <p className="mt-3 text-xs text-danger">{memoryError}</p> : null}
             <div className="mt-4 flex justify-end gap-2">
               <button

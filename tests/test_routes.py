@@ -149,8 +149,8 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(body["profile"]["industry"], ["B2B SaaS"])
         self.assertEqual(body["profile"]["channels"], ["LinkedIn", "Email"])
 
-        # A manual save is authoritative and must reset accumulated evidence so
-        # edited-away values cannot immediately re-promote.
+        # Manual save and auto-learned memory are independent layers: saving the
+        # manual profile must NOT touch the auto-learned evidence ledger.
         user_id = db.get_user_by_account("alice@example.com")["id"]
         db.add_user_marketing_memory_evidence(user_id, [("channels", "LinkedIn", False)])
         self.assertTrue(db.list_user_marketing_memory_evidence(user_id))
@@ -159,7 +159,7 @@ class RouteTests(unittest.TestCase):
             headers=self.headers,
             json={"profile": {"industry": ["B2B SaaS"]}},
         )
-        self.assertEqual(db.list_user_marketing_memory_evidence(user_id), [])
+        self.assertTrue(db.list_user_marketing_memory_evidence(user_id))
 
         other_headers = self._register("memory-other@example.com")
         other = self.client.get("/api/memory/marketing", headers=other_headers)

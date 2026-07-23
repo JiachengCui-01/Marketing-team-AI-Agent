@@ -184,9 +184,8 @@ def save_marketing_memory(request: Request, payload: dict = Body(...)) -> dict:
     raw_profile = payload.get("profile") if isinstance(payload.get("profile"), dict) else payload
     profile = memory.canonicalize_profile(raw_profile)
     rec = db.upsert_user_marketing_memory(user["id"], profile)
-    # Manual edits are authoritative: clear accumulated evidence so removed values
-    # cannot immediately re-promote and future promotion recounts from scratch.
-    db.delete_user_marketing_memory_evidence(user["id"])
+    # Manual profile and auto-learned memory are independent layers: saving the
+    # manual profile never touches the auto-learned evidence ledger.
     return _marketing_memory_payload(user["id"], rec["updated_at"])
 
 
@@ -201,10 +200,8 @@ def update_marketing_memory_settings(request: Request, payload: dict = Body(...)
 @router.delete("/memory/marketing")
 def clear_marketing_memory(request: Request) -> dict:
     user = auth.require_user(request)
+    # Only clears the manual layer; auto-learned evidence is left untouched.
     db.delete_user_marketing_memory(user["id"])
-    # Also drop evidence so "clear" truly rebuilds from scratch rather than
-    # re-promoting from retained counts.
-    db.delete_user_marketing_memory_evidence(user["id"])
     return _marketing_memory_payload(user["id"], None)
 
 
