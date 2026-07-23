@@ -14,6 +14,8 @@ import {
   PanelLeft,
   Newspaper,
   Image as ImageIcon,
+  MessageCircle,
+  Contact,
 } from "lucide-react";
 import { ContextMenu, type MenuItem } from "./context-menu";
 import type { GroupRecord, SessionRecord } from "@/lib/api";
@@ -43,8 +45,11 @@ export function SessionSidebar({
   onCreateGroup,
   onRenameGroup,
   onDeleteGroup,
+  onOpenMessages,
+  onOpenContacts,
   onOpenNews,
   onOpenImage,
+  messageUnread,
 }: {
   sessions: SessionRecord[];
   groups: GroupRecord[];
@@ -61,8 +66,11 @@ export function SessionSidebar({
   onCreateGroup: (name: string) => Promise<string> | void;
   onRenameGroup: (id: string, name: string) => void;
   onDeleteGroup: (id: string) => void;
+  onOpenMessages: () => void;
+  onOpenContacts: () => void;
   onOpenNews: () => void;
   onOpenImage: () => void;
+  messageUnread?: number;
 }) {
   const { t } = useI18n();
   const sidebarRef = useRef<HTMLElement | null>(null);
@@ -100,6 +108,25 @@ export function SessionSidebar({
           title={t.newChat}
         >
           <Plus size={16} />
+        </button>
+        <button
+          onClick={onOpenMessages}
+          className="btn-ghost w-9 h-9 relative"
+          aria-label={t.messages}
+          title={t.messages}
+        >
+          <MessageCircle size={16} className="text-feature-news" />
+          {messageUnread ? (
+            <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-danger" aria-hidden />
+          ) : null}
+        </button>
+        <button
+          onClick={onOpenContacts}
+          className="btn-ghost w-9 h-9"
+          aria-label={t.contacts}
+          title={t.contacts}
+        >
+          <Contact size={16} className="text-feature-image" />
         </button>
         <button
           onClick={onOpenNews}
@@ -263,6 +290,25 @@ export function SessionSidebar({
       </div>
 
       <div className="px-1.5 pt-2 space-y-0.5">
+        <button
+          onClick={onOpenMessages}
+          className="btn-ghost w-full justify-start px-2.5 py-2 text-sm font-medium"
+        >
+          <MessageCircle size={15} className="text-feature-news shrink-0" />
+          <span className="truncate flex-1 text-left">{t.messages}</span>
+          {messageUnread ? (
+            <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-danger text-white text-[10px] font-semibold flex items-center justify-center">
+              {messageUnread > 99 ? "99+" : messageUnread}
+            </span>
+          ) : null}
+        </button>
+        <button
+          onClick={onOpenContacts}
+          className="btn-ghost w-full justify-start px-2.5 py-2 text-sm font-medium"
+        >
+          <Contact size={15} className="text-feature-image shrink-0" />
+          <span className="truncate">{t.contacts}</span>
+        </button>
         <button
           onClick={onOpenNews}
           className="btn-ghost w-full justify-start px-2.5 py-2 text-sm font-medium"

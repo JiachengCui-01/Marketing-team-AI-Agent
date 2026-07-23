@@ -18,12 +18,15 @@ import {
 import { SessionSidebar } from "@/components/session-sidebar";
 import { NewsPanel } from "@/components/news-panel";
 import { MarketingImagePanel } from "@/components/image-panel";
+import { MessagesPanel } from "@/components/messages-panel";
+import { ContactsPanel } from "@/components/contacts-panel";
 import { Spinner } from "@/components/ui/spinner";
 import type { ChatMessage, MessageArtifact } from "@/components/message";
 import { deriveStatus } from "@/components/status-chip";
 import { useI18n } from "@/lib/i18n";
 import { getUserLocale, getUserTheme } from "@/lib/user-settings";
 import { useSessionsStore } from "@/lib/sessions-store";
+import { useImStore } from "@/lib/im-store";
 import {
   API_BASE,
   artifactDownloadUrl,
@@ -76,6 +79,7 @@ export default function HomePage() {
   const { setTheme } = useTheme();
   const store = useSessionsStore();
   const [user, setUser] = useState<UserProfile | null>(null);
+  const im = useImStore(user?.id ?? null);
   const [authLoading, setAuthLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messagesBySession, setMessagesBySession] = useState<Record<string, ChatMessage[]>>({});
@@ -90,9 +94,16 @@ export default function HomePage() {
   const [collapsed, setCollapsed] = useState(false);
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [switchOpen, setSwitchOpen] = useState(false);
-  const [view, setView] = useState<"chat" | "news" | "image">("chat");
+  const [view, setView] = useState<"chat" | "news" | "image" | "messages" | "contacts">("chat");
   const [leftWidth, setLeftWidth] = useState(LEFT_MIN_WIDTH);
   const [rightWidth, setRightWidth] = useState(RIGHT_MIN_WIDTH);
+  // Collaboration views (messages/contacts) use a different layout: the right
+  // column is pinned to half the viewport, and the session sidebar shares the
+  // left half with the panel's list column via a draggable divider.
+  const [collabSidebarWidth, setCollabSidebarWidth] = useState(LEFT_MIN_WIDTH);
+  const [halfWidth, setHalfWidth] = useState(() =>
+    typeof window !== "undefined" ? Math.floor(window.innerWidth / 2) : 640,
+  );
   const closeRefs = useRef<Map<string, () => void>>(new Map());
   const activeIdRef = useRef<string | null>(null);
   const workspaceHandleRef = useRef<DirectoryHandle | null>(null);
@@ -100,6 +111,7 @@ export default function HomePage() {
   const messages = activeId ? messagesBySession[activeId] ?? [] : [];
   const trace = activeId ? traceBySession[activeId] ?? [] : [];
   const busy = activeId ? !!runningSessions[activeId] : false;
+  const isCollab = view === "messages" || view === "contacts";
 
   const applyUserSettings = useCallback(
     (profile: UserProfile) => {
@@ -175,8 +187,33 @@ export default function HomePage() {
     [leftWidth, rightWidth, maxSidebarWidth],
   );
 
+  const beginCollabResize = useCallback(
+    (startX: number) => {
+      const startWidth = collabSidebarWidth;
+      const maxWidth = Math.max(LEFT_MIN_WIDTH, halfWidth - LEFT_MIN_WIDTH);
+
+      function onMove(e: MouseEvent) {
+        const next = startWidth + (e.clientX - startX);
+        setCollabSidebarWidth(Math.min(maxWidth, Math.max(LEFT_MIN_WIDTH, next)));
+      }
+      function onUp() {
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      }
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [collabSidebarWidth, halfWidth],
+  );
+
   useEffect(() => {
     function clampWidths() {
+      const half = Math.floor(window.innerWidth / 2);
+      setHalfWidth(half);
       setLeftWidth((w) =>
         Math.min(
           maxSidebarWidth("left", LEFT_MIN_WIDTH),
@@ -188,6 +225,9 @@ export default function HomePage() {
           maxSidebarWidth("right", RIGHT_MIN_WIDTH),
           Math.max(RIGHT_MIN_WIDTH, w),
         ),
+      );
+      setCollabSidebarWidth((w) =>
+        Math.min(Math.max(LEFT_MIN_WIDTH, half - LEFT_MIN_WIDTH), Math.max(LEFT_MIN_WIDTH, w)),
       );
     }
     window.addEventListener("resize", clampWidths);
@@ -591,6 +631,22 @@ export default function HomePage() {
     setAttached([]);
   }, []);
 
+  const handleMessageUser = useCallback(
+    async (peerRef: string) => {
+      setView("messages");
+      try {
+        if (peerRef.startsWith("conversation:")) {
+          await im.openConversation(peerRef.slice("conversation:".length));
+        } else {
+          await im.openDirect(peerRef);
+        }
+      } catch (err) {
+        console.error("open conversation failed", err);
+      }
+    },
+    [im],
+  );
+
   const totals = classifyTotals(trace);
 
   if (authLoading) {
@@ -640,7 +696,7 @@ export default function HomePage() {
           activeId={activeId}
           runningIds={Object.keys(runningSessions).filter((id) => runningSessions[id])}
           collapsed={collapsed}
-          width={leftWidth}
+          width={isCollab ? collabSidebarWidth : leftWidth}
           onToggle={() => setCollapsed((c) => !c)}
           onSelect={loadSession}
           onNewChat={handleNewChat}
@@ -650,15 +706,42 @@ export default function HomePage() {
           onCreateGroup={store.createGroup}
           onRenameGroup={store.renameGroup}
           onDeleteGroup={handleDeleteGroup}
+          onOpenMessages={() => setView("messages")}
+          onOpenContacts={() => setView("contacts")}
           onOpenNews={() => setView("news")}
           onOpenImage={() => setView("image")}
+          messageUnread={im.unreadTotal}
         />
         {!collapsed ? (
           <ResizeHandle
             side="left"
-            onMouseDown={(e) => beginResize("left", e.clientX)}
+            onMouseDown={(e) =>
+              isCollab ? beginCollabResize(e.clientX) : beginResize("left", e.clientX)
+            }
           />
         ) : null}
+        {isCollab ? (
+          view === "messages" ? (
+            <MessagesPanel
+              key={user.id}
+              onBack={() => setView("chat")}
+              halfWidth={halfWidth}
+              im={im}
+              meId={user.id}
+              meName={user.username}
+              meAvatar={user.avatar}
+            />
+          ) : (
+            <ContactsPanel
+              key={user.id}
+              onBack={() => setView("chat")}
+              halfWidth={halfWidth}
+              meId={user.id}
+              onMessageUser={handleMessageUser}
+            />
+          )
+        ) : (
+          <>
         {view === "news" ? (
           <NewsPanel key={user.id} onBack={() => setView("chat")} />
         ) : view === "image" ? (
@@ -723,6 +806,8 @@ export default function HomePage() {
           }
           defaultTab={preview ? "preview" : "trace"}
         />
+          </>
+        )}
       </div>
       <SwitchAccountPanel
         open={switchOpen}

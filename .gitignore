@@ -1,4 +1,6 @@
 .env
+.env*.local
+web/.env*.local
 .vercel/
 .claude/
 .venv/

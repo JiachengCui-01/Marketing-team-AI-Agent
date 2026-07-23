@@ -771,6 +771,321 @@ export async function listImageTemplates(filter?: {
 
 // ---------- stream ----------
 
+// ---------- collaboration: organization ----------
+
+export type OrgInfo = {
+  id: string;
+  name: string;
+  owner_id: string;
+  invite_code: string;
+  created_at: number;
+  my_role?: string;
+};
+
+export type OrgMember = {
+  id: string;
+  account: string | null;
+  username: string | null;
+  real_name: string | null;
+  avatar: string | null;
+  email: string | null;
+  phone: string | null;
+  company: string | null;
+  title: string | null;
+  role: string | null;
+};
+
+export async function getOrg(): Promise<OrgInfo> {
+  const res = await fetch(`${API_BASE}/api/org`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).org;
+}
+
+export async function createOrg(name: string): Promise<OrgInfo> {
+  const res = await fetch(`${API_BASE}/api/org`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).org;
+}
+
+export async function joinOrg(inviteCode: string): Promise<OrgInfo> {
+  const res = await fetch(`${API_BASE}/api/org/join`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ invite_code: inviteCode }),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).org;
+}
+
+export async function leaveOrg(): Promise<OrgInfo> {
+  const res = await fetch(`${API_BASE}/api/org/leave`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).org;
+}
+
+export async function listOrgMembers(): Promise<{ org: OrgInfo; members: OrgMember[] }> {
+  const res = await fetch(`${API_BASE}/api/org/members`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return res.json();
+}
+
+export async function removeOrgMember(memberId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/org/members/${memberId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+}
+
+export async function addOrgMember(account: string): Promise<OrgMember> {
+  const res = await fetch(`${API_BASE}/api/org/members`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ account }),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).member;
+}
+
+// ---------- collaboration: contacts ----------
+
+export type ExternalContact = {
+  id: string;
+  contact_user_id: string | null;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  company: string | null;
+  title: string | null;
+  avatar: string | null;
+  starred: boolean;
+  source: string;
+  created_at: number;
+};
+
+export type ContactRequest = {
+  id: string;
+  message: string | null;
+  status: string;
+  created_at: number;
+  responded_at: number | null;
+  user_id: string;
+  username: string | null;
+  real_name: string | null;
+  avatar: string | null;
+  email: string | null;
+  company: string | null;
+  title: string | null;
+};
+
+export async function listExternalContacts(): Promise<ExternalContact[]> {
+  const res = await fetch(`${API_BASE}/api/contacts/external`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).contacts;
+}
+
+export async function addExternalContact(payload: {
+  account?: string;
+  name?: string;
+  phone?: string;
+  email?: string;
+  company?: string;
+  title?: string;
+  message?: string;
+}): Promise<{ mode: "request" | "manual"; request_id?: string; contact?: ExternalContact }> {
+  const res = await fetch(`${API_BASE}/api/contacts/external`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return res.json();
+}
+
+export async function updateExternalContact(
+  id: string,
+  patch: Partial<Pick<ExternalContact, "name" | "phone" | "email" | "company" | "title" | "starred">>,
+): Promise<ExternalContact> {
+  const res = await fetch(`${API_BASE}/api/contacts/external/${id}`, {
+    method: "PATCH",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).contact;
+}
+
+export async function deleteExternalContact(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/contacts/external/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+}
+
+export async function listContactRequests(): Promise<{
+  incoming: ContactRequest[];
+  outgoing: ContactRequest[];
+}> {
+  const res = await fetch(`${API_BASE}/api/contacts/requests`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return res.json();
+}
+
+export async function acceptContactRequest(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/contacts/requests/${id}/accept`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+}
+
+export async function rejectContactRequest(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/contacts/requests/${id}/reject`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+}
+
+export async function starMember(memberUserId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/contacts/star`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ member_user_id: memberUserId }),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+}
+
+export async function unstarMember(memberUserId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/contacts/star/${memberUserId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+}
+
+export async function getStarredContacts(): Promise<{
+  members: OrgMember[];
+  externals: ExternalContact[];
+}> {
+  const res = await fetch(`${API_BASE}/api/contacts/starred`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return res.json();
+}
+
+// ---------- collaboration: instant messaging ----------
+
+export type ImPeer = { id: string; username: string | null; real_name: string | null; avatar: string | null };
+export type ImLastMessage = { sender_id: string; kind: string; content: string; created_at: number };
+
+export type Conversation = {
+  id: string;
+  type: "direct" | "group";
+  title: string | null;
+  created_by: string;
+  updated_at: number;
+  member_count: number;
+  peer: ImPeer | null;
+  last_message: ImLastMessage | null;
+  unread: number;
+};
+
+export type ImMessage = {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  kind: string;
+  content: string;
+  created_at: number;
+  sender_name?: string;
+};
+
+export async function listConversations(type?: "direct" | "group"): Promise<Conversation[]> {
+  const qs = type ? `?type=${type}` : "";
+  const res = await fetch(`${API_BASE}/api/conversations${qs}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).conversations;
+}
+
+export async function createConversation(payload: {
+  type: "direct" | "group";
+  peer_id?: string;
+  title?: string;
+  member_ids?: string[];
+}): Promise<Conversation> {
+  const res = await fetch(`${API_BASE}/api/conversations`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).conversation;
+}
+
+export async function getConversationMessages(
+  id: string,
+  opts: { before?: number; limit?: number } = {},
+): Promise<ImMessage[]> {
+  const params = new URLSearchParams();
+  if (opts.before != null) params.set("before", String(opts.before));
+  if (opts.limit != null) params.set("limit", String(opts.limit));
+  const qs = params.toString();
+  const res = await fetch(`${API_BASE}/api/conversations/${id}/messages${qs ? `?${qs}` : ""}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).messages;
+}
+
+export async function sendConversationMessage(id: string, content: string): Promise<ImMessage> {
+  const res = await fetch(`${API_BASE}/api/conversations/${id}/messages`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).message;
+}
+
+export async function markConversationRead(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/conversations/${id}/read`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+}
+
+export async function listConversationMembers(id: string): Promise<OrgMember[]> {
+  const res = await fetch(`${API_BASE}/api/conversations/${id}/members`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).members;
+}
+
+export async function addConversationMembers(
+  id: string,
+  payload: { account?: string; member_ids?: string[] },
+): Promise<OrgMember[]> {
+  const res = await fetch(`${API_BASE}/api/conversations/${id}/members`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).members;
+}
+
+export function imStreamUrl(): string {
+  return withToken(`${API_BASE}/api/im/stream`);
+}
+
 export function streamUrl(
   sessionId: string,
   prompt: string,

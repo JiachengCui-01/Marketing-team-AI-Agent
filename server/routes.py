@@ -18,8 +18,8 @@ from marketing_agent.orchestrator import run_orchestrator
 from marketing_agent.tools import image_gen
 from marketing_agent.tools.pdf_tool import generate_pdf
 
-from . import auth, clarify, db, image_processing, image_serve, llm, marketing_skills, memory, news, sessions, uploads
-from .streaming import orchestrator_event_stream, to_sse
+from . import auth, clarify, db, im_hub, image_processing, image_serve, llm, marketing_skills, memory, news, sessions, uploads
+from .streaming import HEARTBEAT_INTERVAL_SECONDS, orchestrator_event_stream, to_sse
 
 logger = logging.getLogger(__name__)
 
@@ -1251,3 +1251,406 @@ def _derive_name(session_id: str, prompt: str) -> str | None:
         return None
     snippet = prompt.strip().splitlines()[0][:40] if prompt.strip() else "New chat"
     return snippet or "New chat"
+
+
+# ---------- organizations / directory ----------
+
+def _org_member_public(row: dict) -> dict:
+    return {
+        "id": row["id"],
+        "account": row.get("account"),
+        "username": row.get("username"),
+        "real_name": row.get("real_name"),
+        "avatar": row.get("avatar"),
+        "email": row.get("email"),
+        "phone": row.get("phone"),
+        "company": row.get("company"),
+        "title": row.get("title"),
+        "role": row.get("role"),
+    }
+
+
+@router.get("/org")
+def org_get(request: Request) -> dict:
+    user = auth.require_user(request)
+    org = db.get_or_create_default_org(user["id"], user.get("username") or "")
+    return {"org": org}
+
+
+@router.post("/org")
+def org_create(request: Request, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "组织名称不能为空。")
+    if len(name) > 80:
+        raise HTTPException(400, "组织名称不能超过 80 个字符。")
+    db.create_org(user["id"], name)
+    return {"org": db.get_current_org(user["id"])}
+
+
+@router.post("/org/join")
+def org_join(request: Request, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    code = (payload.get("invite_code") or "").strip()
+    if not code:
+        raise HTTPException(400, "请输入邀请码。")
+    org = db.join_org_by_invite(user["id"], code)
+    if org is None:
+        raise HTTPException(404, "邀请码无效。")
+    return {"org": org}
+
+
+@router.post("/org/leave")
+def org_leave(request: Request) -> dict:
+    user = auth.require_user(request)
+    org = db.get_current_org(user["id"])
+    if org is None:
+        raise HTTPException(400, "你还没有加入任何组织。")
+    if org["owner_id"] == user["id"]:
+        raise HTTPException(400, "组织所有者不能退出自己的组织。")
+    db.remove_org_member(org["id"], user["id"])
+    return {"org": db.get_or_create_default_org(user["id"], user.get("username") or "")}
+
+
+@router.get("/org/members")
+def org_members(request: Request) -> dict:
+    user = auth.require_user(request)
+    org = db.get_or_create_default_org(user["id"], user.get("username") or "")
+    members = [_org_member_public(m) for m in db.list_org_members(org["id"])]
+    return {"org": org, "members": members}
+
+
+@router.post("/org/members")
+def org_add_member(request: Request, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    org = db.get_or_create_default_org(user["id"], user.get("username") or "")
+    account = (payload.get("account") or "").strip()
+    if not account:
+        raise HTTPException(400, "请输入对方账号（邮箱/手机号）。")
+    target = db.get_user_by_account(auth.validate_account(account))
+    if target is None:
+        raise HTTPException(404, "未找到该注册用户。")
+    if db.get_org_membership(org["id"], target["id"]) is not None:
+        raise HTTPException(409, "对方已在该组织中。")
+    db.add_org_member(org["id"], target["id"])
+    return {"member": _org_member_public({**target, "role": "member"})}
+
+
+@router.delete("/org/members/{member_id}")
+def org_remove_member(request: Request, member_id: str) -> dict:
+    user = auth.require_user(request)
+    org = db.get_current_org(user["id"])
+    if org is None:
+        raise HTTPException(404, "组织不存在。")
+    my = db.get_org_membership(org["id"], user["id"])
+    if my is None:
+        raise HTTPException(403, "你不在该组织中。")
+    if member_id != user["id"] and my["role"] not in ("owner", "admin"):
+        raise HTTPException(403, "只有管理员可以移除成员。")
+    if member_id == org["owner_id"]:
+        raise HTTPException(400, "不能移除组织所有者。")
+    if not db.remove_org_member(org["id"], member_id):
+        raise HTTPException(404, "成员不存在。")
+    return {"removed": member_id}
+
+
+# ---------- contacts ----------
+
+def _external_contact_public(c: dict) -> dict:
+    return {
+        "id": c["id"],
+        "contact_user_id": c.get("contact_user_id"),
+        "name": c.get("name"),
+        "phone": c.get("phone"),
+        "email": c.get("email"),
+        "company": c.get("company"),
+        "title": c.get("title"),
+        "avatar": c.get("avatar"),
+        "starred": bool(c.get("starred")),
+        "source": c.get("source"),
+        "created_at": c.get("created_at"),
+    }
+
+
+@router.get("/contacts/external")
+def contacts_external_list(request: Request) -> dict:
+    user = auth.require_user(request)
+    return {"contacts": [_external_contact_public(c) for c in db.list_external_contacts(user["id"])]}
+
+
+@router.post("/contacts/external")
+def contacts_external_add(request: Request, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    account = (payload.get("account") or "").strip()
+    if account:
+        target = db.get_user_by_account(auth.validate_account(account))
+        if target is None:
+            raise HTTPException(404, "未找到该注册用户，可改用手动填写。")
+        if target["id"] == user["id"]:
+            raise HTTPException(400, "不能添加自己为联系人。")
+        if db.external_contact_with_user_exists(user["id"], target["id"]):
+            raise HTTPException(409, "对方已在你的联系人中。")
+        message = (payload.get("message") or "").strip() or None
+        req = db.create_contact_request(user["id"], target["id"], message)
+        return {"mode": "request", "request_id": req["id"]}
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "请填写联系人名称或对方账号。")
+    contact = db.create_external_contact(
+        user["id"],
+        name=name,
+        phone=auth.validate_optional_text(payload.get("phone"), "手机号", max_len=20),
+        email=auth.validate_optional_text(payload.get("email"), "邮箱", max_len=120),
+        company=auth.validate_optional_text(payload.get("company"), "公司", max_len=120),
+        title=auth.validate_optional_text(payload.get("title"), "职位", max_len=120),
+        source="manual",
+    )
+    return {"mode": "manual", "contact": _external_contact_public(contact)}
+
+
+@router.patch("/contacts/external/{contact_id}")
+def contacts_external_update(request: Request, contact_id: str, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    fields: dict = {}
+    for key in ("name", "phone", "email", "company", "title"):
+        if key in payload:
+            raw = payload[key]
+            fields[key] = (str(raw).strip() or None) if raw is not None else None
+    if "starred" in payload:
+        fields["starred"] = bool(payload["starred"])
+    if not fields:
+        raise HTTPException(400, "没有可更新的字段。")
+    if not db.update_external_contact(user["id"], contact_id, **fields):
+        raise HTTPException(404, "联系人不存在。")
+    return {"contact": _external_contact_public(db.get_external_contact(user["id"], contact_id))}
+
+
+@router.delete("/contacts/external/{contact_id}")
+def contacts_external_delete(request: Request, contact_id: str) -> dict:
+    user = auth.require_user(request)
+    if not db.delete_external_contact(user["id"], contact_id):
+        raise HTTPException(404, "联系人不存在。")
+    return {"deleted": contact_id}
+
+
+@router.get("/contacts/requests")
+def contacts_requests(request: Request) -> dict:
+    user = auth.require_user(request)
+    return {
+        "incoming": db.list_incoming_contact_requests(user["id"]),
+        "outgoing": db.list_outgoing_contact_requests(user["id"]),
+    }
+
+
+def _reciprocal_contact(owner: dict, other: dict) -> None:
+    if not db.external_contact_with_user_exists(owner["id"], other["id"]):
+        db.create_external_contact(
+            owner["id"],
+            name=other.get("username") or other.get("real_name") or "",
+            email=other.get("email"),
+            phone=other.get("phone"),
+            company=other.get("company"),
+            title=other.get("title"),
+            avatar=other.get("avatar"),
+            contact_user_id=other["id"],
+            source="request",
+        )
+
+
+@router.post("/contacts/requests/{request_id}/accept")
+def contacts_request_accept(request: Request, request_id: str) -> dict:
+    user = auth.require_user(request)
+    req = db.respond_contact_request(request_id, user["id"], "accepted")
+    if req is None:
+        raise HTTPException(404, "联系人申请不存在或已处理。")
+    sender = db.get_user(req["from_user_id"])
+    recipient = db.get_user(req["to_user_id"])
+    if sender and recipient:
+        _reciprocal_contact(recipient, sender)
+        _reciprocal_contact(sender, recipient)
+    return {"accepted": request_id}
+
+
+@router.post("/contacts/requests/{request_id}/reject")
+def contacts_request_reject(request: Request, request_id: str) -> dict:
+    user = auth.require_user(request)
+    req = db.respond_contact_request(request_id, user["id"], "rejected")
+    if req is None:
+        raise HTTPException(404, "联系人申请不存在或已处理。")
+    return {"rejected": request_id}
+
+
+@router.post("/contacts/star")
+def contacts_star(request: Request, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    member_id = (payload.get("member_user_id") or "").strip()
+    if not member_id:
+        raise HTTPException(400, "缺少成员 ID。")
+    db.star_member(user["id"], member_id)
+    return {"starred": member_id}
+
+
+@router.delete("/contacts/star/{member_user_id}")
+def contacts_unstar(request: Request, member_user_id: str) -> dict:
+    user = auth.require_user(request)
+    db.unstar_member(user["id"], member_user_id)
+    return {"unstarred": member_user_id}
+
+
+@router.get("/contacts/starred")
+def contacts_starred(request: Request) -> dict:
+    user = auth.require_user(request)
+    starred_ids = db.list_starred_member_ids(user["id"])
+    members = [_org_member_public({**u, "role": None}) for u in db.get_users_by_ids(starred_ids)]
+    externals = [
+        _external_contact_public(c) for c in db.list_external_contacts(user["id"]) if c.get("starred")
+    ]
+    return {"members": members, "externals": externals}
+
+
+# ---------- instant messaging (direct + group) ----------
+
+def _one_conversation_for(user_id: str, conversation_id: str) -> dict | None:
+    for conv in db.list_conversations_for_user(user_id):
+        if conv["id"] == conversation_id:
+            return conv
+    return None
+
+
+def _publish_conversation_update(conversation_id: str) -> None:
+    for uid in db.list_conversation_member_ids(conversation_id):
+        im_hub.publish(uid, {"event": "conversation_updated", "payload": {"conversation_id": conversation_id}})
+
+
+@router.get("/conversations")
+def conversations_list(request: Request, type: str | None = None) -> dict:
+    user = auth.require_user(request)
+    convs = db.list_conversations_for_user(user["id"])
+    if type in ("direct", "group"):
+        convs = [c for c in convs if c["type"] == type]
+    return {"conversations": convs}
+
+
+@router.post("/conversations")
+async def conversations_create(request: Request, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    ctype = (payload.get("type") or "direct").strip()
+    if ctype == "direct":
+        peer_id = (payload.get("peer_id") or "").strip()
+        if not peer_id:
+            raise HTTPException(400, "缺少对方用户 ID。")
+        if peer_id == user["id"]:
+            raise HTTPException(400, "不能和自己创建会话。")
+        if db.get_user(peer_id) is None:
+            raise HTTPException(404, "对方用户不存在。")
+        conv = db.find_or_create_direct_conversation(user["id"], peer_id)
+    elif ctype == "group":
+        member_ids = [str(x) for x in (payload.get("member_ids") or []) if str(x).strip()]
+        member_ids = [m for m in member_ids if db.get_user(m) is not None and m != user["id"]]
+        if not member_ids:
+            raise HTTPException(400, "请选择至少一名群成员。")
+        title = (payload.get("title") or "").strip() or "群聊"
+        conv = db.create_group_conversation(user["id"], title, member_ids)
+        _publish_conversation_update(conv["id"])
+    else:
+        raise HTTPException(400, "会话类型无效。")
+    return {"conversation": _one_conversation_for(user["id"], conv["id"])}
+
+
+@router.get("/conversations/{conversation_id}/messages")
+def conversation_messages(
+    request: Request, conversation_id: str, before: float | None = None, limit: int = 50
+) -> dict:
+    user = auth.require_user(request)
+    if not db.is_conversation_member(conversation_id, user["id"]):
+        raise HTTPException(404, "会话不存在。")
+    return {"messages": db.list_im_messages(conversation_id, before, limit)}
+
+
+@router.post("/conversations/{conversation_id}/messages")
+async def conversation_send(request: Request, conversation_id: str, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    if not db.is_conversation_member(conversation_id, user["id"]):
+        raise HTTPException(404, "会话不存在。")
+    content = (payload.get("content") or "").strip()
+    if not content:
+        raise HTTPException(400, "消息内容不能为空。")
+    if len(content) > 4000:
+        raise HTTPException(400, "消息内容过长。")
+    msg = db.add_im_message(conversation_id, user["id"], content)
+    event = {"event": "im_message", "payload": {**msg, "sender_name": user.get("username")}}
+    for uid in db.list_conversation_member_ids(conversation_id):
+        im_hub.publish(uid, event)
+    return {"message": msg}
+
+
+@router.post("/conversations/{conversation_id}/read")
+def conversation_read(request: Request, conversation_id: str) -> dict:
+    user = auth.require_user(request)
+    if not db.is_conversation_member(conversation_id, user["id"]):
+        raise HTTPException(404, "会话不存在。")
+    db.mark_conversation_read(conversation_id, user["id"])
+    return {"ok": True}
+
+
+@router.get("/conversations/{conversation_id}/members")
+def conversation_members_list(request: Request, conversation_id: str) -> dict:
+    user = auth.require_user(request)
+    if not db.is_conversation_member(conversation_id, user["id"]):
+        raise HTTPException(404, "会话不存在。")
+    return {"members": [_org_member_public(m) for m in db.list_conversation_members(conversation_id)]}
+
+
+@router.post("/conversations/{conversation_id}/members")
+async def conversation_add_members(request: Request, conversation_id: str, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    if not db.is_conversation_member(conversation_id, user["id"]):
+        raise HTTPException(404, "会话不存在。")
+    conv = db.get_conversation(conversation_id)
+    if not conv or conv.get("type") != "group":
+        raise HTTPException(400, "只能给群聊添加成员。")
+
+    candidates = [str(x) for x in (payload.get("member_ids") or []) if str(x).strip()]
+    account = (payload.get("account") or "").strip()
+    if account:
+        target = db.get_user_by_account(auth.validate_account(account))
+        if target is None:
+            raise HTTPException(404, "未找到该注册用户。")
+        candidates.append(target["id"])
+
+    to_add = [
+        uid
+        for uid in dict.fromkeys(candidates)
+        if db.get_user(uid) is not None and not db.is_conversation_member(conversation_id, uid)
+    ]
+    if not to_add:
+        raise HTTPException(400, "没有可添加的新成员。")
+
+    db.add_conversation_members(conversation_id, to_add)
+    _publish_conversation_update(conversation_id)
+    return {"members": [_org_member_public(m) for m in db.list_conversation_members(conversation_id)]}
+
+
+@router.get("/im/stream")
+async def im_stream(request: Request):
+    user = auth.require_user(request)
+    user_id = user["id"]
+
+    async def event_gen() -> AsyncIterator[dict]:
+        queue = im_hub.subscribe(user_id)
+        try:
+            yield {"event": "im_connected", "payload": {}}
+            while True:
+                if await request.is_disconnected():
+                    return
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_INTERVAL_SECONDS)
+                except asyncio.TimeoutError:
+                    yield {"event": "im_heartbeat", "payload": {}}
+                    continue
+                yield item
+        finally:
+            im_hub.unsubscribe(user_id, queue)
+
+    return EventSourceResponse(to_sse(event_gen()))

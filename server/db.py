@@ -217,6 +217,105 @@ CREATE TABLE IF NOT EXISTS image_templates (
     sort_order INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_image_templates_platform ON image_templates(platform, style);
+
+-- enterprise collaboration: organizations + directory
+CREATE TABLE IF NOT EXISTS organizations (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
+    invite_code TEXT NOT NULL UNIQUE,
+    created_at REAL NOT NULL,
+    FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS org_members (
+    org_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'member',
+    joined_at REAL NOT NULL,
+    PRIMARY KEY (org_id, user_id),
+    FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id, joined_at);
+
+CREATE TABLE IF NOT EXISTS external_contacts (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    contact_user_id TEXT,
+    name TEXT NOT NULL,
+    phone TEXT,
+    email TEXT,
+    company TEXT,
+    title TEXT,
+    avatar TEXT,
+    starred INTEGER NOT NULL DEFAULT 0,
+    source TEXT NOT NULL DEFAULT 'manual',
+    created_at REAL NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (contact_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_external_contacts_user ON external_contacts(user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS contact_requests (
+    id TEXT PRIMARY KEY,
+    from_user_id TEXT NOT NULL,
+    to_user_id TEXT NOT NULL,
+    message TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at REAL NOT NULL,
+    responded_at REAL,
+    FOREIGN KEY (from_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (to_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_contact_requests_to ON contact_requests(to_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_contact_requests_from ON contact_requests(from_user_id, status);
+
+CREATE TABLE IF NOT EXISTS contact_stars (
+    user_id TEXT NOT NULL,
+    member_user_id TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    PRIMARY KEY (user_id, member_user_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (member_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- enterprise collaboration: instant messaging (direct + group)
+CREATE TABLE IF NOT EXISTS conversations (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    title TEXT,
+    org_id TEXT,
+    created_by TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at);
+
+CREATE TABLE IF NOT EXISTS conversation_members (
+    conversation_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'member',
+    last_read_at REAL NOT NULL DEFAULT 0,
+    joined_at REAL NOT NULL,
+    PRIMARY KEY (conversation_id, user_id),
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_conversation_members_user ON conversation_members(user_id);
+
+CREATE TABLE IF NOT EXISTS im_messages (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    sender_id TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'text',
+    content TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+    FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_im_messages_conv ON im_messages(conversation_id, created_at);
 """
 
 
@@ -1301,6 +1400,557 @@ def get_image_template(template_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+# ---------- organizations / directory ----------
+
+def _gen_invite_code() -> str:
+    return uuid.uuid4().hex[:8].upper()
+
+
+def create_org(owner_id: str, name: str) -> dict:
+    _ensure()
+    oid = uuid.uuid4().hex
+    now = time.time()
+    code = _gen_invite_code()
+    with _connect() as conn:
+        for _ in range(6):
+            try:
+                conn.execute(
+                    "INSERT INTO organizations (id, name, owner_id, invite_code, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (oid, name, owner_id, code, now),
+                )
+                break
+            except sqlite3.IntegrityError:
+                code = _gen_invite_code()
+        else:
+            raise RuntimeError("could not allocate a unique invite code")
+        conn.execute(
+            "INSERT OR IGNORE INTO org_members (org_id, user_id, role, joined_at) VALUES (?, ?, 'owner', ?)",
+            (oid, owner_id, now),
+        )
+    return {"id": oid, "name": name, "owner_id": owner_id, "invite_code": code, "created_at": now}
+
+
+def get_current_org(user_id: str) -> dict | None:
+    """The org the user is currently in — their most recently joined membership."""
+    _ensure()
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT o.id, o.name, o.owner_id, o.invite_code, o.created_at, m.role AS my_role
+            FROM org_members m
+            JOIN organizations o ON o.id = m.org_id
+            WHERE m.user_id = ?
+            ORDER BY m.joined_at DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_or_create_default_org(user_id: str, username: str) -> dict:
+    org = get_current_org(user_id)
+    if org is not None:
+        return org
+    name = f"{username}'s organization" if username else "My organization"
+    create_org(user_id, name)
+    org = get_current_org(user_id)
+    return org or {}
+
+
+def join_org_by_invite(user_id: str, invite_code: str) -> dict | None:
+    _ensure()
+    code = (invite_code or "").strip().upper()
+    now = time.time()
+    with _connect() as conn:
+        org = conn.execute(
+            "SELECT id FROM organizations WHERE invite_code = ?", (code,)
+        ).fetchone()
+        if org is None:
+            return None
+        conn.execute(
+            "INSERT OR IGNORE INTO org_members (org_id, user_id, role, joined_at) VALUES (?, ?, 'member', ?)",
+            (org["id"], user_id, now),
+        )
+        # Bump joined_at so this org becomes the user's current org (even on rejoin).
+        conn.execute(
+            "UPDATE org_members SET joined_at = ? WHERE org_id = ? AND user_id = ?",
+            (now, org["id"], user_id),
+        )
+    return get_current_org(user_id)
+
+
+def list_org_members(org_id: str) -> list[dict]:
+    _ensure()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT u.id, u.account, u.username, u.real_name, u.avatar, u.email, u.phone,
+                   u.company, u.title, m.role, m.joined_at
+            FROM org_members m
+            JOIN users u ON u.id = m.user_id
+            WHERE m.org_id = ?
+            ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, m.joined_at ASC
+            """,
+            (org_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_org_membership(org_id: str, user_id: str) -> dict | None:
+    _ensure()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT org_id, user_id, role, joined_at FROM org_members WHERE org_id = ? AND user_id = ?",
+            (org_id, user_id),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def add_org_member(org_id: str, user_id: str, role: str = "member") -> None:
+    _ensure()
+    with _connect() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO org_members (org_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)",
+            (org_id, user_id, role, time.time()),
+        )
+
+
+def remove_org_member(org_id: str, target_user_id: str) -> bool:
+    _ensure()
+    with _connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM org_members WHERE org_id = ? AND user_id = ?",
+            (org_id, target_user_id),
+        )
+        return cur.rowcount > 0
+
+
+# ---------- external contacts ----------
+
+def _external_row(row: sqlite3.Row) -> dict:
+    d = dict(row)
+    d["starred"] = bool(d.get("starred"))
+    return d
+
+
+def create_external_contact(
+    user_id: str,
+    *,
+    name: str,
+    phone: str | None = None,
+    email: str | None = None,
+    company: str | None = None,
+    title: str | None = None,
+    avatar: str | None = None,
+    contact_user_id: str | None = None,
+    source: str = "manual",
+    starred: bool = False,
+) -> dict:
+    _ensure()
+    cid = uuid.uuid4().hex
+    now = time.time()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO external_contacts
+                (id, user_id, contact_user_id, name, phone, email, company, title, avatar, starred, source, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (cid, user_id, contact_user_id, name, phone, email, company, title, avatar,
+             1 if starred else 0, source, now),
+        )
+    return get_external_contact(user_id, cid) or {}
+
+
+def get_external_contact(user_id: str, contact_id: str) -> dict | None:
+    _ensure()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM external_contacts WHERE id = ? AND user_id = ?",
+            (contact_id, user_id),
+        ).fetchone()
+    return _external_row(row) if row else None
+
+
+def list_external_contacts(user_id: str) -> list[dict]:
+    _ensure()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM external_contacts WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,),
+        ).fetchall()
+    return [_external_row(r) for r in rows]
+
+
+def external_contact_with_user_exists(user_id: str, contact_user_id: str) -> bool:
+    _ensure()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM external_contacts WHERE user_id = ? AND contact_user_id = ?",
+            (user_id, contact_user_id),
+        ).fetchone()
+    return row is not None
+
+
+def update_external_contact(user_id: str, contact_id: str, **fields: Any) -> bool:
+    _ensure()
+    allowed = {"name", "phone", "email", "company", "title", "starred"}
+    sets, vals = [], []
+    for key, value in fields.items():
+        if key not in allowed:
+            continue
+        sets.append(f"{key} = ?")
+        vals.append((1 if value else 0) if key == "starred" else value)
+    if not sets:
+        return False
+    vals.extend([contact_id, user_id])
+    with _connect() as conn:
+        cur = conn.execute(
+            f"UPDATE external_contacts SET {', '.join(sets)} WHERE id = ? AND user_id = ?", vals
+        )
+        return cur.rowcount > 0
+
+
+def delete_external_contact(user_id: str, contact_id: str) -> bool:
+    _ensure()
+    with _connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM external_contacts WHERE id = ? AND user_id = ?", (contact_id, user_id)
+        )
+        return cur.rowcount > 0
+
+
+# ---------- contact requests ----------
+
+def create_contact_request(from_user_id: str, to_user_id: str, message: str | None = None) -> dict:
+    _ensure()
+    now = time.time()
+    with _connect() as conn:
+        existing = conn.execute(
+            "SELECT id FROM contact_requests WHERE from_user_id = ? AND to_user_id = ? AND status = 'pending'",
+            (from_user_id, to_user_id),
+        ).fetchone()
+        if existing:
+            rid = existing["id"]
+        else:
+            rid = uuid.uuid4().hex
+            conn.execute(
+                "INSERT INTO contact_requests (id, from_user_id, to_user_id, message, status, created_at) "
+                "VALUES (?, ?, ?, ?, 'pending', ?)",
+                (rid, from_user_id, to_user_id, message, now),
+            )
+    return get_contact_request(rid) or {}
+
+
+def get_contact_request(request_id: str) -> dict | None:
+    _ensure()
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM contact_requests WHERE id = ?", (request_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def _list_contact_requests(user_id: str, incoming: bool) -> list[dict]:
+    _ensure()
+    mine, other = ("to_user_id", "from_user_id") if incoming else ("from_user_id", "to_user_id")
+    with _connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT r.id, r.message, r.status, r.created_at, r.responded_at,
+                   u.id AS user_id, u.username, u.real_name, u.avatar, u.email, u.company, u.title
+            FROM contact_requests r
+            JOIN users u ON u.id = r.{other}
+            WHERE r.{mine} = ? AND r.status = 'pending'
+            ORDER BY r.created_at DESC
+            """,
+            (user_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_incoming_contact_requests(user_id: str) -> list[dict]:
+    return _list_contact_requests(user_id, incoming=True)
+
+
+def list_outgoing_contact_requests(user_id: str) -> list[dict]:
+    return _list_contact_requests(user_id, incoming=False)
+
+
+def respond_contact_request(request_id: str, to_user_id: str, status: str) -> dict | None:
+    _ensure()
+    now = time.time()
+    with _connect() as conn:
+        cur = conn.execute(
+            "UPDATE contact_requests SET status = ?, responded_at = ? "
+            "WHERE id = ? AND to_user_id = ? AND status = 'pending'",
+            (status, now, request_id, to_user_id),
+        )
+        if cur.rowcount == 0:
+            return None
+    return get_contact_request(request_id)
+
+
+# ---------- contact stars (org members) ----------
+
+def star_member(user_id: str, member_user_id: str) -> None:
+    _ensure()
+    with _connect() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO contact_stars (user_id, member_user_id, created_at) VALUES (?, ?, ?)",
+            (user_id, member_user_id, time.time()),
+        )
+
+
+def unstar_member(user_id: str, member_user_id: str) -> bool:
+    _ensure()
+    with _connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM contact_stars WHERE user_id = ? AND member_user_id = ?",
+            (user_id, member_user_id),
+        )
+        return cur.rowcount > 0
+
+
+def list_starred_member_ids(user_id: str) -> list[str]:
+    _ensure()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT member_user_id FROM contact_stars WHERE user_id = ?", (user_id,)
+        ).fetchall()
+    return [str(r["member_user_id"]) for r in rows]
+
+
+def get_users_by_ids(ids: list[str]) -> list[dict]:
+    _ensure()
+    if not ids:
+        return []
+    placeholders = ",".join("?" for _ in ids)
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT id, account, username, real_name, avatar, email, phone, company, title "
+            f"FROM users WHERE id IN ({placeholders})",
+            ids,
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ---------- instant messaging ----------
+
+def find_or_create_direct_conversation(user_a: str, user_b: str) -> dict:
+    _ensure()
+    now = time.time()
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT c.id FROM conversations c
+            WHERE c.type = 'direct'
+              AND (SELECT COUNT(*) FROM conversation_members m WHERE m.conversation_id = c.id) = 2
+              AND EXISTS (SELECT 1 FROM conversation_members m WHERE m.conversation_id = c.id AND m.user_id = ?)
+              AND EXISTS (SELECT 1 FROM conversation_members m WHERE m.conversation_id = c.id AND m.user_id = ?)
+            LIMIT 1
+            """,
+            (user_a, user_b),
+        ).fetchone()
+        if row:
+            cid = row["id"]
+        else:
+            cid = uuid.uuid4().hex
+            conn.execute(
+                "INSERT INTO conversations (id, type, title, org_id, created_by, created_at, updated_at) "
+                "VALUES (?, 'direct', NULL, NULL, ?, ?, ?)",
+                (cid, user_a, now, now),
+            )
+            for uid in (user_a, user_b):
+                conn.execute(
+                    "INSERT OR IGNORE INTO conversation_members "
+                    "(conversation_id, user_id, role, last_read_at, joined_at) VALUES (?, ?, 'member', 0, ?)",
+                    (cid, uid, now),
+                )
+    return get_conversation(cid) or {}
+
+
+def create_group_conversation(creator_id: str, title: str, member_ids: list[str]) -> dict:
+    _ensure()
+    now = time.time()
+    cid = uuid.uuid4().hex
+    members = list(dict.fromkeys([creator_id, *member_ids]))
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO conversations (id, type, title, org_id, created_by, created_at, updated_at) "
+            "VALUES (?, 'group', ?, NULL, ?, ?, ?)",
+            (cid, title, creator_id, now, now),
+        )
+        for uid in members:
+            role = "owner" if uid == creator_id else "member"
+            conn.execute(
+                "INSERT OR IGNORE INTO conversation_members "
+                "(conversation_id, user_id, role, last_read_at, joined_at) VALUES (?, ?, ?, 0, ?)",
+                (cid, uid, role, now),
+            )
+    return get_conversation(cid) or {}
+
+
+def get_conversation(conversation_id: str) -> dict | None:
+    _ensure()
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def is_conversation_member(conversation_id: str, user_id: str) -> bool:
+    _ensure()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM conversation_members WHERE conversation_id = ? AND user_id = ?",
+            (conversation_id, user_id),
+        ).fetchone()
+    return row is not None
+
+
+def list_conversation_member_ids(conversation_id: str) -> list[str]:
+    _ensure()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT user_id FROM conversation_members WHERE conversation_id = ?", (conversation_id,)
+        ).fetchall()
+    return [str(r["user_id"]) for r in rows]
+
+
+def list_conversation_members(conversation_id: str) -> list[dict]:
+    _ensure()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT u.id, u.account, u.username, u.real_name, u.avatar, u.email, u.company, u.title, m.role, m.joined_at
+            FROM conversation_members m
+            JOIN users u ON u.id = m.user_id
+            WHERE m.conversation_id = ?
+            ORDER BY CASE m.role WHEN 'owner' THEN 0 ELSE 1 END, m.joined_at ASC
+            """,
+            (conversation_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def add_conversation_members(conversation_id: str, member_ids: list[str]) -> None:
+    _ensure()
+    now = time.time()
+    with _connect() as conn:
+        for uid in member_ids:
+            conn.execute(
+                "INSERT OR IGNORE INTO conversation_members "
+                "(conversation_id, user_id, role, last_read_at, joined_at) VALUES (?, ?, 'member', 0, ?)",
+                (conversation_id, uid, now),
+            )
+        conn.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, conversation_id))
+
+
+def add_im_message(conversation_id: str, sender_id: str, content: str, kind: str = "text") -> dict:
+    _ensure()
+    mid = uuid.uuid4().hex
+    now = time.time()
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO im_messages (id, conversation_id, sender_id, kind, content, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (mid, conversation_id, sender_id, kind, content, now),
+        )
+        conn.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, conversation_id))
+        # The sender has implicitly read their own message.
+        conn.execute(
+            "UPDATE conversation_members SET last_read_at = ? WHERE conversation_id = ? AND user_id = ?",
+            (now, conversation_id, sender_id),
+        )
+    return {
+        "id": mid, "conversation_id": conversation_id, "sender_id": sender_id,
+        "kind": kind, "content": content, "created_at": now,
+    }
+
+
+def list_im_messages(conversation_id: str, before: float | None = None, limit: int = 50) -> list[dict]:
+    _ensure()
+    limit = max(1, min(int(limit), 200))
+    with _connect() as conn:
+        if before is None:
+            rows = conn.execute(
+                "SELECT id, conversation_id, sender_id, kind, content, created_at FROM im_messages "
+                "WHERE conversation_id = ? ORDER BY created_at DESC LIMIT ?",
+                (conversation_id, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, conversation_id, sender_id, kind, content, created_at FROM im_messages "
+                "WHERE conversation_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT ?",
+                (conversation_id, before, limit),
+            ).fetchall()
+    return [dict(r) for r in reversed(rows)]
+
+
+def mark_conversation_read(conversation_id: str, user_id: str, ts: float | None = None) -> None:
+    _ensure()
+    stamp = ts if ts is not None else time.time()
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE conversation_members SET last_read_at = ? WHERE conversation_id = ? AND user_id = ?",
+            (stamp, conversation_id, user_id),
+        )
+
+
+def list_conversations_for_user(user_id: str) -> list[dict]:
+    _ensure()
+    result: list[dict] = []
+    with _connect() as conn:
+        conv_rows = conn.execute(
+            """
+            SELECT c.id, c.type, c.title, c.created_by, c.created_at, c.updated_at, m.last_read_at
+            FROM conversation_members m
+            JOIN conversations c ON c.id = m.conversation_id
+            WHERE m.user_id = ?
+            ORDER BY c.updated_at DESC
+            """,
+            (user_id,),
+        ).fetchall()
+        for c in conv_rows:
+            cid = c["id"]
+            last = conn.execute(
+                "SELECT sender_id, kind, content, created_at FROM im_messages "
+                "WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1",
+                (cid,),
+            ).fetchone()
+            unread = conn.execute(
+                "SELECT COUNT(*) AS n FROM im_messages "
+                "WHERE conversation_id = ? AND created_at > ? AND sender_id != ?",
+                (cid, c["last_read_at"] or 0, user_id),
+            ).fetchone()["n"]
+            member_count = conn.execute(
+                "SELECT COUNT(*) AS n FROM conversation_members WHERE conversation_id = ?", (cid,)
+            ).fetchone()["n"]
+            peer = None
+            if c["type"] == "direct":
+                peer = conn.execute(
+                    """
+                    SELECT u.id, u.username, u.real_name, u.avatar
+                    FROM conversation_members mm
+                    JOIN users u ON u.id = mm.user_id
+                    WHERE mm.conversation_id = ? AND mm.user_id != ?
+                    LIMIT 1
+                    """,
+                    (cid, user_id),
+                ).fetchone()
+            result.append({
+                "id": cid,
+                "type": c["type"],
+                "title": c["title"],
+                "created_by": c["created_by"],
+                "updated_at": c["updated_at"],
+                "member_count": int(member_count),
+                "peer": dict(peer) if peer else None,
+                "last_message": dict(last) if last else None,
+                "unread": int(unread),
+            })
+    return result
+
+
 def reset_for_tests() -> None:
     global _INITIALIZED
     with _LOCK:
@@ -1312,6 +1962,14 @@ def reset_for_tests() -> None:
                 with _connect() as conn:
                     conn.executescript(
                         """
+                        DROP TABLE IF EXISTS im_messages;
+                        DROP TABLE IF EXISTS conversation_members;
+                        DROP TABLE IF EXISTS conversations;
+                        DROP TABLE IF EXISTS contact_stars;
+                        DROP TABLE IF EXISTS contact_requests;
+                        DROP TABLE IF EXISTS external_contacts;
+                        DROP TABLE IF EXISTS org_members;
+                        DROP TABLE IF EXISTS organizations;
                         DROP TABLE IF EXISTS auth_tokens;
                         DROP TABLE IF EXISTS image_history;
                         DROP TABLE IF EXISTS image_templates;
