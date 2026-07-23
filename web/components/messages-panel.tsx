@@ -336,6 +336,15 @@ function Thread({
           return (
             <div key={m.id} className={`flex items-end gap-2 ${mine ? "justify-end" : "justify-start"}`}>
               {!mine ? <MsgAvatar name={senderName} avatar={senderAvatar} /> : null}
+              {mine ? (
+                <span
+                  className={`shrink-0 whitespace-nowrap text-[10px] ${
+                    m._status === "failed" ? "text-danger" : "text-fg-subtle"
+                  }`}
+                >
+                  {statusLabel(m, isGroup, peerReadAt, t)}
+                </span>
+              ) : null}
               <div className={`max-w-[70%] flex flex-col ${mine ? "items-end" : "items-start"}`}>
                 {isGroup && !mine && m.sender_name ? (
                   <div className="mb-0.5 text-[11px] text-fg-subtle">{m.sender_name}</div>
@@ -351,15 +360,6 @@ function Thread({
                     {m.content}
                   </div>
                 )}
-                {mine ? (
-                  <div
-                    className={`mt-0.5 text-[10px] ${
-                      m._status === "failed" ? "text-danger" : "text-fg-subtle"
-                    }`}
-                  >
-                    {statusLabel(m, isGroup, peerReadAt, t)}
-                  </div>
-                ) : null}
               </div>
               {mine ? <MsgAvatar name={senderName} avatar={senderAvatar} /> : null}
             </div>
