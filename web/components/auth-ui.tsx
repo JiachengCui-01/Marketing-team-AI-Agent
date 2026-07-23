@@ -23,6 +23,7 @@ import {
   clearMarketingMemory,
   deleteMe,
   getMarketingMemory,
+  getMarketingMemoryEvidence,
   loginUser,
   lookupAvatar,
   registerUser,
@@ -30,6 +31,7 @@ import {
   setAuthToken,
   updateMe,
   updateMarketingMemorySettings,
+  type MarketingMemoryEvidenceItem,
   type MarketingMemoryProfile,
   type ProfilePayload,
   type UserProfile,
@@ -695,6 +697,9 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
   const [memoryError, setMemoryError] = useState<string | null>(null);
   const [memorySaved, setMemorySaved] = useState(false);
   const [memoryEnabled, setMemoryEnabled] = useState(true);
+  const [memoryLearned, setMemoryLearned] = useState<Partial<MarketingMemoryProfile>>({});
+  const [memoryEvidence, setMemoryEvidence] = useState<MarketingMemoryEvidenceItem[]>([]);
+  const [memoryThreshold, setMemoryThreshold] = useState(3);
   const [confirmClearMemory, setConfirmClearMemory] = useState(false);
   const languageRef = useRef<HTMLDivElement>(null);
   const themeRef = useRef<HTMLDivElement>(null);
@@ -718,6 +723,15 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
           memoryClearTitle: "清空长期记忆？",
           memoryClearBody: "清空后，当前账号已保存的企业营销画像会被删除，后续对话需要重新积累。",
           memorySaved: "已保存",
+          memoryLearnedTitle: "自动学习到的画像",
+          memoryLearnedBody: "系统从历次对话中自动沉淀的信息（只读）。手动填写的内容会覆盖这里的对应字段。",
+          memoryLearnedEmpty: "暂无自动学习到的内容，多聊几次后会自动积累。",
+          memoryEvidenceTitle: "查看识别到的线索",
+          memoryPromoted: "已采纳",
+          memoryPending: "待确认",
+          memoryExplicitTag: "明确声明",
+          memoryMentions: (n: number) => `${n} 次提及`,
+          memoryPendingHint: (n: number) => `非明确声明的信息需累计约 ${n} 次提及才会被采纳。`,
           loading: "加载中...",
           roleTitle: "角色 / 职位",
           industry: "所属行业",
@@ -750,6 +764,15 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
           memoryClearTitle: "Clear long-term memory?",
           memoryClearBody: "This deletes the saved enterprise marketing profile for this account. Future chats will rebuild it over time.",
           memorySaved: "Saved",
+          memoryLearnedTitle: "Auto-learned profile",
+          memoryLearnedBody: "Details the system captured from past chats (read-only). Anything you fill in manually overrides the matching field here.",
+          memoryLearnedEmpty: "Nothing learned yet — it builds up automatically as you chat more.",
+          memoryEvidenceTitle: "View detected signals",
+          memoryPromoted: "Applied",
+          memoryPending: "Pending",
+          memoryExplicitTag: "Stated",
+          memoryMentions: (n: number) => `${n}×`,
+          memoryPendingHint: (n: number) => `Incidental signals apply after about ${n} mentions.`,
           loading: "Loading...",
           roleTitle: "Role / title",
           industry: "Industry",
@@ -783,6 +806,13 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
     { key: "kpi_data_preferences", label: labels.kpiDataPreferences },
     { key: "other_preferences", label: labels.otherPreferences },
   ] as { key: keyof MarketingMemoryProfile; label: string }[];
+  const memoryFieldLabels = Object.fromEntries(memoryFields.map((f) => [f.key, f.label])) as Record<
+    keyof MarketingMemoryProfile,
+    string
+  >;
+  const learnedEntries = memoryFields
+    .map((f) => ({ key: f.key, label: f.label, values: (memoryLearned[f.key] ?? []) as string[] }))
+    .filter((f) => f.values.length > 0);
   const themes = [
     { id: "light", label: labels.light, preview: "theme-preview-light" },
     { id: "dark", label: labels.dark, preview: "theme-preview-dark" },
@@ -801,6 +831,7 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
         if (!cancelled) {
           setMemoryForm(memoryToForm(res.profile, locale));
           setMemoryEnabled(res.enabled);
+          setMemoryLearned(res.learned ?? {});
         }
       })
       .catch((err) => {
@@ -809,10 +840,30 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
       .finally(() => {
         if (!cancelled) setMemoryLoading(false);
       });
+    getMarketingMemoryEvidence()
+      .then((res) => {
+        if (!cancelled) {
+          setMemoryEvidence(res.evidence);
+          setMemoryThreshold(res.threshold);
+        }
+      })
+      .catch(() => {
+        /* evidence is a non-critical enhancement */
+      });
     return () => {
       cancelled = true;
     };
   }, [locale, userAccount]);
+
+  async function refreshMemoryEvidence() {
+    try {
+      const res = await getMarketingMemoryEvidence();
+      setMemoryEvidence(res.evidence);
+      setMemoryThreshold(res.threshold);
+    } catch {
+      /* non-critical */
+    }
+  }
 
   function scrollTo(ref: React.RefObject<HTMLDivElement>) {
     ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -840,7 +891,10 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
     try {
       const res = await saveMarketingMemory(formToMemory(memoryForm));
       setMemoryForm(memoryToForm(res.profile, locale));
+      setMemoryLearned(res.learned ?? {});
       setMemorySaved(true);
+      // A manual save resets the evidence ledger server-side.
+      await refreshMemoryEvidence();
     } catch (err) {
       setMemoryError(localizeError(err, locale));
     } finally {
@@ -855,6 +909,7 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
     try {
       const res = await updateMarketingMemorySettings(next);
       setMemoryEnabled(res.enabled);
+      setMemoryLearned(res.learned ?? {});
     } catch (err) {
       setMemoryEnabled(!next);
       setMemoryError(localizeError(err, locale));
@@ -865,8 +920,10 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
     setMemorySaving(true);
     setMemoryError(null);
     try {
-      await clearMarketingMemory();
+      const res = await clearMarketingMemory();
       setMemoryForm(EMPTY_MARKETING_MEMORY);
+      setMemoryLearned(res.learned ?? {});
+      setMemoryEvidence([]);
       setMemorySaved(false);
       setConfirmClearMemory(false);
     } catch (err) {
@@ -1011,6 +1068,58 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
                 </label>
               ))}
             </div>
+            {!memoryLoading ? (
+              <div className="mt-4 rounded-lg border border-border/70 bg-bg-subtle/40 p-3">
+                <p className="text-xs font-semibold text-fg-muted">{labels.memoryLearnedTitle}</p>
+                <p className="mt-0.5 text-[11px] text-fg-subtle">{labels.memoryLearnedBody}</p>
+                {learnedEntries.length === 0 ? (
+                  <p className="mt-2 text-xs text-fg-subtle">{labels.memoryLearnedEmpty}</p>
+                ) : (
+                  <div className="mt-2 space-y-1.5">
+                    {learnedEntries.map((entry) => (
+                      <div key={entry.key} className="flex flex-wrap items-center gap-1.5 text-xs">
+                        <span className="shrink-0 text-fg-subtle">{entry.label}:</span>
+                        {entry.values.map((value, idx) => (
+                          <span key={idx} className="rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent">
+                            {localizeMemoryValue(value, locale)}
+                          </span>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {memoryEvidence.length > 0 ? (
+                  <details className="mt-3">
+                    <summary className="cursor-pointer select-none text-[11px] font-medium text-fg-muted">
+                      {labels.memoryEvidenceTitle}
+                    </summary>
+                    <div className="mt-2 space-y-1">
+                      {memoryEvidence.map((item, idx) => (
+                        <div key={`${item.field}-${item.value}-${idx}`} className="flex flex-wrap items-center gap-1.5 text-[11px] text-fg-subtle">
+                          <span className="text-fg-muted">{localizeMemoryValue(item.value, locale)}</span>
+                          <span className="rounded bg-bg-subtle px-1.5 py-0.5">{memoryFieldLabels[item.field] ?? item.field}</span>
+                          <span>{labels.memoryMentions(item.count)}</span>
+                          {item.explicit ? (
+                            <span className="rounded-full bg-accent/10 px-1.5 py-0.5 font-medium text-accent">{labels.memoryExplicitTag}</span>
+                          ) : null}
+                          <span
+                            className={cn(
+                              "rounded-full px-1.5 py-0.5 font-medium",
+                              item.promoted ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+                            )}
+                          >
+                            {item.promoted ? labels.memoryPromoted : labels.memoryPending}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    {memoryEvidence.some((item) => !item.promoted) ? (
+                      <p className="mt-2 text-[11px] text-fg-subtle">{labels.memoryPendingHint(memoryThreshold)}</p>
+                    ) : null}
+                  </details>
+                ) : null}
+              </div>
+            ) : null}
             {memoryError ? <p className="mt-3 text-xs text-danger">{memoryError}</p> : null}
             <div className="mt-4 flex justify-end gap-2">
               <button

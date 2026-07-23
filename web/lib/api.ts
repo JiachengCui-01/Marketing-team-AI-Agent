@@ -154,8 +154,27 @@ export type MarketingMemoryProfile = {
 
 export type MarketingMemoryResponse = {
   profile: MarketingMemoryProfile;
+  // User-edited layer (same as `profile`), plus the auto-learned and merged views.
+  manual?: MarketingMemoryProfile;
+  learned?: MarketingMemoryProfile;
+  merged?: MarketingMemoryProfile;
   enabled: boolean;
   updated_at: number | null;
+};
+
+export type MarketingMemoryEvidenceItem = {
+  field: keyof MarketingMemoryProfile;
+  value: string;
+  count: number;
+  explicit: boolean;
+  promoted: boolean;
+  first_seen_at: number | null;
+  last_seen_at: number | null;
+};
+
+export type MarketingMemoryEvidenceResponse = {
+  evidence: MarketingMemoryEvidenceItem[];
+  threshold: number;
 };
 
 // ---------- auth ----------
@@ -255,6 +274,12 @@ export async function clearMarketingMemory(): Promise<MarketingMemoryResponse> {
     method: "DELETE",
     headers: authHeaders(),
   });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return res.json();
+}
+
+export async function getMarketingMemoryEvidence(): Promise<MarketingMemoryEvidenceResponse> {
+  const res = await fetch(`${API_BASE}/api/memory/marketing/evidence`, { headers: authHeaders() });
   if (!res.ok) throw new Error(await parseJsonError(res));
   return res.json();
 }

@@ -10,6 +10,7 @@ import json
 import re
 from typing import Any
 
+from marketing_agent import config
 from marketing_agent.conversation import Conversation
 
 from . import db
@@ -18,7 +19,13 @@ RECENT_MESSAGE_WINDOW = 12
 CONTEXT_TOKEN_BUDGET = 24000
 SUMMARY_CHAR_BUDGET = 3200
 RECENT_MESSAGE_CHAR_CAP = 5000
+# Incidental mentions must recur this many times before promotion. Explicit
+# self-declarations (see `Observation.explicit`) bypass this and promote at once.
 LONG_TERM_EVIDENCE_THRESHOLD = 3
+# How many learned values to keep per multi-valued field once promoted.
+LEARNED_MULTI_VALUE_CAP = 8
+# Max de-duped values kept per field when rendering/storing a profile.
+PROFILE_VALUE_CAP = 12
 
 MARKETING_PROFILE_FIELDS = {
     "role_title": "Role/title",
@@ -33,11 +40,16 @@ MARKETING_PROFILE_FIELDS = {
     "other_preferences": "Other long-term preferences",
 }
 
-LEGACY_PROFILE_FIELDS = {
-    "industries": "Industries",
-    "audiences": "Audiences",
-    "tones": "Tone/style",
-    "deliverables": "Common deliverables",
+# Fields that describe a single durable fact — keep only the most recent /
+# authoritative value so contradictory learned values cannot pile up.
+SINGLE_VALUE_FIELDS = {"role_title", "industry", "company_brand"}
+
+# Old profile keys still accepted on input and folded into the canonical field.
+LEGACY_PROFILE_ALIASES = {
+    "industry": "industries",
+    "target_customers": "audiences",
+    "tone_preferences": "tones",
+    "report_format_preferences": "deliverables",
 }
 
 
@@ -50,8 +62,9 @@ def build_conversation(session_id: str, user_id: str) -> Conversation | None:
 
     messages: list[dict[str, Any]] = []
     memory_blocks: list[str] = []
-    profile = db.get_user_marketing_memory(user_id)
-    profile_text = _format_profile(profile.get("profile", {}) if profile else {})
+    profile_enabled = db.get_user_memory_settings(user_id).get("long_term_enabled", True)
+    profile = merged_profile(user_id) if profile_enabled else {}
+    profile_text = _format_profile(profile)
     if profile_text:
         memory_blocks.append(profile_text)
     if summary:
@@ -65,11 +78,41 @@ def build_conversation(session_id: str, user_id: str) -> Conversation | None:
 
 
 def update_long_term_marketing_memory(user_id: str, *texts: str) -> dict | None:
+    """Record profile evidence from prompt text and return the learned profile.
+
+    Manual profile edits live in their own table and always win at injection
+    time; this only feeds the evidence ledger. The learned profile is a pure
+    function of (decayed) evidence — dropping evidence forgets the value.
+    """
     if not db.get_user_memory_settings(user_id).get("long_term_enabled", True):
         return None
-    current = (db.get_user_marketing_memory(user_id) or {}).get("profile") or {}
-    structured = _extract_structured_observations(texts)
-    observations = {
+
+    from . import memory_extraction  # local import avoids an import cycle
+
+    observations = memory_extraction.extract_observations(
+        texts, use_llm=config.memory_llm_extraction_enabled()
+    )
+    triples = [
+        (obs.field, obs.value, obs.explicit)
+        for obs in observations
+        if obs.field in MARKETING_PROFILE_FIELDS and obs.value
+    ]
+    if not triples:
+        return None
+
+    db.add_user_marketing_memory_evidence(user_id, triples)
+    db.prune_user_marketing_memory_evidence(user_id, min_count=LONG_TERM_EVIDENCE_THRESHOLD)
+    return derive_learned_profile(user_id) or None
+
+
+def heuristic_observations(texts: tuple[str, ...]) -> list[tuple[str, str, bool]]:
+    """Deterministic, offline extraction used as the LLM fallback.
+
+    Structured self-declarations ("我的产品是X" / "product is X") are marked
+    explicit; keyword/pattern hits are incidental (``explicit=False``).
+    """
+    out: list[tuple[str, str, bool]] = []
+    keyword = {
         "role_title": _extract_values(texts, _ROLE_PATTERNS),
         "industry": _extract_values(texts, _INDUSTRY_PATTERNS),
         "company_brand": _extract_values(texts, _COMPANY_PATTERNS),
@@ -79,36 +122,100 @@ def update_long_term_marketing_memory(user_id: str, *texts: str) -> dict | None:
         "tone_preferences": _extract_values(texts, _TONE_PATTERNS),
         "report_format_preferences": _extract_values(texts, _DELIVERABLE_PATTERNS),
         "kpi_data_preferences": _extract_values(texts, _KPI_PATTERNS),
-        "other_preferences": [],
     }
-    for key, values in structured.items():
-        observations[key] = _merge_list(observations.get(key), values)
-    observations = {key: values for key, values in observations.items() if values}
-    if not observations:
-        return None
+    for field, values in keyword.items():
+        for value in values:
+            out.append((field, value, False))
+    for field, values in _extract_structured_observations(texts).items():
+        for value in values:
+            out.append((field, value, True))
+    return out
 
-    evidence = db.add_user_marketing_memory_evidence(user_id, observations)
-    promoted: dict[str, list[str]] = {}
-    for row in evidence:
-        if int(row.get("count") or 0) >= LONG_TERM_EVIDENCE_THRESHOLD:
-            promoted.setdefault(str(row["field"]), []).append(str(row["value"]))
 
-    profile = {
-        "role_title": _merge_list(current.get("role_title"), promoted.get("role_title")),
-        "industry": _merge_list(current.get("industry") or current.get("industries"), promoted.get("industry")),
-        "company_brand": _merge_list(current.get("company_brand"), promoted.get("company_brand")),
-        "products": _merge_list(current.get("products"), promoted.get("products")),
-        "target_customers": _merge_list(current.get("target_customers") or current.get("audiences"), promoted.get("target_customers")),
-        "channels": _merge_list(current.get("channels"), promoted.get("channels")),
-        "tone_preferences": _merge_list(current.get("tone_preferences") or current.get("tones"), promoted.get("tone_preferences")),
-        "report_format_preferences": _merge_list(current.get("report_format_preferences") or current.get("deliverables"), promoted.get("report_format_preferences")),
-        "kpi_data_preferences": _merge_list(current.get("kpi_data_preferences"), promoted.get("kpi_data_preferences")),
-        "other_preferences": _merge_list(current.get("other_preferences"), promoted.get("other_preferences")),
-    }
-    profile = {key: value for key, value in profile.items() if value}
-    if not profile or profile == current:
-        return None
-    return db.upsert_user_marketing_memory(user_id, profile)
+def derive_learned_profile(user_id: str) -> dict[str, list[str]]:
+    """Compute the auto-learned profile from the current evidence ledger.
+
+    A value is promoted when it is explicit or has reached the evidence
+    threshold. Single-valued fields keep only the top value (explicit and
+    recency win) so contradictory learned facts cannot accumulate; multi-valued
+    fields keep the most recent/strongest values up to a cap.
+    """
+    by_field: dict[str, list[dict]] = {}
+    for row in db.list_user_marketing_memory_evidence(user_id):
+        promoted = bool(row.get("explicit")) or int(row.get("count") or 0) >= LONG_TERM_EVIDENCE_THRESHOLD
+        if not promoted:
+            continue
+        field = str(row.get("field") or "")
+        if field in MARKETING_PROFILE_FIELDS:
+            by_field.setdefault(field, []).append(row)
+
+    profile: dict[str, list[str]] = {}
+    for field, rows in by_field.items():
+        rows.sort(
+            key=lambda r: (
+                1 if bool(r.get("explicit")) else 0,
+                float(r.get("last_seen_at") or 0.0),
+                int(r.get("count") or 0),
+            ),
+            reverse=True,
+        )
+        cap = 1 if field in SINGLE_VALUE_FIELDS else LEARNED_MULTI_VALUE_CAP
+        values: list[str] = []
+        for row in rows:
+            value = str(row.get("value") or "").strip()
+            if value and value not in values:
+                values.append(value)
+            if len(values) >= cap:
+                break
+        if values:
+            profile[field] = values
+    return profile
+
+
+def merged_profile(user_id: str) -> dict[str, list[str]]:
+    """Profile injected into model turns: manual edits override learned values."""
+    manual = canonicalize_profile((db.get_user_marketing_memory(user_id) or {}).get("profile") or {})
+    learned = derive_learned_profile(user_id)
+    out: dict[str, list[str]] = {}
+    for field in MARKETING_PROFILE_FIELDS:
+        values = manual.get(field) or learned.get(field)
+        if values:
+            out[field] = values
+    return out
+
+
+def split_values(value: Any) -> list[str]:
+    """Split user-entered field input (list or comma/newline string) into a list."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        raw = value
+    else:
+        raw = str(value).replace("，", ",").replace("\n", ",").split(",")
+    out: list[str] = []
+    for item in raw:
+        text = str(item).strip()
+        if text and text not in out:
+            out.append(text)
+        if len(out) >= PROFILE_VALUE_CAP:
+            break
+    return out
+
+
+def canonicalize_profile(profile: dict | None) -> dict[str, list[str]]:
+    """Normalize a profile to canonical fields, folding legacy aliases in."""
+    profile = profile or {}
+    normalized: dict[str, list[str]] = {}
+    for field in MARKETING_PROFILE_FIELDS:
+        values = split_values(profile.get(field))
+        alias = LEGACY_PROFILE_ALIASES.get(field)
+        if alias:
+            for item in split_values(profile.get(alias)):
+                if item not in values:
+                    values.append(item)
+        if values:
+            normalized[field] = values[:PROFILE_VALUE_CAP]
+    return normalized
 
 
 def _summary_for_rows(session_id: str, user_id: str, rows: list[dict]) -> str:
@@ -209,14 +316,11 @@ def _memory_block(title: str, body: str) -> str:
 
 
 def _format_profile(profile: dict) -> str:
+    profile = canonicalize_profile(profile)
     if not profile:
         return ""
     lines = []
     for key, label in MARKETING_PROFILE_FIELDS.items():
-        values = profile.get(key)
-        if values:
-            lines.append(f"- {label}: {', '.join(_as_list(values)[:8])}")
-    for key, label in LEGACY_PROFILE_FIELDS.items():
         values = profile.get(key)
         if values:
             lines.append(f"- {label}: {', '.join(_as_list(values)[:8])}")

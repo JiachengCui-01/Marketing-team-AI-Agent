@@ -8,7 +8,7 @@ from unittest import mock
 
 from fastapi.testclient import TestClient
 
-from server import db, sessions, uploads
+from server import db, memory, sessions, uploads
 from server.main import app
 
 
@@ -16,6 +16,8 @@ class RouteTests(unittest.TestCase):
     def setUp(self) -> None:
         sessions.reset_for_tests()
         os.environ["ANTHROPIC_API_KEY"] = "test-key"
+        # Deterministic heuristic extraction; never call the model in tests.
+        os.environ["MARKETING_AGENT_MEMORY_LLM"] = "0"
         self.upload_tmp = tempfile.TemporaryDirectory()
         self.old_upload_dir = uploads.UPLOAD_DIR
         uploads.UPLOAD_DIR = Path(self.upload_tmp.name)
@@ -147,6 +149,18 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(body["profile"]["industry"], ["B2B SaaS"])
         self.assertEqual(body["profile"]["channels"], ["LinkedIn", "Email"])
 
+        # A manual save is authoritative and must reset accumulated evidence so
+        # edited-away values cannot immediately re-promote.
+        user_id = db.get_user_by_account("alice@example.com")["id"]
+        db.add_user_marketing_memory_evidence(user_id, [("channels", "LinkedIn", False)])
+        self.assertTrue(db.list_user_marketing_memory_evidence(user_id))
+        self.client.put(
+            "/api/memory/marketing",
+            headers=self.headers,
+            json={"profile": {"industry": ["B2B SaaS"]}},
+        )
+        self.assertEqual(db.list_user_marketing_memory_evidence(user_id), [])
+
         other_headers = self._register("memory-other@example.com")
         other = self.client.get("/api/memory/marketing", headers=other_headers)
         self.assertEqual(other.status_code, 200, other.text)
@@ -163,6 +177,26 @@ class RouteTests(unittest.TestCase):
         loaded = self.client.get("/api/memory/marketing", headers=self.headers)
         self.assertEqual(loaded.status_code, 200, loaded.text)
         self.assertFalse(loaded.json()["enabled"])
+
+    def test_marketing_memory_evidence_endpoint(self) -> None:
+        user_id = db.get_user_by_account("alice@example.com")["id"]
+        db.add_user_marketing_memory_evidence(
+            user_id,
+            [("channels", "LinkedIn", False), ("products", "牙科诊所预约系统", True)],
+        )
+
+        response = self.client.get("/api/memory/marketing/evidence", headers=self.headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["threshold"], memory.LONG_TERM_EVIDENCE_THRESHOLD)
+        by_value = {item["value"]: item for item in body["evidence"]}
+        # Explicit self-declaration is promoted immediately; incidental is not.
+        self.assertTrue(by_value["牙科诊所预约系统"]["promoted"])
+        self.assertTrue(by_value["牙科诊所预约系统"]["explicit"])
+        self.assertFalse(by_value["LinkedIn"]["promoted"])
+        # And the learned profile reflects the promoted value.
+        learned = self.client.get("/api/memory/marketing", headers=self.headers).json()["learned"]
+        self.assertIn("牙科诊所预约系统", learned["products"])
 
     def test_session_create_delete(self) -> None:
         created = self.client.post("/api/sessions", headers=self.headers)

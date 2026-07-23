@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-import os
+import logging
 import time
 from typing import AsyncIterator
 from urllib.parse import quote
@@ -18,16 +18,42 @@ from marketing_agent.orchestrator import run_orchestrator
 from marketing_agent.tools import image_gen
 from marketing_agent.tools.pdf_tool import generate_pdf
 
-from . import auth, db, image_processing, image_serve, marketing_skills, memory, news, sessions, uploads
+from . import auth, db, image_processing, image_serve, llm, marketing_skills, memory, news, sessions, uploads
 from .streaming import orchestrator_event_stream, to_sse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
 
+# Keep strong references to fire-and-forget background tasks so they are not
+# garbage-collected mid-flight.
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
+
 
 def _client() -> anthropic.Anthropic:
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    client = llm.get_client()
+    if client is None:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured on server.")
-    return anthropic.Anthropic()
+    return client
+
+
+def _schedule_memory_update(user_id: str, prompt: str) -> None:
+    """Learn long-term memory off the request path so it never adds latency."""
+
+    async def _run() -> None:
+        try:
+            await asyncio.to_thread(memory.update_long_term_marketing_memory, user_id, prompt)
+        except Exception:  # noqa: BLE001
+            logger.exception("background long-term memory update failed")
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        memory.update_long_term_marketing_memory(user_id, prompt)
+        return
+    task = loop.create_task(_run())
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
 
 
 @router.get("/health")
@@ -119,47 +145,35 @@ def avatar_lookup(account: str) -> dict:
 
 # ---------- memory ----------
 
-def _memory_values(value) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        raw = value
-    else:
-        raw = str(value).replace("，", ",").replace("\n", ",").split(",")
-    out: list[str] = []
-    for item in raw:
-        text = str(item).strip()
-        if text and text not in out:
-            out.append(text)
-        if len(out) >= 12:
-            break
-    return out
+def _full_profile(profile: dict) -> dict:
+    """Ensure every canonical field is present (empty list if unset)."""
+    return {field: list(profile.get(field, [])) for field in memory.MARKETING_PROFILE_FIELDS}
 
 
-def _normalize_marketing_profile(profile: dict | None) -> dict:
-    profile = profile or {}
-    normalized: dict[str, list[str]] = {}
-    aliases = {
-        "industry": ["industries"],
-        "target_customers": ["audiences"],
-        "tone_preferences": ["tones"],
-        "report_format_preferences": ["deliverables"],
+def _marketing_memory_payload(user_id: str, updated_at: float | None) -> dict:
+    """Standard response: manual (editable), learned (auto), and merged view.
+
+    ``profile`` mirrors ``manual`` for backward compatibility with the editable
+    settings UI; ``merged`` is what actually gets injected into model turns.
+    All views expose every canonical field so the UI can render consistently.
+    """
+    manual = _full_profile(memory.canonicalize_profile((db.get_user_marketing_memory(user_id) or {}).get("profile") or {}))
+    settings = db.get_user_memory_settings(user_id)
+    return {
+        "profile": manual,
+        "manual": manual,
+        "learned": _full_profile(memory.derive_learned_profile(user_id)),
+        "merged": _full_profile(memory.merged_profile(user_id)),
+        "enabled": settings["long_term_enabled"],
+        "updated_at": updated_at,
     }
-    for key in memory.MARKETING_PROFILE_FIELDS:
-        values = _memory_values(profile.get(key))
-        for alias in aliases.get(key, []):
-            values = [*values, *[item for item in _memory_values(profile.get(alias)) if item not in values]]
-        normalized[key] = values
-    return normalized
 
 
 @router.get("/memory/marketing")
 def get_marketing_memory(request: Request) -> dict:
     user = auth.require_user(request)
     rec = db.get_user_marketing_memory(user["id"])
-    settings = db.get_user_memory_settings(user["id"])
-    profile = _normalize_marketing_profile((rec or {}).get("profile") or {})
-    return {"profile": profile, "enabled": settings["long_term_enabled"], "updated_at": (rec or {}).get("updated_at")}
+    return _marketing_memory_payload(user["id"], (rec or {}).get("updated_at"))
 
 
 @router.put("/memory/marketing")
@@ -168,28 +182,51 @@ def save_marketing_memory(request: Request, payload: dict = Body(...)) -> dict:
     if "enabled" in payload:
         db.set_user_memory_enabled(user["id"], bool(payload.get("enabled")))
     raw_profile = payload.get("profile") if isinstance(payload.get("profile"), dict) else payload
-    profile = _normalize_marketing_profile(raw_profile)
-    profile = {key: value for key, value in profile.items() if value}
+    profile = memory.canonicalize_profile(raw_profile)
     rec = db.upsert_user_marketing_memory(user["id"], profile)
-    settings = db.get_user_memory_settings(user["id"])
-    return {"profile": _normalize_marketing_profile(rec["profile"]), "enabled": settings["long_term_enabled"], "updated_at": rec["updated_at"]}
+    # Manual edits are authoritative: clear accumulated evidence so removed values
+    # cannot immediately re-promote and future promotion recounts from scratch.
+    db.delete_user_marketing_memory_evidence(user["id"])
+    return _marketing_memory_payload(user["id"], rec["updated_at"])
 
 
 @router.patch("/memory/marketing")
 def update_marketing_memory_settings(request: Request, payload: dict = Body(...)) -> dict:
     user = auth.require_user(request)
-    enabled = bool(payload.get("enabled"))
-    db.set_user_memory_enabled(user["id"], enabled)
+    db.set_user_memory_enabled(user["id"], bool(payload.get("enabled")))
     rec = db.get_user_marketing_memory(user["id"])
-    return {"profile": _normalize_marketing_profile((rec or {}).get("profile") or {}), "enabled": enabled, "updated_at": (rec or {}).get("updated_at")}
+    return _marketing_memory_payload(user["id"], (rec or {}).get("updated_at"))
 
 
 @router.delete("/memory/marketing")
 def clear_marketing_memory(request: Request) -> dict:
     user = auth.require_user(request)
     db.delete_user_marketing_memory(user["id"])
-    settings = db.get_user_memory_settings(user["id"])
-    return {"profile": _normalize_marketing_profile({}), "enabled": settings["long_term_enabled"], "updated_at": None}
+    # Also drop evidence so "clear" truly rebuilds from scratch rather than
+    # re-promoting from retained counts.
+    db.delete_user_marketing_memory_evidence(user["id"])
+    return _marketing_memory_payload(user["id"], None)
+
+
+@router.get("/memory/marketing/evidence")
+def get_marketing_memory_evidence(request: Request) -> dict:
+    """Explainability: what the system has observed and whether it's promoted."""
+    user = auth.require_user(request)
+    threshold = memory.LONG_TERM_EVIDENCE_THRESHOLD
+    items = []
+    for row in db.list_user_marketing_memory_evidence(user["id"]):
+        explicit = bool(row.get("explicit"))
+        count = int(row.get("count") or 0)
+        items.append({
+            "field": row.get("field"),
+            "value": row.get("value"),
+            "count": count,
+            "explicit": explicit,
+            "promoted": explicit or count >= threshold,
+            "first_seen_at": row.get("first_seen_at"),
+            "last_seen_at": row.get("last_seen_at"),
+        })
+    return {"evidence": items, "threshold": threshold}
 
 
 # ---------- news ----------
@@ -974,7 +1011,8 @@ def _persist_user_prompt(user_id: str, session_id: str, prompt: str) -> None:
     if not last or last["role"] != "user" or last["content"] != prompt:
         db.add_message(session_id, "user", prompt)
     db.update_session(session_id, user_id=user_id, name=_derive_name(session_id, prompt), touch=True)
-    memory.update_long_term_marketing_memory(user_id, prompt)
+    # Long-term memory learning runs in the background (see _schedule_memory_update)
+    # so LLM extraction never delays the model response.
 
 
 def _pdf_sections_from_markdown(text: str, output_language: str = "en") -> list[dict]:
@@ -1118,6 +1156,7 @@ async def stream_session(
     output_language = _output_language_for_prompt(prompt)
     user_message = _build_user_message(user["id"], prompt, file_ids, csv_id, selected_skills)
     _persist_user_prompt(user["id"], session_id, prompt)
+    _schedule_memory_update(user["id"], prompt)
 
     # Build user_message — string if no images, else list-of-blocks.
     client = _client()
@@ -1159,6 +1198,7 @@ async def complete_session(request: Request, session_id: str, payload: dict = Bo
         selected_skills,
     )
     _persist_user_prompt(user["id"], session_id, prompt)
+    _schedule_memory_update(user["id"], prompt)
     client = _client()
     events: list[dict] = []
     final_text = ""

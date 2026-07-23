@@ -1,9 +1,27 @@
 """Central configuration."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 MODEL_ID = "claude-opus-4-8"
+
+# Cheap, fast model used to extract long-term marketing profile facts from
+# prompts. Kept separate from the orchestrator/sub-agent model so memory
+# learning never pays Opus rates.
+MEMORY_EXTRACTION_MODEL = "claude-haiku-4-5-20251001"
+
+_FALSEY = {"0", "false", "no", "off", ""}
+
+
+def memory_llm_extraction_enabled() -> bool:
+    """Whether long-term memory should use LLM extraction (default: on).
+
+    Set ``MARKETING_AGENT_MEMORY_LLM=0`` to force the deterministic heuristic
+    fallback (used by tests and offline runs). LLM extraction also silently
+    degrades to heuristics whenever no API key/client is available.
+    """
+    return os.environ.get("MARKETING_AGENT_MEMORY_LLM", "1").strip().lower() not in _FALSEY
 
 # Max output token caps. Streaming is enabled in the loop, so these can be generous.
 ORCHESTRATOR_MAX_TOKENS = 16000

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import itertools
+import os
 import unittest
+from unittest import mock
 
 from server import db, sessions
 from server import auth
@@ -9,6 +12,8 @@ from server import memory
 
 class SessionStoreTests(unittest.TestCase):
     def setUp(self) -> None:
+        # Force the deterministic heuristic extractor so tests never hit the API.
+        os.environ["MARKETING_AGENT_MEMORY_LLM"] = "0"
         sessions.reset_for_tests()
 
     def tearDown(self) -> None:
@@ -89,13 +94,16 @@ class SessionStoreTests(unittest.TestCase):
 
         memory.update_long_term_marketing_memory(user_id, prompt)
         memory.update_long_term_marketing_memory(user_id, prompt)
+        # Incidental (keyword) evidence is not promoted before the threshold.
+        self.assertEqual(memory.derive_learned_profile(user_id).get("channels", []), [])
+        # Learning never writes the manual layer.
         self.assertIsNone(db.get_user_marketing_memory(user_id))
 
         memory.update_long_term_marketing_memory(user_id, prompt)
-        stored = db.get_user_marketing_memory(user_id)
-        self.assertIsNotNone(stored)
-        assert stored is not None
-        self.assertIn("Little Red Book", stored["profile"]["channels"])
+        learned = memory.derive_learned_profile(user_id)
+        self.assertIn("Little Red Book", learned["channels"])
+        # Manual layer stays empty even after promotion.
+        self.assertIsNone(db.get_user_marketing_memory(user_id))
 
         conv = sessions.prepare_for_turn(session_id, user_id)
         assert conv is not None
@@ -121,13 +129,10 @@ class SessionStoreTests(unittest.TestCase):
             "报告格式偏好是结论先行。KPI是曝光和转化率。其他偏好是少用夸张表达。"
         )
 
-        for _ in range(memory.LONG_TERM_EVIDENCE_THRESHOLD):
-            memory.update_long_term_marketing_memory(user_id, prompt)
+        # A single mention is enough: structured self-declarations are explicit.
+        memory.update_long_term_marketing_memory(user_id, prompt)
 
-        stored = db.get_user_marketing_memory(user_id)
-        self.assertIsNotNone(stored)
-        assert stored is not None
-        profile = stored["profile"]
+        profile = memory.derive_learned_profile(user_id)
         self.assertIn("增长负责人", profile["role_title"])
         self.assertIn("消费电子", profile["industry"])
         self.assertIn("星环科技", profile["company_brand"])
@@ -138,6 +143,78 @@ class SessionStoreTests(unittest.TestCase):
         self.assertIn("结论先行", profile["report_format_preferences"])
         self.assertIn("曝光和转化率", profile["kpi_data_preferences"])
         self.assertIn("少用夸张表达", profile["other_preferences"])
+
+    def test_disabled_memory_not_injected(self) -> None:
+        user_id = self.create_user()
+        session_id = sessions.create(user_id)
+        db.upsert_user_marketing_memory(user_id, {"channels": ["Little Red Book"]})
+
+        # Disabling should stop injecting the existing profile, not delete it.
+        db.set_user_memory_enabled(user_id, False)
+        conv = sessions.prepare_for_turn(session_id, user_id)
+        assert conv is not None
+        serialized = "\n".join(str(m["content"]) for m in conv.messages)
+        self.assertNotIn("Long-term enterprise marketing profile", serialized)
+        self.assertIsNotNone(db.get_user_marketing_memory(user_id))
+
+        # Re-enabling restores injection from the retained profile.
+        db.set_user_memory_enabled(user_id, True)
+        conv = sessions.prepare_for_turn(session_id, user_id)
+        assert conv is not None
+        self.assertIn("Long-term enterprise marketing profile", conv.messages[0]["content"])
+        self.assertIn("Little Red Book", conv.messages[0]["content"])
+
+    def test_manual_clear_also_clears_evidence(self) -> None:
+        user_id = self.create_user()
+        prompt = "write XHS marketing copy for a SaaS product"
+
+        for _ in range(memory.LONG_TERM_EVIDENCE_THRESHOLD):
+            memory.update_long_term_marketing_memory(user_id, prompt)
+        self.assertIn("Little Red Book", memory.derive_learned_profile(user_id).get("channels", []))
+        self.assertTrue(db.list_user_marketing_memory_evidence(user_id))
+
+        db.delete_user_marketing_memory(user_id)
+        db.delete_user_marketing_memory_evidence(user_id)
+        self.assertEqual(db.list_user_marketing_memory_evidence(user_id), [])
+        # Forgetting the evidence forgets the learned value.
+        self.assertEqual(memory.derive_learned_profile(user_id), {})
+
+        # One further mention must not immediately re-promote from stale evidence.
+        memory.update_long_term_marketing_memory(user_id, prompt)
+        self.assertEqual(memory.derive_learned_profile(user_id).get("channels", []), [])
+
+    def test_explicit_declaration_promotes_immediately(self) -> None:
+        user_id = self.create_user()
+        # A single explicit self-declaration is authoritative right away.
+        memory.update_long_term_marketing_memory(user_id, "我的产品是牙科诊所预约系统。")
+        learned = memory.derive_learned_profile(user_id)
+        self.assertIn("牙科诊所预约系统", learned.get("products", []))
+
+    def test_single_valued_field_keeps_most_recent(self) -> None:
+        user_id = self.create_user()
+        # Deterministic, strictly-increasing clock so recency ordering is stable.
+        clock = itertools.count(1000.0, 10.0)
+        with mock.patch("server.db.time.time", lambda: next(clock)):
+            memory.update_long_term_marketing_memory(user_id, "我的职位是市场经理。")
+            memory.update_long_term_marketing_memory(user_id, "我的职位是增长负责人。")
+        role = memory.derive_learned_profile(user_id).get("role_title", [])
+        # Single-valued fields do not accumulate contradictory values.
+        self.assertEqual(len(role), 1)
+        self.assertEqual(role[0], "增长负责人")
+
+    def test_manual_profile_overrides_learned(self) -> None:
+        user_id = self.create_user()
+        session_id = sessions.create(user_id)
+        memory.update_long_term_marketing_memory(user_id, "我的产品是牙科诊所预约系统。")
+        db.upsert_user_marketing_memory(user_id, {"products": ["企业级 CRM"]})
+
+        merged = memory.merged_profile(user_id)
+        self.assertEqual(merged["products"], ["企业级 CRM"])
+
+        conv = sessions.prepare_for_turn(session_id, user_id)
+        assert conv is not None
+        self.assertIn("企业级 CRM", conv.messages[0]["content"])
+        self.assertNotIn("牙科诊所预约系统", conv.messages[0]["content"])
 
     def test_memory_block_keeps_current_request_priority(self) -> None:
         user_id = self.create_user()

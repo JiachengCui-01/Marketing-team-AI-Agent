@@ -10,6 +10,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from collections.abc import Iterable
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
@@ -119,6 +120,7 @@ CREATE TABLE IF NOT EXISTS user_marketing_memory_evidence (
     field TEXT NOT NULL,
     value TEXT NOT NULL,
     count INTEGER NOT NULL,
+    explicit INTEGER NOT NULL DEFAULT 0,
     first_seen_at REAL NOT NULL,
     last_seen_at REAL NOT NULL,
     PRIMARY KEY (user_id, field, value),
@@ -228,6 +230,7 @@ def init() -> None:
             _migrate_news_config_cancelled_at(conn)
             _migrate_news_summary_sources(conn)
             _migrate_image_template_style(conn)
+            _migrate_evidence_explicit(conn)
             _seed_image_templates(conn)
         _INITIALIZED = True
 
@@ -269,6 +272,13 @@ def _migrate_news_summary_sources(conn: sqlite3.Connection) -> None:
 def _migrate_image_template_style(conn: sqlite3.Connection) -> None:
     if "style" not in _table_columns(conn, "image_templates"):
         conn.execute("ALTER TABLE image_templates ADD COLUMN style TEXT")
+
+
+def _migrate_evidence_explicit(conn: sqlite3.Connection) -> None:
+    if "explicit" not in _table_columns(conn, "user_marketing_memory_evidence"):
+        conn.execute(
+            "ALTER TABLE user_marketing_memory_evidence ADD COLUMN explicit INTEGER NOT NULL DEFAULT 0"
+        )
 
 
 def _drop_anonymous_tables_if_needed(conn: sqlite3.Connection) -> None:
@@ -610,6 +620,9 @@ def upsert_session_memory_summary(
     }
 
 
+MARKETING_PROFILE_SCHEMA_VERSION = 1
+
+
 def get_user_marketing_memory(user_id: str) -> dict | None:
     _ensure()
     with _connect() as conn:
@@ -621,16 +634,22 @@ def get_user_marketing_memory(user_id: str) -> dict | None:
         return None
     data = dict(row)
     try:
-        data["profile"] = json.loads(data.get("profile_json") or "{}")
+        raw = json.loads(data.get("profile_json") or "{}")
     except (ValueError, TypeError):
-        data["profile"] = {}
+        raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    # Older rows predate schema versioning — treat a missing marker as v1.
+    data["schema_version"] = int(raw.pop("schema_version", 1) or 1)
+    data["profile"] = raw
     return data
 
 
 def upsert_user_marketing_memory(user_id: str, profile: dict) -> dict:
     _ensure()
     now = time.time()
-    payload = json.dumps(profile, ensure_ascii=False, sort_keys=True)
+    stored = {**(profile or {}), "schema_version": MARKETING_PROFILE_SCHEMA_VERSION}
+    payload = json.dumps(stored, ensure_ascii=False, sort_keys=True)
     with _connect() as conn:
         conn.execute(
             """
@@ -650,6 +669,15 @@ def delete_user_marketing_memory(user_id: str) -> bool:
     with _connect() as conn:
         cur = conn.execute("DELETE FROM user_marketing_memory WHERE user_id = ?", (user_id,))
         return cur.rowcount > 0
+
+
+def delete_user_marketing_memory_evidence(user_id: str) -> int:
+    _ensure()
+    with _connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM user_marketing_memory_evidence WHERE user_id = ?", (user_id,)
+        )
+        return cur.rowcount
 
 
 def get_user_memory_settings(user_id: str) -> dict:
@@ -687,34 +715,92 @@ def list_user_marketing_memory_evidence(user_id: str) -> list[dict]:
     _ensure()
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT user_id, field, value, count, first_seen_at, last_seen_at "
+            "SELECT user_id, field, value, count, explicit, first_seen_at, last_seen_at "
             "FROM user_marketing_memory_evidence WHERE user_id = ? ORDER BY field ASC, count DESC, last_seen_at DESC",
             (user_id,),
         ).fetchall()
-    return [dict(row) for row in rows]
+    out: list[dict] = []
+    for row in rows:
+        data = dict(row)
+        data["explicit"] = bool(data.get("explicit"))
+        out.append(data)
+    return out
 
 
-def add_user_marketing_memory_evidence(user_id: str, observations: dict[str, list[str]]) -> list[dict]:
+def add_user_marketing_memory_evidence(
+    user_id: str, observations: Iterable[tuple[str, str, bool]]
+) -> list[dict]:
+    """Record profile observations as evidence.
+
+    ``observations`` is an iterable of ``(field, value, explicit)`` triples.
+    ``explicit`` marks a direct self-declaration (e.g. "our product is X"),
+    which callers may promote at a lower threshold. Repeated observations
+    increment the count and can only raise ``explicit`` (never lower it).
+    """
     _ensure()
     now = time.time()
     with _connect() as conn:
-        for field, values in observations.items():
-            for raw in values:
-                value = str(raw).strip()
-                if not value:
-                    continue
-                conn.execute(
-                    """
-                    INSERT INTO user_marketing_memory_evidence
-                        (user_id, field, value, count, first_seen_at, last_seen_at)
-                    VALUES (?, ?, ?, 1, ?, ?)
-                    ON CONFLICT(user_id, field, value) DO UPDATE SET
-                        count = count + 1,
-                        last_seen_at = excluded.last_seen_at
-                    """,
-                    (user_id, field, value, now, now),
-                )
+        for field, raw, explicit in observations:
+            value = str(raw).strip()
+            if not field or not value:
+                continue
+            conn.execute(
+                """
+                INSERT INTO user_marketing_memory_evidence
+                    (user_id, field, value, count, explicit, first_seen_at, last_seen_at)
+                VALUES (?, ?, ?, 1, ?, ?, ?)
+                ON CONFLICT(user_id, field, value) DO UPDATE SET
+                    count = count + 1,
+                    explicit = MAX(explicit, excluded.explicit),
+                    last_seen_at = excluded.last_seen_at
+                """,
+                (user_id, str(field), value, 1 if explicit else 0, now, now),
+            )
     return list_user_marketing_memory_evidence(user_id)
+
+
+def prune_user_marketing_memory_evidence(
+    user_id: str,
+    *,
+    max_age_days: float = 90.0,
+    max_rows_per_field: int = 40,
+    min_count: int = 3,
+) -> int:
+    """Bound the evidence ledger so it cannot grow without limit.
+
+    Drops weak, non-explicit, stale rows (below ``min_count`` and older than
+    ``max_age_days``), then caps each field to its ``max_rows_per_field``
+    strongest/most-recent rows. Returns the number of rows deleted.
+    """
+    _ensure()
+    cutoff = time.time() - max_age_days * 86400
+    deleted = 0
+    with _connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM user_marketing_memory_evidence "
+            "WHERE user_id = ? AND explicit = 0 AND count < ? AND last_seen_at < ?",
+            (user_id, min_count, cutoff),
+        )
+        deleted += cur.rowcount or 0
+        rows = conn.execute(
+            "SELECT field, value FROM user_marketing_memory_evidence WHERE user_id = ? "
+            "ORDER BY field ASC, count DESC, last_seen_at DESC",
+            (user_id,),
+        ).fetchall()
+        per_field: dict[str, int] = {}
+        overflow: list[tuple[str, str]] = []
+        for row in rows:
+            field = str(row["field"])
+            per_field[field] = per_field.get(field, 0) + 1
+            if per_field[field] > max_rows_per_field:
+                overflow.append((field, str(row["value"])))
+        for field, value in overflow:
+            cur = conn.execute(
+                "DELETE FROM user_marketing_memory_evidence WHERE user_id = ? AND field = ? AND value = ?",
+                (user_id, field, value),
+            )
+            deleted += cur.rowcount or 0
+    return deleted
 
 
 # ---------- artifacts ----------
