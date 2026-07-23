@@ -994,6 +994,7 @@ export type Conversation = {
   updated_at: number;
   member_count: number;
   peer: ImPeer | null;
+  peer_last_read_at?: number | null;
   last_message: ImLastMessage | null;
   unread: number;
 };
@@ -1053,6 +1054,28 @@ export async function sendConversationMessage(id: string, content: string): Prom
   });
   if (!res.ok) throw new Error(await parseJsonError(res));
   return (await res.json()).message;
+}
+
+export async function sendConversationFile(id: string, file: UploadResponse): Promise<ImMessage> {
+  const res = await fetch(`${API_BASE}/api/conversations/${id}/messages`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      file: {
+        file_id: file.file_id,
+        name: file.original_name,
+        size: file.size,
+        mime: file.mime,
+        ext: file.ext,
+      },
+    }),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).message;
+}
+
+export function conversationFileDownloadUrl(conversationId: string, fileId: string): string {
+  return withToken(`${API_BASE}/api/conversations/${conversationId}/files/${fileId}/download`);
 }
 
 export async function markConversationRead(id: string): Promise<void> {

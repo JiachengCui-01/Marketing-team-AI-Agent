@@ -1,11 +1,26 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, MessageCircle, Send, UsersRound, Loader2 } from "lucide-react";
-import { listOrgMembers, type OrgMember, type Conversation } from "@/lib/api";
+import {
+  ArrowLeft,
+  MessageCircle,
+  Paperclip,
+  Send,
+  UsersRound,
+  Loader2,
+  FileText,
+  Download,
+} from "lucide-react";
+import {
+  conversationFileDownloadUrl,
+  listOrgMembers,
+  type OrgMember,
+  type Conversation,
+} from "@/lib/api";
 import { localizeError, useI18n } from "@/lib/i18n";
+import type { I18nText } from "@/lib/i18n";
 import { Modal } from "@/components/modal";
-import type { ImStore } from "@/lib/im-store";
+import type { ClientImMessage, ImStore } from "@/lib/im-store";
 
 function initial(name: string | null | undefined): string {
   const s = (name || "").trim();
@@ -15,6 +30,33 @@ function initial(name: string | null | undefined): string {
 function conversationName(c: Conversation): string {
   if (c.type === "group") return c.title || "群聊";
   return c.peer?.username || c.peer?.real_name || "对话";
+}
+
+type FileMeta = { file_id?: string; name?: string; size?: number; mime?: string; ext?: string };
+
+function parseFileMeta(content: string): FileMeta {
+  try {
+    return JSON.parse(content) as FileMeta;
+  } catch {
+    return {};
+  }
+}
+
+function formatBytes(n?: number): string {
+  if (!n || n <= 0) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function lastPreview(c: Conversation, t: I18nText): string {
+  const m = c.last_message;
+  if (!m) return "";
+  if (m.kind === "file") {
+    const meta = parseFileMeta(m.content);
+    return `${t.fileLabel} ${meta.name ?? ""}`.trim();
+  }
+  return m.content;
 }
 
 function formatTime(ts: number): string {
@@ -79,9 +121,18 @@ export function MessagesPanel({
                   c.id === im.activeId ? "bg-accent/15" : "hover:bg-bg-elevated"
                 }`}
               >
-                <span className="w-9 h-9 rounded-full bg-accent/15 text-accent flex items-center justify-center text-sm font-medium shrink-0">
-                  {c.type === "group" ? <UsersRound size={16} /> : initial(conversationName(c))}
-                </span>
+                {c.type === "direct" && c.peer?.avatar ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={c.peer.avatar}
+                    alt=""
+                    className="w-9 h-9 rounded-full object-cover shrink-0"
+                  />
+                ) : (
+                  <span className="w-9 h-9 rounded-full bg-accent/15 text-accent flex items-center justify-center text-sm font-medium shrink-0">
+                    {c.type === "group" ? <UsersRound size={16} /> : initial(conversationName(c))}
+                  </span>
+                )}
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-2">
                     <span className="truncate text-sm font-medium flex-1">{conversationName(c)}</span>
@@ -91,9 +142,7 @@ export function MessagesPanel({
                       </span>
                     ) : null}
                   </span>
-                  <span className="block truncate text-xs text-fg-subtle">
-                    {c.last_message?.content ?? ""}
-                  </span>
+                  <span className="block truncate text-xs text-fg-subtle">{lastPreview(c, t)}</span>
                 </span>
                 {c.unread > 0 ? (
                   <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-danger text-white text-[10px] font-semibold flex items-center justify-center shrink-0">
@@ -149,6 +198,79 @@ function MsgAvatar({ name, avatar }: { name?: string | null; avatar?: string | n
   );
 }
 
+function statusLabel(
+  m: ClientImMessage,
+  isGroup: boolean,
+  peerReadAt: number | null,
+  t: I18nText,
+): string {
+  if (m._status === "sending") return t.msgSending;
+  if (m._status === "failed") return t.msgFailed;
+  if (!isGroup && peerReadAt != null && peerReadAt >= m.created_at) return t.msgRead;
+  return t.msgDelivered;
+}
+
+function FileBubble({
+  msg,
+  conversationId,
+  mine,
+}: {
+  msg: ClientImMessage;
+  conversationId: string;
+  mine: boolean;
+}) {
+  const meta = parseFileMeta(msg.content);
+  const uploading = msg._status === "sending" || !meta.file_id;
+  const url = meta.file_id ? conversationFileDownloadUrl(conversationId, meta.file_id) : null;
+  const isImage = (meta.mime || "").startsWith("image/");
+
+  if (isImage && url) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <a href={url} target="_blank" rel="noreferrer" className="block">
+        <img
+          src={url}
+          alt={meta.name || ""}
+          className="max-w-[220px] max-h-[220px] rounded-xl object-cover"
+        />
+      </a>
+    );
+  }
+
+  const inner = (
+    <div
+      className={`flex items-center gap-2.5 rounded-xl px-3 py-2 ${
+        mine ? "bg-accent text-accent-fg" : "bg-bg-elevated text-fg"
+      }`}
+    >
+      <span
+        className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+          mine ? "bg-white/20" : "bg-bg-subtle"
+        }`}
+      >
+        {uploading ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate max-w-[160px] text-sm">{meta.name || "文件"}</span>
+        {meta.size ? (
+          <span className={`block text-[10px] ${mine ? "text-accent-fg/80" : "text-fg-subtle"}`}>
+            {formatBytes(meta.size)}
+          </span>
+        ) : null}
+      </span>
+      {url ? <Download size={14} className={mine ? "text-accent-fg/80" : "text-fg-subtle"} /> : null}
+    </div>
+  );
+
+  return url ? (
+    <a href={url} target="_blank" rel="noreferrer" className="block">
+      {inner}
+    </a>
+  ) : (
+    inner
+  );
+}
+
 function Thread({
   conversation,
   im,
@@ -164,26 +286,30 @@ function Thread({
 }) {
   const { t } = useI18n();
   const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const messages = im.activeMessages;
   const isGroup = conversation.type === "group";
+  const peerReadAt = im.activePeerReadAt;
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
-  async function submit() {
+  // Sending is optimistic and never blocks the composer — the message appears
+  // immediately with a "sending" tag and reconciles when the server confirms.
+  function submit() {
     const value = text.trim();
-    if (!value || sending) return;
+    if (!value) return;
     setText("");
-    setSending(true);
-    try {
-      await im.send(value);
-    } finally {
-      setSending(false);
-    }
+    void im.send(value);
+  }
+
+  function pickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (f) void im.sendFile(f);
   }
 
   return (
@@ -210,17 +336,30 @@ function Thread({
           return (
             <div key={m.id} className={`flex items-end gap-2 ${mine ? "justify-end" : "justify-start"}`}>
               {!mine ? <MsgAvatar name={senderName} avatar={senderAvatar} /> : null}
-              <div className="max-w-[70%]">
+              <div className={`max-w-[70%] flex flex-col ${mine ? "items-end" : "items-start"}`}>
                 {isGroup && !mine && m.sender_name ? (
                   <div className="mb-0.5 text-[11px] text-fg-subtle">{m.sender_name}</div>
                 ) : null}
-                <div
-                  className={`rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap break-words ${
-                    mine ? "bg-accent text-accent-fg" : "bg-bg-elevated text-fg"
-                  }`}
-                >
-                  {m.content}
-                </div>
+                {m.kind === "file" ? (
+                  <FileBubble msg={m} conversationId={conversation.id} mine={mine} />
+                ) : (
+                  <div
+                    className={`rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap break-words ${
+                      mine ? "bg-accent text-accent-fg" : "bg-bg-elevated text-fg"
+                    }`}
+                  >
+                    {m.content}
+                  </div>
+                )}
+                {mine ? (
+                  <div
+                    className={`mt-0.5 text-[10px] ${
+                      m._status === "failed" ? "text-danger" : "text-fg-subtle"
+                    }`}
+                  >
+                    {statusLabel(m, isGroup, peerReadAt, t)}
+                  </div>
+                ) : null}
               </div>
               {mine ? <MsgAvatar name={senderName} avatar={senderAvatar} /> : null}
             </div>
@@ -230,13 +369,22 @@ function Thread({
 
       <div className="border-t border-border p-2.5">
         <div className="flex items-end gap-2">
+          <input ref={fileRef} type="file" className="hidden" onChange={pickFile} />
+          <button
+            onClick={() => fileRef.current?.click()}
+            className="btn-ghost w-9 h-9 shrink-0"
+            title={t.attachFile}
+            aria-label={t.attachFile}
+          >
+            <Paperclip size={16} />
+          </button>
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                void submit();
+                submit();
               }
             }}
             rows={1}
@@ -244,12 +392,12 @@ function Thread({
             className="flex-1 resize-none rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none placeholder:text-fg-subtle focus:border-accent max-h-32"
           />
           <button
-            onClick={() => void submit()}
-            disabled={!text.trim() || sending}
+            onClick={submit}
+            disabled={!text.trim()}
             className="btn-accent w-9 h-9 shrink-0"
             aria-label={t.send}
           >
-            {sending ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
+            <Send size={15} />
           </button>
         </div>
       </div>

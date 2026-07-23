@@ -127,6 +127,46 @@ class ImTests(unittest.TestCase):
         denied = self.client.get(f"/api/conversations/{cid}/messages", headers=carol_headers)
         self.assertEqual(denied.status_code, 404)
 
+    def test_file_message_share_and_download_authz(self) -> None:
+        cid = self._create_direct()
+        up = self.client.post(
+            "/api/upload",
+            headers=self.alice,
+            files={"file": ("hello.png", b"\x89PNG\r\n\x1a\nfake-bytes", "image/png")},
+        )
+        self.assertEqual(up.status_code, 200, up.text)
+        file_id = up.json()["file_id"]
+
+        sent = self.client.post(
+            f"/api/conversations/{cid}/messages",
+            headers=self.alice,
+            json={"file": {"file_id": file_id}},
+        )
+        self.assertEqual(sent.status_code, 200, sent.text)
+        self.assertEqual(sent.json()["message"]["kind"], "file")
+
+        # A member (Bob) can download the shared file even though he did not upload it.
+        dl = self.client.get(f"/api/conversations/{cid}/files/{file_id}/download", headers=self.bob)
+        self.assertEqual(dl.status_code, 200, dl.text)
+
+        # A non-member (Carol) cannot.
+        carol_headers, _ = self._register("carol@example.com", "Carol", "110101198001010037")
+        denied = self.client.get(
+            f"/api/conversations/{cid}/files/{file_id}/download", headers=carol_headers
+        )
+        self.assertEqual(denied.status_code, 404)
+
+    def test_read_receipt_updates_peer_last_read(self) -> None:
+        cid = self._create_direct()
+        self.client.post(f"/api/conversations/{cid}/messages", headers=self.alice, json={"content": "hi"})
+        before = self.client.get("/api/conversations", headers=self.alice).json()["conversations"][0]
+        self.assertIn("peer_last_read_at", before)
+
+        self.client.post(f"/api/conversations/{cid}/read", headers=self.bob)
+        after = self.client.get("/api/conversations", headers=self.alice).json()["conversations"][0]
+        self.assertIsNotNone(after["peer_last_read_at"])
+        self.assertGreater(after["peer_last_read_at"], 0)
+
     def test_hub_delivers_to_subscriber(self) -> None:
         async def scenario() -> dict:
             queue = im_hub.subscribe(self.bob_id)

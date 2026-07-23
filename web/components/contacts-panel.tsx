@@ -47,6 +47,7 @@ import {
 import { localizeError, useI18n } from "@/lib/i18n";
 import type { I18nText } from "@/lib/i18n";
 import { Modal } from "@/components/modal";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type CategoryKey = "org" | "external" | "new" | "starred" | "mailbox" | "groups";
 
@@ -283,7 +284,7 @@ export function ContactsPanel({
         <div className="flex-1 overflow-y-auto px-3 py-3">
           {error ? <p className="mb-3 text-sm text-danger">{error}</p> : null}
           {loading ? (
-            <p className="py-10 text-center text-sm text-fg-subtle">…</p>
+            <ContactListSkeleton />
           ) : category === "org" ? (
             members.length === 0 ? (
               <Empty text={t.noMembers} />
@@ -504,6 +505,28 @@ function roleLabel(role: string | null, t: I18nText): string {
 
 function Empty({ text }: { text: string }) {
   return <p className="py-10 text-center text-sm text-fg-subtle">{text}</p>;
+}
+
+// Shimmer placeholder rows (same skeleton treatment as the news/image panels),
+// staggered with a fade-in so loading feels lively rather than a static dash.
+function ContactListSkeleton({ rows = 7 }: { rows?: number }) {
+  return (
+    <div className="space-y-0.5">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div
+          key={i}
+          className="flex items-center gap-2.5 px-2 py-2.5 animate-fade-in"
+          style={{ animationDelay: `${i * 60}ms` }}
+        >
+          <Skeleton className="w-9 h-9 !rounded-full shrink-0" />
+          <div className="flex-1 space-y-1.5">
+            <Skeleton className="h-3.5" style={{ width: `${45 + ((i * 13) % 30)}%` }} />
+            <Skeleton className="h-2.5" style={{ width: `${60 + ((i * 7) % 25)}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function Avatar({

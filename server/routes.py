@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from typing import AsyncIterator
@@ -1573,12 +1574,32 @@ async def conversation_send(request: Request, conversation_id: str, payload: dic
     user = auth.require_user(request)
     if not db.is_conversation_member(conversation_id, user["id"]):
         raise HTTPException(404, "会话不存在。")
-    content = (payload.get("content") or "").strip()
-    if not content:
-        raise HTTPException(400, "消息内容不能为空。")
-    if len(content) > 4000:
-        raise HTTPException(400, "消息内容过长。")
-    msg = db.add_im_message(conversation_id, user["id"], content)
+
+    file_meta = payload.get("file")
+    if isinstance(file_meta, dict) and file_meta.get("file_id"):
+        # The sender just uploaded this file, so it is owner-checked here.
+        rec = db.get_upload(str(file_meta["file_id"]), user["id"])
+        if rec is None:
+            raise HTTPException(400, "文件不存在或无权访问。")
+        content = json.dumps(
+            {
+                "file_id": rec["id"],
+                "name": rec["original_name"],
+                "size": rec["size"],
+                "mime": rec["mime"],
+                "ext": rec["ext"],
+            },
+            ensure_ascii=False,
+        )
+        msg = db.add_im_message(conversation_id, user["id"], content, kind="file")
+    else:
+        content = (payload.get("content") or "").strip()
+        if not content:
+            raise HTTPException(400, "消息内容不能为空。")
+        if len(content) > 4000:
+            raise HTTPException(400, "消息内容过长。")
+        msg = db.add_im_message(conversation_id, user["id"], content)
+
     event = {"event": "im_message", "payload": {**msg, "sender_name": user.get("username")}}
     for uid in db.list_conversation_member_ids(conversation_id):
         im_hub.publish(uid, event)
@@ -1590,8 +1611,33 @@ def conversation_read(request: Request, conversation_id: str) -> dict:
     user = auth.require_user(request)
     if not db.is_conversation_member(conversation_id, user["id"]):
         raise HTTPException(404, "会话不存在。")
-    db.mark_conversation_read(conversation_id, user["id"])
+    read_at = time.time()
+    db.mark_conversation_read(conversation_id, user["id"], read_at)
+    # Notify the other members so their sent messages can flip to "read".
+    payload = {"conversation_id": conversation_id, "user_id": user["id"], "last_read_at": read_at}
+    for uid in db.list_conversation_member_ids(conversation_id):
+        if uid != user["id"]:
+            im_hub.publish(uid, {"event": "conversation_read", "payload": payload})
     return {"ok": True}
+
+
+@router.get("/conversations/{conversation_id}/files/{file_id}/download")
+def conversation_file_download(request: Request, conversation_id: str, file_id: str):
+    user = auth.require_user(request)
+    if not db.is_conversation_member(conversation_id, user["id"]):
+        raise HTTPException(404, "会话不存在。")
+    if not db.conversation_has_file(conversation_id, file_id):
+        raise HTTPException(404, "文件不存在。")
+    rec = db.get_upload_any(file_id)
+    if rec is None:
+        raise HTTPException(404, "文件不存在。")
+    from pathlib import Path
+
+    path = Path(rec["path"])
+    return FileResponse(
+        path,
+        filename=path.name.split("_", 1)[-1] if "_" in path.name else path.name,
+    )
 
 
 @router.get("/conversations/{conversation_id}/members")

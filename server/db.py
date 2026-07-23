@@ -1047,6 +1047,18 @@ def get_upload(file_id: str, user_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def get_upload_any(file_id: str) -> dict | None:
+    """Fetch an upload regardless of owner. Callers MUST authorize access first
+    (e.g. verify the file is shared in a conversation the requester belongs to)."""
+    _ensure()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id, user_id, original_name, mime, ext, size, path, created_at FROM uploads WHERE id = ?",
+            (file_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 # ---------- news ----------
 
 def get_news_config(user_id: str) -> dict | None:
@@ -1867,6 +1879,20 @@ def add_im_message(conversation_id: str, sender_id: str, content: str, kind: str
     }
 
 
+def conversation_has_file(conversation_id: str, file_id: str) -> bool:
+    """True if a file message in this conversation references the given upload id."""
+    _ensure()
+    if not re.fullmatch(r"[0-9a-f]{32}", file_id or ""):
+        return False
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM im_messages WHERE conversation_id = ? AND kind = 'file' "
+            "AND content LIKE ? LIMIT 1",
+            (conversation_id, f'%"file_id": "{file_id}"%'),
+        ).fetchone()
+    return row is not None
+
+
 def list_im_messages(conversation_id: str, before: float | None = None, limit: int = 50) -> list[dict]:
     _ensure()
     limit = max(1, min(int(limit), 200))
@@ -1926,10 +1952,11 @@ def list_conversations_for_user(user_id: str) -> list[dict]:
                 "SELECT COUNT(*) AS n FROM conversation_members WHERE conversation_id = ?", (cid,)
             ).fetchone()["n"]
             peer = None
+            peer_last_read_at = None
             if c["type"] == "direct":
                 peer = conn.execute(
                     """
-                    SELECT u.id, u.username, u.real_name, u.avatar
+                    SELECT u.id, u.username, u.real_name, u.avatar, mm.last_read_at
                     FROM conversation_members mm
                     JOIN users u ON u.id = mm.user_id
                     WHERE mm.conversation_id = ? AND mm.user_id != ?
@@ -1937,6 +1964,8 @@ def list_conversations_for_user(user_id: str) -> list[dict]:
                     """,
                     (cid, user_id),
                 ).fetchone()
+                if peer is not None:
+                    peer_last_read_at = peer["last_read_at"]
             result.append({
                 "id": cid,
                 "type": c["type"],
@@ -1944,7 +1973,13 @@ def list_conversations_for_user(user_id: str) -> list[dict]:
                 "created_by": c["created_by"],
                 "updated_at": c["updated_at"],
                 "member_count": int(member_count),
-                "peer": dict(peer) if peer else None,
+                "peer": {
+                    "id": peer["id"],
+                    "username": peer["username"],
+                    "real_name": peer["real_name"],
+                    "avatar": peer["avatar"],
+                } if peer else None,
+                "peer_last_read_at": peer_last_read_at,
                 "last_message": dict(last) if last else None,
                 "unread": int(unread),
             })
