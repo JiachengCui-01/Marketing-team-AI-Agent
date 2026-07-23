@@ -70,6 +70,23 @@ class SessionStoreTests(unittest.TestCase):
         self.assertIn("round 17", serialized)
         self.assertLess(len(conv.messages), 36)
 
+    def test_summary_follows_recent_topic(self) -> None:
+        user_id = self.create_user()
+        session_id = sessions.create(user_id)
+        # An old founding goal that the conversation later moves away from.
+        db.add_message(session_id, "user", "OLD_GOAL: launch a spring skincare campaign")
+        db.add_message(session_id, "assistant", "draft output 0")
+        for idx in range(1, 20):
+            db.add_message(session_id, "user", f"NEW_TOPIC tweak request round {idx}")
+            db.add_message(session_id, "assistant", f"draft output round {idx}")
+
+        conv = sessions.prepare_for_turn(session_id, user_id)
+        assert conv is not None
+        serialized = "\n".join(str(m["content"]) for m in conv.messages)
+        # Recency-first: the summary tracks the current topic, not the stale founding goal.
+        self.assertIn("NEW_TOPIC", serialized)
+        self.assertNotIn("OLD_GOAL", serialized)
+
     def test_prepare_for_turn_injects_marketing_profile(self) -> None:
         user_id = self.create_user()
         session_id = sessions.create(user_id)
@@ -129,8 +146,9 @@ class SessionStoreTests(unittest.TestCase):
             "报告格式偏好是结论先行。KPI是曝光和转化率。其他偏好是少用夸张表达。"
         )
 
-        # A single mention is enough: structured self-declarations are explicit.
-        memory.update_long_term_marketing_memory(user_id, prompt)
+        # Even explicit self-declarations must recur before entering long-term memory.
+        for _ in range(memory.LONG_TERM_EVIDENCE_THRESHOLD):
+            memory.update_long_term_marketing_memory(user_id, prompt)
 
         profile = memory.derive_learned_profile(user_id)
         self.assertIn("增长负责人", profile["role_title"])
@@ -183,20 +201,26 @@ class SessionStoreTests(unittest.TestCase):
         memory.update_long_term_marketing_memory(user_id, prompt)
         self.assertEqual(memory.derive_learned_profile(user_id).get("channels", []), [])
 
-    def test_explicit_declaration_promotes_immediately(self) -> None:
+    def test_explicit_declaration_still_needs_sedimentation(self) -> None:
         user_id = self.create_user()
-        # A single explicit self-declaration is authoritative right away.
-        memory.update_long_term_marketing_memory(user_id, "我的产品是牙科诊所预约系统。")
-        learned = memory.derive_learned_profile(user_id)
-        self.assertIn("牙科诊所预约系统", learned.get("products", []))
+        prompt = "我的产品是牙科诊所预约系统。"
+        # A single explicit mention stays in short-term memory only.
+        memory.update_long_term_marketing_memory(user_id, prompt)
+        self.assertEqual(memory.derive_learned_profile(user_id).get("products", []), [])
+        # It is promoted only after recurring to the threshold.
+        for _ in range(memory.LONG_TERM_EVIDENCE_THRESHOLD - 1):
+            memory.update_long_term_marketing_memory(user_id, prompt)
+        self.assertIn("牙科诊所预约系统", memory.derive_learned_profile(user_id).get("products", []))
 
     def test_single_valued_field_keeps_most_recent(self) -> None:
         user_id = self.create_user()
         # Deterministic, strictly-increasing clock so recency ordering is stable.
         clock = itertools.count(1000.0, 10.0)
         with mock.patch("server.db.time.time", lambda: next(clock)):
-            memory.update_long_term_marketing_memory(user_id, "我的职位是市场经理。")
-            memory.update_long_term_marketing_memory(user_id, "我的职位是增长负责人。")
+            for _ in range(memory.LONG_TERM_EVIDENCE_THRESHOLD):
+                memory.update_long_term_marketing_memory(user_id, "我的职位是市场经理。")
+            for _ in range(memory.LONG_TERM_EVIDENCE_THRESHOLD):
+                memory.update_long_term_marketing_memory(user_id, "我的职位是增长负责人。")
         role = memory.derive_learned_profile(user_id).get("role_title", [])
         # Single-valued fields do not accumulate contradictory values.
         self.assertEqual(len(role), 1)
@@ -205,7 +229,9 @@ class SessionStoreTests(unittest.TestCase):
     def test_manual_profile_overrides_learned(self) -> None:
         user_id = self.create_user()
         session_id = sessions.create(user_id)
-        memory.update_long_term_marketing_memory(user_id, "我的产品是牙科诊所预约系统。")
+        for _ in range(memory.LONG_TERM_EVIDENCE_THRESHOLD):
+            memory.update_long_term_marketing_memory(user_id, "我的产品是牙科诊所预约系统。")
+        self.assertIn("牙科诊所预约系统", memory.derive_learned_profile(user_id).get("products", []))
         db.upsert_user_marketing_memory(user_id, {"products": ["企业级 CRM"]})
 
         merged = memory.merged_profile(user_id)

@@ -219,7 +219,7 @@ def get_marketing_memory_evidence(request: Request) -> dict:
             "value": row.get("value"),
             "count": count,
             "explicit": explicit,
-            "promoted": explicit or count >= threshold,
+            "promoted": count >= threshold,
             "first_seen_at": row.get("first_seen_at"),
             "last_seen_at": row.get("last_seen_at"),
         })

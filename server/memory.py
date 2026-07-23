@@ -135,15 +135,18 @@ def heuristic_observations(texts: tuple[str, ...]) -> list[tuple[str, str, bool]
 def derive_learned_profile(user_id: str) -> dict[str, list[str]]:
     """Compute the auto-learned profile from the current evidence ledger.
 
-    A value is promoted when it is explicit or has reached the evidence
-    threshold. Single-valued fields keep only the top value (explicit and
-    recency win) so contradictory learned facts cannot accumulate; multi-valued
-    fields keep the most recent/strongest values up to a cap.
+    A value is promoted only after it has recurred `LONG_TERM_EVIDENCE_THRESHOLD`
+    times — a single mention (even an explicit self-declaration) stays in the
+    session's short-term memory and does not enter long-term memory, so the two
+    layers don't overlap. The ``explicit`` flag no longer fast-tracks promotion;
+    it is kept only as a provenance signal and a tie-breaker. Single-valued
+    fields keep only the top value (recency/explicit win) so contradictory
+    learned facts cannot accumulate; multi-valued fields keep the most
+    recent/strongest values up to a cap.
     """
     by_field: dict[str, list[dict]] = {}
     for row in db.list_user_marketing_memory_evidence(user_id):
-        promoted = bool(row.get("explicit")) or int(row.get("count") or 0) >= LONG_TERM_EVIDENCE_THRESHOLD
-        if not promoted:
+        if int(row.get("count") or 0) < LONG_TERM_EVIDENCE_THRESHOLD:
             continue
         field = str(row.get("field") or "")
         if field in MARKETING_PROFILE_FIELDS:
@@ -249,6 +252,8 @@ def _compress_rows(rows: list[dict]) -> str:
 
     parts: list[str] = []
     if user_intents:
+        # Recency-first: keep the most recent user needs so the summary follows
+        # topic changes instead of anchoring to a possibly-stale founding goal.
         parts.append("Earlier user needs:\n" + "\n".join(f"- {item}" for item in user_intents[-8:]))
     if deliverables:
         parts.append("Important prior outputs:\n" + "\n".join(f"- {item}" for item in deliverables[-6:]))

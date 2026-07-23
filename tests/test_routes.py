@@ -181,17 +181,21 @@ class RouteTests(unittest.TestCase):
 
     def test_marketing_memory_evidence_endpoint(self) -> None:
         user_id = db.get_user_by_account("alice@example.com")["id"]
+        # One mention of each: explicit no longer fast-tracks, so neither is promoted yet.
         db.add_user_marketing_memory_evidence(
             user_id,
             [("channels", "LinkedIn", False), ("products", "牙科诊所预约系统", True)],
         )
+        # Repeat the explicit one until it reaches the threshold.
+        for _ in range(memory.LONG_TERM_EVIDENCE_THRESHOLD - 1):
+            db.add_user_marketing_memory_evidence(user_id, [("products", "牙科诊所预约系统", True)])
 
         response = self.client.get("/api/memory/marketing/evidence", headers=self.headers)
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
         self.assertEqual(body["threshold"], memory.LONG_TERM_EVIDENCE_THRESHOLD)
         by_value = {item["value"]: item for item in body["evidence"]}
-        # Explicit self-declaration is promoted immediately; incidental is not.
+        # Promotion depends purely on reaching the threshold; explicit is just a badge.
         self.assertTrue(by_value["牙科诊所预约系统"]["promoted"])
         self.assertTrue(by_value["牙科诊所预约系统"]["explicit"])
         self.assertFalse(by_value["LinkedIn"]["promoted"])
