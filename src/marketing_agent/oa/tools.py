@@ -227,6 +227,15 @@ def build_oa_handlers(
         hits = out["results"]
         if not hits:
             return "知识库中没有找到相关内容。请提示用户先在“知识库”上传文档。"
+        # Emit the cited documents so the UI can render source capsules (deduped by title).
+        if on_event:
+            seen: set[str] = set()
+            sources = []
+            for h in hits:
+                if h["title"] not in seen:
+                    seen.add(h["title"])
+                    sources.append({"title": h["title"], "doc_id": h["doc_id"]})
+            on_event("oa_sources", {"sources": sources})
         blocks = [f"[{h['title']}] {h['text'][:600]}" for h in hits]
         return "根据知识库检索到以下资料，请据此回答并标注引用的文档标题：\n\n" + "\n\n".join(blocks)
 

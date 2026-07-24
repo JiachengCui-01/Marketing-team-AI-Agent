@@ -490,8 +490,12 @@ export default function HomePage() {
             });
           }
         } else if (e.event === "oa_draft") {
-          const draft = e.payload as unknown as OaDraft;
+          // Stable id lets the draft card keep its confirmed state across view switches.
+          const draft = { ...(e.payload as unknown as OaDraft), _id: newId() };
           updatePending((msg) => ({ ...msg, drafts: [...(msg.drafts ?? []), draft] }));
+        } else if (e.event === "oa_sources") {
+          const sources = (e.payload.sources ?? []) as { title: string; doc_id: string }[];
+          updatePending((msg) => ({ ...msg, kbSources: sources }));
         } else if (e.event === "result") {
           const finalText = String(e.payload.text ?? "");
           updatePending((msg) => ({

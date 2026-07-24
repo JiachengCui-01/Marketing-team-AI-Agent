@@ -18,6 +18,17 @@ from ..orchestrator import _dispatch, _final_text, _stream_text, _task_text
 from ..tools.delegation_tools import DELEGATION_TOOLS
 from .tools import OA_TOOLS, build_oa_handlers
 
+# Friendly Agent-Trace labels for each OA tool so users can see what the workspace did.
+_TOOL_STEPS: dict[str, tuple[str, str]] = {
+    "draft_approval": ("起草审批", "根据你的请求生成审批草稿，待你确认后提交。"),
+    "query_approvals": ("查询审批", "读取你发起或待你审批的记录。"),
+    "draft_task": ("起草任务", "生成任务草稿，待你确认后创建。"),
+    "query_tasks": ("查询任务", "读取你的未完成待办。"),
+    "draft_event": ("起草日程", "生成日程草稿，待你确认后创建。"),
+    "query_calendar": ("查询日程", "读取你即将到来的日程。"),
+    "search_knowledge_base": ("检索知识库", "在你有权限的知识库中检索相关资料并据此作答。"),
+}
+
 SYSTEM_TEMPLATE = """你是一个企业 OA（办公自动化）智能助手，服务于企业员工的日常办公。你可以通过工具完成办公事务，也可以调用营销专家能力。
 
 当前时间：{now}（用于计算日程/审批中的相对日期，如“下周一”“明天下午”）。
@@ -118,6 +129,12 @@ def run_oa_copilot(
                 if block.type != "tool_use":
                     continue
                 if block.name in handlers:
+                    if on_event and block.name in _TOOL_STEPS:
+                        title, detail = _TOOL_STEPS[block.name]
+                        on_event(
+                            "orchestrator_step",
+                            {"stage": "tool", "title": title, "detail": detail, "status": "running"},
+                        )
                     try:
                         result = handlers[block.name](block.input)
                     except Exception as exc:  # noqa: BLE001

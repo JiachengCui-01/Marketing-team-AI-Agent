@@ -1144,7 +1144,7 @@ export type ApprovalRecord = {
   type: string;
   title: string;
   form: Record<string, unknown>;
-  status: "pending" | "approved" | "rejected";
+  status: "pending" | "approved" | "rejected" | "withdrawn";
   current_step: number;
   created_at: number;
   updated_at: number | null;
@@ -1211,6 +1211,28 @@ export async function actApproval(
   return (await res.json()).approval;
 }
 
+export async function updateApproval(
+  id: string,
+  payload: { title?: string; fields?: Record<string, unknown> },
+): Promise<ApprovalRecord> {
+  const res = await fetch(`${API_BASE}/api/approvals/${id}`, {
+    method: "PATCH",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).approval;
+}
+
+export async function withdrawApproval(id: string): Promise<ApprovalRecord> {
+  const res = await fetch(`${API_BASE}/api/approvals/${id}/withdraw`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).approval;
+}
+
 // ---------- AI OA: tasks ----------
 
 export type TaskRecord = {
@@ -1218,7 +1240,7 @@ export type TaskRecord = {
   title: string;
   detail: string | null;
   priority: string;
-  status: "open" | "done";
+  status: "open" | "awaiting_confirmation" | "done";
   due_at: number | null;
   created_at: number;
   creator_id: string;
@@ -1227,7 +1249,9 @@ export type TaskRecord = {
   assignee_name: string | null;
 };
 
-export async function listTasks(scope: "all" | "assigned" | "created"): Promise<TaskRecord[]> {
+export async function listTasks(
+  scope: "all" | "assigned" | "created" | "done",
+): Promise<TaskRecord[]> {
   const res = await fetch(`${API_BASE}/api/tasks?scope=${scope}`, { headers: authHeaders() });
   if (!res.ok) throw new Error(await parseJsonError(res));
   return (await res.json()).tasks;
@@ -1238,6 +1262,7 @@ export async function createTask(payload: {
   detail?: string;
   priority?: string;
   assignee_name?: string;
+  due?: string;
 }): Promise<TaskRecord> {
   const res = await fetch(`${API_BASE}/api/tasks`, {
     method: "POST",
@@ -1258,6 +1283,29 @@ export async function updateTask(id: string, status: "open" | "done"): Promise<T
   return (await res.json()).task;
 }
 
+export async function confirmTask(id: string): Promise<TaskRecord> {
+  const res = await fetch(`${API_BASE}/api/tasks/${id}/confirm`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).task;
+}
+
+export async function deleteTask(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/tasks/${id}`, { method: "DELETE", headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+}
+
+export async function clearDoneTasks(): Promise<number> {
+  const res = await fetch(`${API_BASE}/api/tasks/clear-done`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).cleared;
+}
+
 // ---------- AI OA: calendar ----------
 
 export type CalendarEvent = {
@@ -1266,13 +1314,14 @@ export type CalendarEvent = {
   start_at: number;
   end_at: number | null;
   location: string | null;
+  status: "active" | "done";
   attendees: string[];
   owner_id: string;
   owner_name: string | null;
   created_at: number;
 };
 
-export async function listCalendar(upcoming = true): Promise<CalendarEvent[]> {
+export async function listCalendar(upcoming = false): Promise<CalendarEvent[]> {
   const res = await fetch(`${API_BASE}/api/calendar?upcoming=${upcoming}`, { headers: authHeaders() });
   if (!res.ok) throw new Error(await parseJsonError(res));
   return (await res.json()).events;
@@ -1292,6 +1341,27 @@ export async function createEvent(payload: {
   });
   if (!res.ok) throw new Error(await parseJsonError(res));
   return (await res.json()).event;
+}
+
+export async function updateEvent(
+  id: string,
+  payload: { title?: string; start?: string; end?: string; location?: string; status?: "active" | "done" },
+): Promise<CalendarEvent> {
+  const res = await fetch(`${API_BASE}/api/calendar/${id}`, {
+    method: "PATCH",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).event;
+}
+
+export async function deleteEvent(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/calendar/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
 }
 
 // ---------- AI OA: knowledge base ----------

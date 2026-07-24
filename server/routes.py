@@ -1417,6 +1417,38 @@ async def act_approval(request: Request, approval_id: str, payload: dict = Body(
     return {"approval": _approval_view(updated)}
 
 
+@router.patch("/approvals/{approval_id}")
+async def modify_approval(request: Request, approval_id: str, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    title = None
+    if "title" in payload:
+        title = str(payload.get("title") or "").strip()
+        if not title:
+            raise HTTPException(400, "审批标题不能为空。")
+    fields = payload.get("fields")
+    if fields is not None and not isinstance(fields, dict):
+        raise HTTPException(400, "表单字段格式不正确。")
+    updated = db.update_approval(approval_id, user["id"], title=title, form=fields)
+    if updated is None:
+        raise HTTPException(400, "无法修改（仅能修改本人待审批的申请）。")
+    return {"approval": _approval_view(updated)}
+
+
+@router.post("/approvals/{approval_id}/withdraw")
+async def withdraw_approval(request: Request, approval_id: str) -> dict:
+    user = auth.require_user(request)
+    updated = db.withdraw_approval(approval_id, user["id"])
+    if updated is None:
+        raise HTTPException(400, "无法撤回（仅能撤回本人待审批的申请）。")
+    for s in updated.get("steps", []):
+        im_hub.publish(
+            s["approver_id"],
+            {"event": "oa_notification", "payload": {"kind": "approval_withdrawn",
+             "approval_id": approval_id, "title": updated["title"]}},
+        )
+    return {"approval": _approval_view(updated)}
+
+
 # ---------- AI OA: tasks ----------
 
 def _task_view(task: dict) -> dict:
@@ -1461,13 +1493,14 @@ async def create_task(request: Request, payload: dict = Body(...)) -> dict:
         resolved = _resolve_member_by_name(org, name)
         if resolved:
             assignee_id = resolved
-    due_at = payload.get("due_at")
+    raw_due = payload.get("due_at")
+    due_at = float(raw_due) if isinstance(raw_due, (int, float)) else _parse_iso(payload.get("due"))
     task = db.create_task(
         creator_id=user["id"],
         title=title,
         detail=(str(payload.get("detail") or "").strip() or None),
         priority=str(payload.get("priority") or "normal"),
-        due_at=float(due_at) if isinstance(due_at, (int, float)) else None,
+        due_at=due_at,
         assignee_id=assignee_id,
         org_id=org.get("id"),
     )
@@ -1492,7 +1525,43 @@ def update_task(request: Request, task_id: str, payload: dict = Body(...)) -> di
     updated = db.update_task_status(task_id, user["id"], status)
     if updated is None:
         raise HTTPException(400, "无法更新该任务（不存在或无权限）。")
+    # Assignee completed an assigned task → ask the creator to confirm.
+    if updated["status"] == "awaiting_confirmation":
+        im_hub.publish(
+            updated["creator_id"],
+            {"event": "oa_notification", "payload": {"kind": "task_awaiting_confirm",
+             "task_id": task_id, "title": updated["title"]}},
+        )
     return {"task": _task_view(updated)}
+
+
+@router.post("/tasks/{task_id}/confirm")
+def confirm_task_route(request: Request, task_id: str) -> dict:
+    user = auth.require_user(request)
+    updated = db.confirm_task(task_id, user["id"])
+    if updated is None:
+        raise HTTPException(400, "无法确认（仅创建者可确认待确认的任务）。")
+    if updated.get("assignee_id") and updated["assignee_id"] != user["id"]:
+        im_hub.publish(
+            updated["assignee_id"],
+            {"event": "oa_notification", "payload": {"kind": "task_confirmed_done",
+             "task_id": task_id, "title": updated["title"]}},
+        )
+    return {"task": _task_view(updated)}
+
+
+@router.post("/tasks/clear-done")
+def clear_done_tasks_route(request: Request) -> dict:
+    user = auth.require_user(request)
+    return {"cleared": db.clear_done_tasks(user["id"])}
+
+
+@router.delete("/tasks/{task_id}")
+def delete_task_route(request: Request, task_id: str) -> dict:
+    user = auth.require_user(request)
+    if not db.delete_task(task_id, user["id"]):
+        raise HTTPException(400, "无法删除（仅创建者可删除）。")
+    return {"ok": True}
 
 
 # ---------- AI OA: calendar ----------
@@ -1501,6 +1570,7 @@ def _event_view(event: dict) -> dict:
     owner = db.get_user(event["owner_id"])
     return {
         **{k: event[k] for k in ("id", "title", "start_at", "end_at", "location", "created_at")},
+        "status": event.get("status", "active"),
         "attendees": event.get("attendees", []),
         "owner_id": event["owner_id"],
         "owner_name": (owner or {}).get("username"),
@@ -1522,10 +1592,14 @@ def _parse_iso(value) -> float | None:
 
 
 @router.get("/calendar")
-def list_calendar(request: Request, upcoming: bool = True) -> dict:
+def list_calendar(request: Request, upcoming: bool = False) -> dict:
     user = auth.require_user(request)
     rows = db.list_events(user["id"], since=time.time() if upcoming else None)
     return {"events": [_event_view(e) for e in rows]}
+
+
+# Allow a little clock skew between client and server when rejecting past times.
+_PAST_SKEW_SECONDS = 120
 
 
 @router.post("/calendar")
@@ -1537,7 +1611,11 @@ async def create_calendar_event(request: Request, payload: dict = Body(...)) -> 
     start_at = _parse_iso(payload.get("start") or payload.get("start_at"))
     if start_at is None:
         raise HTTPException(400, "开始时间格式无效。")
+    if start_at < time.time() - _PAST_SKEW_SECONDS:
+        raise HTTPException(400, "开始时间不能早于当前时间。")
     end_at = _parse_iso(payload.get("end") or payload.get("end_at"))
+    if end_at is not None and end_at < start_at:
+        raise HTTPException(400, "结束时间不能早于开始时间。")
     attendees = payload.get("attendees")
     org = db.get_or_create_default_org(user["id"], user.get("username") or "")
     event = db.create_event(
@@ -1550,6 +1628,45 @@ async def create_calendar_event(request: Request, payload: dict = Body(...)) -> 
         org_id=org.get("id"),
     )
     return {"event": _event_view(event)}
+
+
+@router.patch("/calendar/{event_id}")
+async def update_calendar_event(request: Request, event_id: str, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    fields: dict = {}
+    if "title" in payload:
+        title = str(payload.get("title") or "").strip()
+        if not title:
+            raise HTTPException(400, "日程标题不能为空。")
+        fields["title"] = title
+    if payload.get("start") or payload.get("start_at"):
+        start_at = _parse_iso(payload.get("start") or payload.get("start_at"))
+        if start_at is None:
+            raise HTTPException(400, "开始时间格式无效。")
+        if start_at < time.time() - _PAST_SKEW_SECONDS:
+            raise HTTPException(400, "开始时间不能早于当前时间。")
+        fields["start_at"] = start_at
+    if payload.get("end") or payload.get("end_at"):
+        fields["end_at"] = _parse_iso(payload.get("end") or payload.get("end_at"))
+    if "location" in payload:
+        fields["location"] = str(payload.get("location") or "").strip() or None
+    if "status" in payload:
+        status = str(payload.get("status") or "").strip()
+        if status not in ("active", "done"):
+            raise HTTPException(400, "status 必须是 active 或 done。")
+        fields["status"] = status
+    updated = db.update_event(event_id, user["id"], fields)
+    if updated is None:
+        raise HTTPException(404, "日程不存在或无权修改。")
+    return {"event": _event_view(updated)}
+
+
+@router.delete("/calendar/{event_id}")
+def delete_calendar_event(request: Request, event_id: str) -> dict:
+    user = auth.require_user(request)
+    if not db.delete_event(event_id, user["id"]):
+        raise HTTPException(404, "日程不存在。")
+    return {"ok": True}
 
 
 # ---------- AI OA: knowledge base ----------

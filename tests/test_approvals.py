@@ -113,6 +113,50 @@ class ApprovalRouteTests(unittest.TestCase):
         )
         self.assertEqual(res.status_code, 400)
 
+    def test_modify_and_withdraw_own_pending(self) -> None:
+        appr = self.client.post(
+            "/api/approvals",
+            headers=self.alice,
+            json={"type": "leave", "title": "年假 1 天", "fields": {"days": 1}},
+        ).json()["approval"]
+
+        # applicant modifies own pending application
+        edited = self.client.patch(
+            f"/api/approvals/{appr['id']}", headers=self.alice, json={"title": "年假 2 天"}
+        )
+        self.assertEqual(edited.status_code, 200, edited.text)
+        self.assertEqual(edited.json()["approval"]["title"], "年假 2 天")
+
+        # the approver cannot modify someone else's application
+        self.assertEqual(
+            self.client.patch(
+                f"/api/approvals/{appr['id']}", headers=self.bob, json={"title": "x"}
+            ).status_code,
+            400,
+        )
+
+        # applicant withdraws
+        wd = self.client.post(f"/api/approvals/{appr['id']}/withdraw", headers=self.alice)
+        self.assertEqual(wd.json()["approval"]["status"], "withdrawn")
+        # once withdrawn it is no longer pending for the approver
+        self.assertEqual(
+            len(self.client.get("/api/approvals?scope=pending", headers=self.bob).json()["approvals"]),
+            0,
+        )
+
+    def test_cannot_view_unrelated_approval(self) -> None:
+        carol = self._register("carol@example.com", "Carol", ID_CAROL)
+        self.client.get("/api/org", headers=carol)
+        appr = self.client.post(
+            "/api/approvals",
+            headers=self.alice,
+            json={"type": "leave", "title": "私密申请", "fields": {}},
+        ).json()["approval"]
+        # Carol is neither applicant nor approver → cannot see it.
+        self.assertEqual(
+            self.client.get(f"/api/approvals/{appr['id']}", headers=carol).status_code, 403
+        )
+
     def test_bad_action_rejected(self) -> None:
         appr = self.client.post(
             "/api/approvals",

@@ -47,7 +47,7 @@ class OaModulesTests(unittest.TestCase):
 
     # ----- tasks -----
 
-    def test_task_assign_and_complete(self) -> None:
+    def test_task_assign_complete_needs_creator_confirm(self) -> None:
         created = self.client.post(
             "/api/tasks",
             headers=self.alice,
@@ -60,10 +60,42 @@ class OaModulesTests(unittest.TestCase):
         assigned = self.client.get("/api/tasks?scope=assigned", headers=self.bob).json()["tasks"]
         self.assertEqual(len(assigned), 1)
 
+        # Assignee completes → awaiting the creator's confirmation, not yet done.
         done = self.client.patch(
             f"/api/tasks/{task['id']}", headers=self.bob, json={"status": "done"}
         )
+        self.assertEqual(done.json()["task"]["status"], "awaiting_confirmation")
+        # Not in either party's done list yet.
+        self.assertEqual(len(self.client.get("/api/tasks?scope=done", headers=self.bob).json()["tasks"]), 0)
+
+        # Assignee cannot confirm; only the creator can.
+        self.assertEqual(
+            self.client.post(f"/api/tasks/{task['id']}/confirm", headers=self.bob).status_code, 400
+        )
+        confirmed = self.client.post(f"/api/tasks/{task['id']}/confirm", headers=self.alice)
+        self.assertEqual(confirmed.json()["task"]["status"], "done")
+        # Now it shows in both parties' done lists.
+        self.assertEqual(len(self.client.get("/api/tasks?scope=done", headers=self.bob).json()["tasks"]), 1)
+        self.assertEqual(len(self.client.get("/api/tasks?scope=done", headers=self.alice).json()["tasks"]), 1)
+
+    def test_self_task_completes_directly_and_clear_done(self) -> None:
+        task = self.client.post(
+            "/api/tasks", headers=self.alice, json={"title": "整理资料"}
+        ).json()["task"]
+        done = self.client.patch(f"/api/tasks/{task['id']}", headers=self.alice, json={"status": "done"})
         self.assertEqual(done.json()["task"]["status"], "done")
+        self.assertEqual(len(self.client.get("/api/tasks?scope=done", headers=self.alice).json()["tasks"]), 1)
+        # clear completed
+        self.client.post("/api/tasks/clear-done", headers=self.alice)
+        self.assertEqual(len(self.client.get("/api/tasks?scope=done", headers=self.alice).json()["tasks"]), 0)
+
+    def test_task_creator_only_delete(self) -> None:
+        task = self.client.post(
+            "/api/tasks", headers=self.alice, json={"title": "跟进", "assignee_name": "Bob"}
+        ).json()["task"]
+        # assignee cannot delete
+        self.assertEqual(self.client.delete(f"/api/tasks/{task['id']}", headers=self.bob).status_code, 400)
+        self.assertEqual(self.client.delete(f"/api/tasks/{task['id']}", headers=self.alice).status_code, 200)
 
     def test_task_defaults_to_self_and_bad_status(self) -> None:
         task = self.client.post(
@@ -98,6 +130,51 @@ class OaModulesTests(unittest.TestCase):
             "/api/calendar", headers=self.alice, json={"title": "会", "start": "not-a-date"}
         )
         self.assertEqual(r.status_code, 400)
+
+    def test_calendar_past_start_rejected(self) -> None:
+        r = self.client.post(
+            "/api/calendar", headers=self.alice, json={"title": "会", "start": "2000-01-01T10:00"}
+        )
+        self.assertEqual(r.status_code, 400)
+
+    def test_calendar_edit_complete_delete(self) -> None:
+        ev = self.client.post(
+            "/api/calendar",
+            headers=self.alice,
+            json={"title": "周会", "start": "2099-01-01T14:00"},
+        ).json()["event"]
+        self.assertEqual(ev["status"], "active")
+
+        # edit title
+        edited = self.client.patch(
+            f"/api/calendar/{ev['id']}", headers=self.alice, json={"title": "季度周会"}
+        )
+        self.assertEqual(edited.status_code, 200, edited.text)
+        self.assertEqual(edited.json()["event"]["title"], "季度周会")
+
+        # mark complete
+        done = self.client.patch(
+            f"/api/calendar/{ev['id']}", headers=self.alice, json={"status": "done"}
+        )
+        self.assertEqual(done.json()["event"]["status"], "done")
+
+        # a non-owner cannot edit
+        denied = self.client.patch(
+            f"/api/calendar/{ev['id']}", headers=self.bob, json={"title": "x"}
+        )
+        self.assertEqual(denied.status_code, 404)
+
+        # editing to a past start is rejected
+        past = self.client.patch(
+            f"/api/calendar/{ev['id']}", headers=self.alice, json={"start": "2000-01-01T09:00"}
+        )
+        self.assertEqual(past.status_code, 400)
+
+        # delete
+        self.assertEqual(
+            self.client.delete(f"/api/calendar/{ev['id']}", headers=self.alice).status_code, 200
+        )
+        self.assertEqual(len(self.client.get("/api/calendar", headers=self.alice).json()["events"]), 0)
 
     # ----- knowledge base -----
 

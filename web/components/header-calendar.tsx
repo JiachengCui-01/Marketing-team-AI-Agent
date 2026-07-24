@@ -23,7 +23,7 @@ export function HeaderCalendar({ onOpen }: { onOpen: () => void }) {
 
   const load = useCallback(async () => {
     try {
-      setEvents(await listCalendar(true));
+      setEvents(await listCalendar());
     } catch {
       /* silent — header widget must never surface errors */
     }
@@ -31,33 +31,38 @@ export function HeaderCalendar({ onOpen }: { onOpen: () => void }) {
 
   useEffect(() => {
     load();
-    // Light polling keeps the summary fresh after the AI or manual add.
-    const id = window.setInterval(load, 60_000);
+    // Refresh immediately when the calendar changes (AI or manual add/edit/delete),
+    // so the summary never lags behind. A slow poll is only a safety net.
+    const onChanged = () => load();
     const onFocus = () => load();
+    window.addEventListener("oa-calendar-changed", onChanged);
     window.addEventListener("focus", onFocus);
+    const id = window.setInterval(load, 120_000);
     return () => {
-      window.clearInterval(id);
+      window.removeEventListener("oa-calendar-changed", onChanged);
       window.removeEventListener("focus", onFocus);
+      window.clearInterval(id);
     };
   }, [load]);
 
   const zh = locale === "zh";
-  const next = events[0];
-  const todayCount = events.filter((e) => isToday(e.start_at)).length;
+  const nowSec = Date.now() / 1000;
+  const activeEvents = events.filter((e) => e.status !== "done");
+  const todayCount = activeEvents.filter((e) => isToday(e.start_at)).length;
+  // The nearest task that has not started yet.
+  const next = activeEvents.filter((e) => e.start_at > nowSec).sort((a, b) => a.start_at - b.start_at)[0];
 
+  const countText = zh ? `今日 ${todayCount} 项` : `${todayCount} today`;
   let summary: string;
   if (!next) {
-    summary = zh ? "今日暂无日程" : "No events today";
+    summary = zh ? `${countText} · 暂无待开始` : `${countText} · none upcoming`;
   } else {
     const time = new Date(next.start_at * 1000).toLocaleTimeString(undefined, {
       hour: "2-digit",
       minute: "2-digit",
     });
     const title = next.title.length > 10 ? next.title.slice(0, 10) + "…" : next.title;
-    const count = todayCount || events.length;
-    summary = zh
-      ? `今日 ${count} 项 · ${time} ${title}`
-      : `${count} today · ${time} ${title}`;
+    summary = `${countText} · ${time} ${title}`;
   }
 
   return (

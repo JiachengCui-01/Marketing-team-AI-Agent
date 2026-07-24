@@ -717,3 +717,12 @@ html, body {
     radial-gradient(circle at 46% 92%, rgb(37 99 235 / 0.86), transparent 42%),
     linear-gradient(180deg, #ffffff, #effcff 48%, #3fbfff 72%, #1769ff);
 }
+
+/* Hidden scrollbar for wheel pickers and similar snap scrollers. */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

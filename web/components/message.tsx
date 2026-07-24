@@ -1,6 +1,6 @@
 "use client";
 
-import { User, Sparkles, FileText, Download } from "lucide-react";
+import { User, Sparkles, FileText, Download, BookOpen } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/i18n";
 import { StatusChip, type StatusInfo } from "./status-chip";
@@ -23,6 +23,7 @@ export type ChatMessage = {
   status?: StatusInfo;
   artifacts?: MessageArtifact[];
   drafts?: OaDraft[];
+  kbSources?: { title: string; doc_id: string }[];
 };
 
 export function MessageBubble({
@@ -103,6 +104,23 @@ export function MessageBubble({
                 {message.drafts.map((d, i) => (
                   <OaDraftCard key={i} draft={d} />
                 ))}
+              </div>
+            ) : null}
+            {message.kbSources && message.kbSources.length > 0 ? (
+              <div className="mt-3 border-t border-border/60 pt-2.5">
+                <div className="text-[11px] text-fg-subtle mb-1.5">{t.knowledgeBase}</div>
+                <div className="flex flex-wrap gap-2">
+                  {message.kbSources.map((s) => (
+                    <span
+                      key={s.doc_id}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-bg-subtle/60 px-2.5 py-1 text-xs text-fg-muted"
+                      title={s.title}
+                    >
+                      <BookOpen size={12} className="text-accent shrink-0" />
+                      <span className="truncate max-w-[20ch]">{s.title}</span>
+                    </span>
+                  ))}
+                </div>
               </div>
             ) : null}
           </>

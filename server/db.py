@@ -374,6 +374,7 @@ CREATE TABLE IF NOT EXISTS calendar_events (
     end_at REAL,
     location TEXT,
     attendees_json TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'active',
     created_at REAL NOT NULL,
     FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
 );
@@ -418,6 +419,7 @@ def init() -> None:
             _migrate_image_template_style(conn)
             _migrate_evidence_explicit(conn)
             _migrate_kb_scope(conn)
+            _migrate_calendar_status(conn)
             _seed_image_templates(conn)
         _INITIALIZED = True
 
@@ -448,6 +450,12 @@ def _migrate_kb_scope(conn: sqlite3.Connection) -> None:
     if "kb_documents" in {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}:
         if "scope" not in _table_columns(conn, "kb_documents"):
             conn.execute("ALTER TABLE kb_documents ADD COLUMN scope TEXT NOT NULL DEFAULT 'org'")
+
+
+def _migrate_calendar_status(conn: sqlite3.Connection) -> None:
+    if "calendar_events" in {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}:
+        if "status" not in _table_columns(conn, "calendar_events"):
+            conn.execute("ALTER TABLE calendar_events ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
 
 
 def _migrate_news_summary_sources(conn: sqlite3.Connection) -> None:
@@ -1769,6 +1777,43 @@ def act_on_approval(
         return _approval_row(conn, row)
 
 
+def update_approval(approval_id: str, applicant_id: str, title=None, form=None) -> dict | None:
+    """Modify one's own still-pending application (title/form). Owner-only."""
+    _ensure()
+    with _connect() as conn:
+        appr = conn.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
+        if appr is None or appr["applicant_id"] != applicant_id or appr["status"] != "pending":
+            return None
+        sets, args = [], []
+        if title is not None:
+            sets.append("title = ?")
+            args.append(title)
+        if form is not None:
+            sets.append("form_json = ?")
+            args.append(json.dumps(form, ensure_ascii=False))
+        if sets:
+            sets.append("updated_at = ?")
+            args.append(time.time())
+            conn.execute(f"UPDATE approvals SET {', '.join(sets)} WHERE id = ?", (*args, approval_id))
+        row = conn.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
+        return _approval_row(conn, row)
+
+
+def withdraw_approval(approval_id: str, applicant_id: str) -> dict | None:
+    """Withdraw one's own still-pending application."""
+    _ensure()
+    with _connect() as conn:
+        appr = conn.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
+        if appr is None or appr["applicant_id"] != applicant_id or appr["status"] != "pending":
+            return None
+        conn.execute(
+            "UPDATE approvals SET status = 'withdrawn', updated_at = ? WHERE id = ?",
+            (time.time(), approval_id),
+        )
+        row = conn.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
+        return _approval_row(conn, row)
+
+
 # ---------- AI OA: tasks ----------
 
 def create_task(
@@ -1801,38 +1846,103 @@ def get_task(task_id: str) -> dict | None:
 
 
 def list_tasks(user_id: str, scope: str = "assigned") -> list[dict]:
+    """Tasks are visible only to their creator and assignee.
+
+    scope: 'created' = active tasks I created; 'assigned' = active tasks others assigned
+    to me; 'done' = my completed tasks (either role); 'all' = any of mine (any status).
+    """
     _ensure()
     with _connect() as conn:
         if scope == "created":
-            where = "creator_id = ?"
+            where = "creator_id = ? AND status != 'done'"
             args: tuple = (user_id,)
+        elif scope == "done":
+            where = "(creator_id = ? OR assignee_id = ?) AND status = 'done'"
+            args = (user_id, user_id)
         elif scope == "all":
             where = "creator_id = ? OR assignee_id = ?"
             args = (user_id, user_id)
-        else:  # assigned
-            where = "assignee_id = ?"
-            args = (user_id,)
+        else:  # assigned to me by someone else
+            where = "assignee_id = ? AND creator_id != ? AND status != 'done'"
+            args = (user_id, user_id)
         rows = conn.execute(
             f"SELECT * FROM tasks WHERE {where} ORDER BY "
-            "CASE status WHEN 'open' THEN 0 ELSE 1 END, created_at DESC",
+            "CASE status WHEN 'open' THEN 0 WHEN 'awaiting_confirmation' THEN 1 ELSE 2 END, "
+            "COALESCE(due_at, 9e18) ASC, created_at DESC",
             args,
         ).fetchall()
         return [dict(r) for r in rows]
 
 
+def _is_self_task(row) -> bool:
+    return row["assignee_id"] is None or row["assignee_id"] == row["creator_id"]
+
+
 def update_task_status(task_id: str, user_id: str, status: str) -> dict | None:
-    """Mark a task open/done. Only the creator or assignee may change it."""
+    """Progress a task's status with the assignment rules:
+
+    - reopen ('open') by creator or assignee;
+    - complete ('done') on a self task → done immediately;
+    - complete on an assigned task by the assignee → 'awaiting_confirmation'
+      (the creator must confirm before it counts as done).
+    """
     _ensure()
     now = time.time()
     with _connect() as conn:
         row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
         if row is None or user_id not in (row["creator_id"], row["assignee_id"]):
             return None
+        if status == "open":
+            new_status = "open"
+        elif status == "done":
+            if _is_self_task(row):
+                new_status = "done"
+            elif user_id == row["assignee_id"]:
+                new_status = "awaiting_confirmation"
+            else:
+                return None  # creator can't self-complete an assigned task; must confirm
+        else:
+            return None
         conn.execute(
-            "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?", (status, now, task_id)
+            "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?", (new_status, now, task_id)
         )
         row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
         return dict(row)
+
+
+def confirm_task(task_id: str, creator_id: str) -> dict | None:
+    """The creator confirms an assignee-completed task, moving it to 'done' for both."""
+    _ensure()
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        if row is None or row["creator_id"] != creator_id or row["status"] != "awaiting_confirmation":
+            return None
+        conn.execute(
+            "UPDATE tasks SET status = 'done', updated_at = ? WHERE id = ?", (time.time(), task_id)
+        )
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        return dict(row)
+
+
+def clear_done_tasks(user_id: str) -> int:
+    """Clear the caller's completed tasks (either role)."""
+    _ensure()
+    with _connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM tasks WHERE (creator_id = ? OR assignee_id = ?) AND status = 'done'",
+            (user_id, user_id),
+        )
+        return cur.rowcount
+
+
+def delete_task(task_id: str, user_id: str) -> bool:
+    """Delete a task. Only the creator may delete."""
+    _ensure()
+    with _connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM tasks WHERE id = ? AND creator_id = ?", (task_id, user_id)
+        )
+        return cur.rowcount > 0
 
 
 # ---------- AI OA: calendar ----------
@@ -1881,6 +1991,52 @@ def list_events(owner_id: str, since: float | None = None) -> list[dict]:
                 (owner_id,),
             ).fetchall()
         return [_event_row(r) for r in rows]
+
+
+def get_event(event_id: str) -> dict | None:
+    _ensure()
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM calendar_events WHERE id = ?", (event_id,)).fetchone()
+        return _event_row(row) if row else None
+
+
+def update_event(event_id: str, owner_id: str, fields: dict) -> dict | None:
+    """Update an event's editable fields and/or status. Only the owner may edit."""
+    _ensure()
+    allowed = ("title", "start_at", "end_at", "location", "status")
+    sets = []
+    args: list = []
+    for key in allowed:
+        if key in fields and fields[key] is not None:
+            sets.append(f"{key} = ?")
+            args.append(fields[key])
+    if "attendees" in fields and fields["attendees"] is not None:
+        sets.append("attendees_json = ?")
+        args.append(json.dumps(list(fields["attendees"]), ensure_ascii=False))
+    if not sets:
+        return get_event(event_id)
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT owner_id FROM calendar_events WHERE id = ?", (event_id,)
+        ).fetchone()
+        if row is None or row["owner_id"] != owner_id:
+            return None
+        conn.execute(
+            f"UPDATE calendar_events SET {', '.join(sets)} WHERE id = ?", (*args, event_id)
+        )
+        updated = conn.execute(
+            "SELECT * FROM calendar_events WHERE id = ?", (event_id,)
+        ).fetchone()
+        return _event_row(updated)
+
+
+def delete_event(event_id: str, owner_id: str) -> bool:
+    _ensure()
+    with _connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM calendar_events WHERE id = ? AND owner_id = ?", (event_id, owner_id)
+        )
+        return cur.rowcount > 0
 
 
 # ---------- AI OA: knowledge base ----------

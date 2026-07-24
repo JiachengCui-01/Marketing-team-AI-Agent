@@ -29,6 +29,11 @@ function fmt(v: unknown): string {
   return String(v);
 }
 
+type CardState = { status: "submitted" | "error" | "cancelled"; note: string };
+// Persist a draft card's terminal state for the session so it survives ChatPanel
+// remounts (e.g. switching to another view and back). Keyed by the draft's stable id.
+const committedStore = new Map<string, CardState>();
+
 function draftRows(draft: OaDraft): [string, string][] {
   if (draft.kind === "task") {
     return [
@@ -57,10 +62,18 @@ function draftRows(draft: OaDraft): [string, string][] {
  * own submit state and commits via the matching API on confirm (human-in-the-loop). */
 export function OaDraftCard({ draft }: { draft: OaDraft }) {
   const { locale } = useI18n();
+  const cardKey = String(draft._id ?? `${draft.kind}:${draft.title}`);
+  const persisted = committedStore.get(cardKey);
   const [status, setStatus] = useState<"pending" | "submitting" | "submitted" | "error" | "cancelled">(
-    "pending",
+    persisted?.status ?? "pending",
   );
-  const [note, setNote] = useState("");
+  const [note, setNote] = useState(persisted?.note ?? "");
+
+  const commit = (s: CardState) => {
+    committedStore.set(cardKey, s);
+    setStatus(s.status);
+    setNote(s.note);
+  };
 
   const kindLabel = KIND_LABEL[draft.kind] ?? "草稿";
   const badge =
@@ -71,6 +84,7 @@ export function OaDraftCard({ draft }: { draft: OaDraft }) {
   async function confirm() {
     setStatus("submitting");
     try {
+      let note = "已提交";
       if (draft.kind === "task") {
         const task = await createTask({
           title: String(draft.title),
@@ -78,7 +92,9 @@ export function OaDraftCard({ draft }: { draft: OaDraft }) {
           priority: draft.priority ? String(draft.priority) : undefined,
           assignee_name: draft.assignee_name ? String(draft.assignee_name) : undefined,
         });
-        setNote(task.assignee_name ? `已创建，指派给 ${task.assignee_name}` : "已创建任务");
+        note = task.assignee_name && task.assignee_id !== task.creator_id
+          ? `已创建，指派给 ${task.assignee_name}`
+          : "已创建任务";
       } else if (draft.kind === "calendar") {
         const ev = await createEvent({
           title: String(draft.title),
@@ -87,7 +103,8 @@ export function OaDraftCard({ draft }: { draft: OaDraft }) {
           location: draft.location ? String(draft.location) : undefined,
           attendees: Array.isArray(draft.attendees) ? (draft.attendees as string[]) : undefined,
         });
-        setNote(`已创建日程：${new Date(ev.start_at * 1000).toLocaleString()}`);
+        if (typeof window !== "undefined") window.dispatchEvent(new Event("oa-calendar-changed"));
+        note = `已创建日程：${new Date(ev.start_at * 1000).toLocaleString()}`;
       } else {
         const appr = await createApproval({
           type: String(draft.type ?? "general"),
@@ -95,12 +112,11 @@ export function OaDraftCard({ draft }: { draft: OaDraft }) {
           fields: (draft.fields as Record<string, unknown>) ?? {},
         });
         const approver = appr.steps[0]?.approver_name ?? "";
-        setNote(approver ? `已提交，待 ${approver} 审批` : "已提交");
+        note = approver ? `已提交，待 ${approver} 审批` : "已提交";
       }
-      setStatus("submitted");
+      commit({ status: "submitted", note });
     } catch (e) {
-      setNote(localizeError(e, locale));
-      setStatus("error");
+      commit({ status: "error", note: localizeError(e, locale) });
     }
   }
 
@@ -149,7 +165,7 @@ export function OaDraftCard({ draft }: { draft: OaDraft }) {
             {confirmLabel}
           </button>
           <button
-            onClick={() => setStatus("cancelled")}
+            onClick={() => commit({ status: "cancelled", note: "" })}
             className="btn-ghost h-8 px-3 text-sm border border-border"
           >
             取消
