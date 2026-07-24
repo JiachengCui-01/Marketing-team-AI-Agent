@@ -173,18 +173,21 @@ export function CalendarPanel({ onBack }: { onBack: () => void }) {
   }, [form, zh, load, locale]);
 
   const timeField = (label: string, value: string, onChange: (iso: string) => void, min?: string) => (
-    <div className="flex-1 min-w-[240px]">
-      <div className="text-[11px] text-fg-muted mb-1">{label}</div>
-      {manual ? (
-        <input
-          value={value.replace("T", " ")}
-          onChange={(e) => onChange(e.target.value.trim().replace(" ", "T"))}
-          placeholder="2026-07-26 14:30"
-          className="w-full h-9 px-3 rounded-lg bg-bg-elevated border border-border text-sm outline-none focus:border-accent"
-        />
-      ) : (
-        <DateTimeWheel value={value || null} onChange={onChange} zh={zh} min={min} />
-      )}
+    <div className="flex-1 flex justify-center">
+      {/* Fixed-width column so the label sits directly above the (centered) picker box. */}
+      <div className="w-[268px] max-w-full">
+        <div className="text-[11px] text-fg-muted mb-1">{label}</div>
+        {manual ? (
+          <input
+            value={value.replace("T", " ")}
+            onChange={(e) => onChange(e.target.value.trim().replace(" ", "T"))}
+            placeholder="2026-07-26 14:30"
+            className="w-full h-9 px-3 rounded-lg bg-bg-elevated border border-border text-sm outline-none focus:border-accent"
+          />
+        ) : (
+          <DateTimeWheel value={value || null} onChange={onChange} zh={zh} min={min} />
+        )}
+      </div>
     </div>
   );
 
@@ -209,7 +212,7 @@ export function CalendarPanel({ onBack }: { onBack: () => void }) {
       </header>
 
       {formOpen ? (
-        <div className="mx-3 mt-3 rounded-xl border border-border bg-bg-subtle p-3 space-y-3 animate-fade-in">
+        <div className="cal-form mx-3 mt-3 rounded-xl border border-border bg-bg-subtle p-3 space-y-3 animate-fade-in">
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium">
               {form.id ? (zh ? "修改日程" : "Edit event") : zh ? "新建日程" : "New event"}

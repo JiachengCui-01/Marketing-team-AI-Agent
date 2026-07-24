@@ -192,11 +192,12 @@ export function DateTimeWheel({
 
   return (
     <div className="flex justify-center">
-      <div className="relative inline-flex items-stretch gap-1 rounded-xl border border-border bg-bg-subtle px-2 py-1">
-        {/* liquid-glass selection band, just wide enough for the wheels */}
+      <div className="dtw-shell relative inline-flex items-stretch gap-1 rounded-xl border border-border bg-bg-subtle px-2 py-1">
+        {/* liquid-glass selection band, just wide enough for the wheels. The +5 top
+            offset absorbs the shell's 4px top padding so the band centers on the row. */}
         <div
           className="dtw-band pointer-events-none absolute inset-x-2 rounded-lg"
-          style={{ top: ITEM_H * PAD + 1, height: ITEM_H - 2 }}
+          style={{ top: ITEM_H * PAD + 5, height: ITEM_H - 2 }}
           aria-hidden
         />
         <Wheel options={dayOpts} value={dayIdx} onChange={(v) => emit(v, selHour, selMinute)} width={132} />
