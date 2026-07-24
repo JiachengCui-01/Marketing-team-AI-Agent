@@ -377,7 +377,7 @@ function EventRow({
   const hasDetails = !!(ev.description || ev.location || ev.attendees.length);
 
   return (
-    <div className="border border-border rounded-xl bg-bg-subtle">
+    <div className="cal-row border border-border rounded-xl bg-bg-subtle">
       <div className="flex items-start gap-2 p-3">
         <button onClick={onToggle} className="min-w-0 flex-1 text-left">
           <div className={`text-sm font-medium flex items-center gap-1.5 ${completed ? "line-through text-fg-subtle" : "text-fg"}`}>
