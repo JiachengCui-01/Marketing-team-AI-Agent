@@ -72,6 +72,17 @@ def run_oa_copilot(
     tools = [*OA_TOOLS, *DELEGATION_TOOLS]
     system = SYSTEM_TEMPLATE.format(now=time.strftime("%Y-%m-%d %H:%M %A", time.localtime()))
 
+    if on_event:
+        on_event(
+            "orchestrator_step",
+            {
+                "stage": "intake",
+                "title": "理解任务",
+                "detail": "读取你的请求，判断需要办公能力（审批/任务/日程/知识库）还是营销专家。",
+                "status": "running",
+            },
+        )
+
     for _ in range(MAX_TOOL_ROUNDS):
         response = client.messages.create(
             model=MODEL_ID,
@@ -90,6 +101,10 @@ def run_oa_copilot(
             if stop == "refusal" and not final:
                 final = "（助手拒绝了本次请求。）"
             if on_event:
+                on_event(
+                    "orchestrator_step",
+                    {"stage": "synthesis", "title": "汇总回复", "detail": "整理结果并生成最终回复。", "status": "done"},
+                )
                 _stream_text(on_event, final)
                 on_event("result", {"text": final})
             return final

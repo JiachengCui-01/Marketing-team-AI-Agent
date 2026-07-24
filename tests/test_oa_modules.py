@@ -119,11 +119,11 @@ class OaModulesTests(unittest.TestCase):
         self.assertTrue(len(found) >= 1)
         self.assertEqual(found[0]["title"], "报销制度")
 
-        # Bob is in the same org, so shared org knowledge is visible to him.
+        # Uploads go to the user's PERSONAL KB, so an org peer cannot see Alice's doc.
         found_bob = self.client.post(
             "/api/kb/search", headers=self.bob, json={"q": "报销"}
         ).json()["results"]
-        self.assertTrue(len(found_bob) >= 1)
+        self.assertEqual(len(found_bob), 0)
 
         self.assertEqual(
             self.client.delete(f"/api/kb/documents/{doc_id}", headers=self.alice).status_code, 200

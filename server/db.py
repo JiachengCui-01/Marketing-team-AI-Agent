@@ -387,6 +387,7 @@ CREATE TABLE IF NOT EXISTS kb_documents (
     text_content TEXT NOT NULL DEFAULT '',
     source_upload_id TEXT,
     source_artifact_id TEXT,
+    scope TEXT NOT NULL DEFAULT 'org',
     created_at REAL NOT NULL,
     FOREIGN KEY (uploader_id) REFERENCES users(id) ON DELETE CASCADE
 );
@@ -416,6 +417,7 @@ def init() -> None:
             _migrate_news_summary_sources(conn)
             _migrate_image_template_style(conn)
             _migrate_evidence_explicit(conn)
+            _migrate_kb_scope(conn)
             _seed_image_templates(conn)
         _INITIALIZED = True
 
@@ -440,6 +442,12 @@ def _migrate_news_config_language(conn: sqlite3.Connection) -> None:
 def _migrate_news_config_cancelled_at(conn: sqlite3.Connection) -> None:
     if "cancelled_at" not in _table_columns(conn, "news_configs"):
         conn.execute("ALTER TABLE news_configs ADD COLUMN cancelled_at REAL")
+
+
+def _migrate_kb_scope(conn: sqlite3.Connection) -> None:
+    if "kb_documents" in {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}:
+        if "scope" not in _table_columns(conn, "kb_documents"):
+            conn.execute("ALTER TABLE kb_documents ADD COLUMN scope TEXT NOT NULL DEFAULT 'org'")
 
 
 def _migrate_news_summary_sources(conn: sqlite3.Connection) -> None:
@@ -1885,6 +1893,7 @@ def create_kb_document(
     chunks: Iterable[str] | None = None,
     source_upload_id: str | None = None,
     embeddings: list[list[float]] | None = None,
+    scope: str = "org",
 ) -> dict:
     _ensure()
     did = uuid.uuid4().hex
@@ -1893,8 +1902,8 @@ def create_kb_document(
     with _connect() as conn:
         conn.execute(
             "INSERT INTO kb_documents (id, org_id, uploader_id, title, text_content, "
-            "source_upload_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (did, org_id, uploader_id, title, text_content, source_upload_id, now),
+            "source_upload_id, scope, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (did, org_id, uploader_id, title, text_content, source_upload_id, scope, now),
         )
         for idx, chunk in enumerate(chunk_list):
             emb = None
@@ -1908,18 +1917,20 @@ def create_kb_document(
         return dict(row)
 
 
-def list_kb_chunks_for_org(org_id: str | None) -> list[dict]:
-    """All chunks in an org's documents, with parsed embeddings, for retrieval."""
+def list_kb_chunks_for_org(org_id: str | None, user_id: str | None = None) -> list[dict]:
+    """Chunks visible for retrieval: the org's shared (enterprise) documents plus the
+    given user's own personal documents. Includes parsed embeddings."""
     _ensure()
     with _connect() as conn:
         rows = conn.execute(
             """
             SELECT c.doc_id, c.chunk_index, c.text, c.embedding_json, d.title
             FROM kb_chunks c JOIN kb_documents d ON d.id = c.doc_id
-            WHERE d.org_id IS ?
+            WHERE (d.org_id IS ? AND d.scope = 'org')
+               OR (d.uploader_id = ? AND d.scope = 'personal')
             ORDER BY c.doc_id, c.chunk_index
             """,
-            (org_id,),
+            (org_id, user_id),
         ).fetchall()
     out = []
     for r in rows:
@@ -1934,13 +1945,27 @@ def list_kb_chunks_for_org(org_id: str | None) -> list[dict]:
 
 
 def list_kb_documents(org_id: str | None) -> list[dict]:
+    """List an org's shared (enterprise) documents."""
     _ensure()
     with _connect() as conn:
         rows = conn.execute(
             "SELECT id, org_id, uploader_id, title, source_upload_id, created_at, "
             "LENGTH(text_content) AS text_length FROM kb_documents "
-            "WHERE org_id IS ? ORDER BY created_at DESC",
+            "WHERE org_id IS ? AND scope = 'org' ORDER BY created_at DESC",
             (org_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def list_personal_kb_documents(user_id: str) -> list[dict]:
+    """List a user's own personal-knowledge documents (private to them)."""
+    _ensure()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, org_id, uploader_id, title, source_upload_id, created_at, "
+            "LENGTH(text_content) AS text_length FROM kb_documents "
+            "WHERE uploader_id = ? AND scope = 'personal' ORDER BY created_at DESC",
+            (user_id,),
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -1950,6 +1975,16 @@ def delete_kb_document(doc_id: str, org_id: str | None) -> bool:
     with _connect() as conn:
         cur = conn.execute(
             "DELETE FROM kb_documents WHERE id = ? AND org_id IS ?", (doc_id, org_id)
+        )
+        return cur.rowcount > 0
+
+
+def delete_personal_kb_document(doc_id: str, user_id: str) -> bool:
+    _ensure()
+    with _connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM kb_documents WHERE id = ? AND uploader_id = ? AND scope = 'personal'",
+            (doc_id, user_id),
         )
         return cur.rowcount > 0
 

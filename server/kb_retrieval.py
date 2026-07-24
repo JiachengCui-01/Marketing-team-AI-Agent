@@ -114,13 +114,15 @@ def retrieve(
     history: list[dict] | None = None,
     limit: int = 5,
     locale: str = "zh",
+    user_id: str | None = None,
 ) -> dict:
-    """Run the full pipeline. Returns ``{results, rewrite, method}``."""
+    """Run the full pipeline over the org's shared docs + the user's personal docs.
+    Returns ``{results, rewrite, method}``."""
     query = (query or "").strip()
     if not query:
         return {"results": [], "rewrite": None, "method": "empty"}
 
-    chunks = db.list_kb_chunks_for_org(org_id)
+    chunks = db.list_kb_chunks_for_org(org_id, user_id)
     if not chunks:
         rw = query_rewrite.rewrite_query(query, history, locale)
         return {"results": [], "rewrite": rw, "method": "empty_corpus"}

@@ -16,11 +16,8 @@ import {
   Image as ImageIcon,
   MessageCircle,
   Contact,
-  Sparkles,
   FileCheck2,
   CheckSquare,
-  Calendar,
-  BookOpen,
 } from "lucide-react";
 import { ContextMenu, type MenuItem } from "./context-menu";
 import type { GroupRecord, SessionRecord } from "@/lib/api";
@@ -50,11 +47,8 @@ export function SessionSidebar({
   onCreateGroup,
   onRenameGroup,
   onDeleteGroup,
-  onOpenOa,
   onOpenApprovals,
   onOpenTasks,
-  onOpenCalendar,
-  onOpenKb,
   onOpenMessages,
   onOpenContacts,
   onOpenNews,
@@ -76,11 +70,8 @@ export function SessionSidebar({
   onCreateGroup: (name: string) => Promise<string> | void;
   onRenameGroup: (id: string, name: string) => void;
   onDeleteGroup: (id: string) => void;
-  onOpenOa: () => void;
   onOpenApprovals: () => void;
   onOpenTasks: () => void;
-  onOpenCalendar: () => void;
-  onOpenKb: () => void;
   onOpenMessages: () => void;
   onOpenContacts: () => void;
   onOpenNews: () => void;
@@ -125,46 +116,6 @@ export function SessionSidebar({
           <Plus size={16} />
         </button>
         <button
-          onClick={onOpenOa}
-          className="btn-ghost w-9 h-9"
-          aria-label={t.oaCopilot}
-          title={t.oaCopilot}
-        >
-          <Sparkles size={16} className="text-accent" />
-        </button>
-        <button
-          onClick={onOpenApprovals}
-          className="btn-ghost w-9 h-9"
-          aria-label={t.approvals}
-          title={t.approvals}
-        >
-          <FileCheck2 size={16} className="text-feature-image" />
-        </button>
-        <button
-          onClick={onOpenTasks}
-          className="btn-ghost w-9 h-9"
-          aria-label={t.tasks}
-          title={t.tasks}
-        >
-          <CheckSquare size={16} className="text-feature-image" />
-        </button>
-        <button
-          onClick={onOpenCalendar}
-          className="btn-ghost w-9 h-9"
-          aria-label={t.calendar}
-          title={t.calendar}
-        >
-          <Calendar size={16} className="text-feature-news" />
-        </button>
-        <button
-          onClick={onOpenKb}
-          className="btn-ghost w-9 h-9"
-          aria-label={t.knowledgeBase}
-          title={t.knowledgeBase}
-        >
-          <BookOpen size={16} className="text-feature-image" />
-        </button>
-        <button
           onClick={onOpenMessages}
           className="btn-ghost w-9 h-9 relative"
           aria-label={t.messages}
@@ -182,6 +133,22 @@ export function SessionSidebar({
           title={t.contacts}
         >
           <Contact size={16} className="text-feature-image" />
+        </button>
+        <button
+          onClick={onOpenApprovals}
+          className="btn-ghost w-9 h-9"
+          aria-label={t.approvals}
+          title={t.approvals}
+        >
+          <FileCheck2 size={16} className="text-feature-image" />
+        </button>
+        <button
+          onClick={onOpenTasks}
+          className="btn-ghost w-9 h-9"
+          aria-label={t.tasks}
+          title={t.tasks}
+        >
+          <CheckSquare size={16} className="text-feature-image" />
         </button>
         <button
           onClick={onOpenNews}
@@ -346,41 +313,6 @@ export function SessionSidebar({
 
       <div className="px-1.5 pt-2 space-y-0.5">
         <button
-          onClick={onOpenOa}
-          className="btn-ghost w-full justify-start px-2.5 py-2 text-sm font-medium"
-        >
-          <Sparkles size={15} className="text-accent shrink-0" />
-          <span className="truncate">{t.oaCopilot}</span>
-        </button>
-        <button
-          onClick={onOpenApprovals}
-          className="btn-ghost w-full justify-start px-2.5 py-2 text-sm font-medium"
-        >
-          <FileCheck2 size={15} className="text-feature-image shrink-0" />
-          <span className="truncate">{t.approvals}</span>
-        </button>
-        <button
-          onClick={onOpenTasks}
-          className="btn-ghost w-full justify-start px-2.5 py-2 text-sm font-medium"
-        >
-          <CheckSquare size={15} className="text-feature-image shrink-0" />
-          <span className="truncate">{t.tasks}</span>
-        </button>
-        <button
-          onClick={onOpenCalendar}
-          className="btn-ghost w-full justify-start px-2.5 py-2 text-sm font-medium"
-        >
-          <Calendar size={15} className="text-feature-news shrink-0" />
-          <span className="truncate">{t.calendar}</span>
-        </button>
-        <button
-          onClick={onOpenKb}
-          className="btn-ghost w-full justify-start px-2.5 py-2 text-sm font-medium"
-        >
-          <BookOpen size={15} className="text-feature-image shrink-0" />
-          <span className="truncate">{t.knowledgeBase}</span>
-        </button>
-        <button
           onClick={onOpenMessages}
           className="btn-ghost w-full justify-start px-2.5 py-2 text-sm font-medium"
         >
@@ -398,6 +330,20 @@ export function SessionSidebar({
         >
           <Contact size={15} className="text-feature-image shrink-0" />
           <span className="truncate">{t.contacts}</span>
+        </button>
+        <button
+          onClick={onOpenApprovals}
+          className="btn-ghost w-full justify-start px-2.5 py-2 text-sm font-medium"
+        >
+          <FileCheck2 size={15} className="text-feature-image shrink-0" />
+          <span className="truncate">{t.approvals}</span>
+        </button>
+        <button
+          onClick={onOpenTasks}
+          className="btn-ghost w-full justify-start px-2.5 py-2 text-sm font-medium"
+        >
+          <CheckSquare size={15} className="text-feature-image shrink-0" />
+          <span className="truncate">{t.tasks}</span>
         </button>
         <button
           onClick={onOpenNews}

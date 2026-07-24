@@ -1160,6 +1160,13 @@ export type ApprovalDraft = {
   fields: Record<string, unknown>;
 };
 
+// A human-in-the-loop draft proposed by the AI workspace (approval / task / calendar),
+// emitted as an `oa_draft` stream event and confirmed by the user before it commits.
+export type OaDraft = { kind: "approval" | "task" | "calendar"; title: string } & Record<
+  string,
+  unknown
+>;
+
 export function oaStreamUrl(prompt: string): string {
   const url = new URL(`${API_BASE}/api/oa/stream`, urlBase());
   url.searchParams.set("prompt", prompt);

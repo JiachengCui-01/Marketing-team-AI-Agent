@@ -221,7 +221,9 @@ def build_oa_handlers(
         if not query:
             return "请提供检索问题。"
         org = db.get_current_org(user_id)
-        out = kb_retrieval.retrieve(org["id"] if org else None, query, history=history, limit=5)
+        out = kb_retrieval.retrieve(
+            org["id"] if org else None, query, history=history, limit=5, user_id=user_id
+        )
         hits = out["results"]
         if not hits:
             return "知识库中没有找到相关内容。请提示用户先在“知识库”上传文档。"

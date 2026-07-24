@@ -324,14 +324,14 @@ class RouteTests(unittest.TestCase):
         )
 
     def test_stream_errors_are_persisted_to_history(self) -> None:
-        from server import streaming
+        from server import routes
 
-        old_run_orchestrator = streaming.run_orchestrator
+        old_runner = routes.run_oa_copilot
 
         def fail_orchestrator(*args, **kwargs) -> None:  # noqa: ANN002, ANN003
             raise RuntimeError("model unavailable")
 
-        streaming.run_orchestrator = fail_orchestrator
+        routes.run_oa_copilot = fail_orchestrator
         try:
             session_id = self._create_session()
 
@@ -349,17 +349,17 @@ class RouteTests(unittest.TestCase):
             self.assertEqual(messages[-1]["role"], "assistant")
             self.assertEqual(messages[-1]["content"], "**Error:** model unavailable")
         finally:
-            streaming.run_orchestrator = old_run_orchestrator
+            routes.run_oa_copilot = old_runner
 
     def test_complete_session_returns_non_streamed_result(self) -> None:
         from server import routes
 
-        old_run_orchestrator = routes.run_orchestrator
+        old_runner = routes.run_oa_copilot
 
-        def complete_orchestrator(client, conversation, prompt, on_event) -> None:
+        def complete_orchestrator(client, conversation, prompt, on_event, **kwargs) -> None:
             on_event("result", {"text": "Done without streaming."})
 
-        routes.run_orchestrator = complete_orchestrator
+        routes.run_oa_copilot = complete_orchestrator
         try:
             session_id = self._create_session()
 
@@ -375,7 +375,7 @@ class RouteTests(unittest.TestCase):
             self.assertEqual(messages[-1]["role"], "assistant")
             self.assertEqual(messages[-1]["content"], "Done without streaming.")
         finally:
-            routes.run_orchestrator = old_run_orchestrator
+            routes.run_oa_copilot = old_runner
 
     def test_chinese_prompt_defaults_pdf_deliverable_to_chinese(self) -> None:
         from server import routes

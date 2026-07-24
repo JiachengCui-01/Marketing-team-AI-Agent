@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Modal } from "@/components/modal";
+import { KbManager } from "@/components/kb-manager";
 import {
+  BookOpen,
   Brain,
   Check,
   ChevronDown,
@@ -704,6 +706,8 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
   const languageRef = useRef<HTMLDivElement>(null);
   const themeRef = useRef<HTMLDivElement>(null);
   const memoryRef = useRef<HTMLDivElement>(null);
+  const kbRef = useRef<HTMLDivElement>(null);
+  const [kbOpen, setKbOpen] = useState(false);
   const activeTheme = mounted ? (theme === "system" ? resolvedTheme : theme) ?? "light" : "light";
   const labels =
     locale === "zh"
@@ -712,6 +716,9 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
           languageBody: "选择界面显示语言。",
           themeGroup: "主题外观",
           themeBody: "选择工作台视觉主题。",
+          kbGroup: "个人知识库",
+          kbBody: "上传并管理你个人账号的知识库文档，AI 工作台会在回答时检索这些内容。",
+          kbManage: "管理个人知识库",
           memoryGroup: "长期记忆",
           memoryBody: "查看和修改自动总结出的企业营销用户画像。",
           memoryHint: "每行一个偏好或事实，系统会在后续对话中优先参考这些信息。",
@@ -754,6 +761,9 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
           languageBody: "Choose the interface language.",
           themeGroup: "Appearance",
           themeBody: "Choose the workspace visual theme.",
+          kbGroup: "Personal knowledge base",
+          kbBody: "Upload and manage documents in your personal KB; the AI workspace retrieves from them when answering.",
+          kbManage: "Manage personal KB",
           memoryGroup: "Long-Term Memory",
           memoryBody: "View and edit the enterprise marketing profile summarized from chats.",
           memoryHint: "Use one fact or preference per line. Future chats will use these details first.",
@@ -794,6 +804,7 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
   const navItems = [
     { label: labels.languageGroup, icon: Languages, target: languageRef },
     { label: labels.themeGroup, icon: Palette, target: themeRef },
+    { label: labels.kbGroup, icon: BookOpen, target: kbRef },
     { label: labels.memoryGroup, icon: Brain, target: memoryRef },
   ];
   const memoryFields = [
@@ -1011,6 +1022,23 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
             </div>
           </section>
 
+          <section ref={kbRef} className="rounded-xl border border-border bg-bg/70 p-4 scroll-mt-2">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold">{labels.kbGroup}</p>
+                <p className="mt-1 text-xs text-fg-subtle">{labels.kbBody}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setKbOpen(true)}
+                className="btn-accent h-8 px-3 text-sm shrink-0 inline-flex items-center gap-1.5"
+              >
+                <BookOpen size={14} />
+                {labels.kbManage}
+              </button>
+            </div>
+          </section>
+
           <section ref={memoryRef} className="rounded-xl border border-border bg-bg/70 p-4 scroll-mt-2">
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -1139,6 +1167,11 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
           onCancel={() => setConfirmClearMemory(false)}
           onConfirm={clearMemory}
         />
+      ) : null}
+      {kbOpen ? (
+        <Modal title={labels.kbGroup} onClose={() => setKbOpen(false)} size="wide">
+          <KbManager />
+        </Modal>
       ) : null}
     </Modal>
   );

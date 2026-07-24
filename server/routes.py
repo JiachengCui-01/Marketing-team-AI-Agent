@@ -1176,7 +1176,8 @@ async def stream_session(
     # Build user_message — string if no images, else list-of-blocks.
     client = _client()
 
-    # Wrap the orchestrator's on_event to also persist assistant turns + bind artifacts to session.
+    # The unified AI workspace runs the OA copilot (marketing delegation + OA tools +
+    # human-in-the-loop drafts) over the persisted session conversation.
     event_stream = orchestrator_event_stream(
         client,
         conversation,
@@ -1189,6 +1190,7 @@ async def stream_session(
             auto_competitive_pdf=marketing_skills.requires_pdf_deliverable(selected_skills),
             output_language=output_language,
         ),
+        runner=functools.partial(run_oa_copilot, user_id=user["id"]),
     )
     return EventSourceResponse(to_sse(_with_current_user(user["id"], event_stream)))
 
@@ -1236,7 +1238,9 @@ async def complete_session(request: Request, session_id: str, payload: dict = Bo
     )(emit)
     token = db.CURRENT_USER_ID.set(user["id"])
     try:
-        await asyncio.to_thread(run_orchestrator, client, conversation, user_message, recorder)
+        await asyncio.to_thread(
+            run_oa_copilot, client, conversation, user_message, recorder, user_id=user["id"]
+        )
     except Exception as exc:  # noqa: BLE001
         recorder("error", {"message": str(exc)})
     finally:
@@ -1559,9 +1563,9 @@ def _chunk_text(text: str, size: int = 600) -> list[str]:
 
 @router.get("/kb/documents")
 def list_kb_docs(request: Request) -> dict:
+    """The Settings → knowledge-base modal manages the user's PERSONAL documents only."""
     user = auth.require_user(request)
-    org = db.get_or_create_default_org(user["id"], user.get("username") or "")
-    return {"documents": db.list_kb_documents(org.get("id"))}
+    return {"documents": db.list_personal_kb_documents(user["id"])}
 
 
 @router.post("/kb/documents")
@@ -1592,6 +1596,8 @@ async def create_kb_doc(request: Request, payload: dict = Body(...)) -> dict:
     chunks = _chunk_text(text)
     # Embed chunks for semantic search (None when embeddings are unavailable → lexical only).
     embeddings_vecs = await asyncio.to_thread(kb_retrieval.embed_chunks, chunks)
+    # Uploads here go into the user's PERSONAL knowledge base (private to them). The
+    # shared enterprise KB (scope='org', permissioned) is managed separately.
     doc = db.create_kb_document(
         org_id=org.get("id"),
         uploader_id=user["id"],
@@ -1600,6 +1606,7 @@ async def create_kb_doc(request: Request, payload: dict = Body(...)) -> dict:
         chunks=chunks,
         source_upload_id=source_upload_id,
         embeddings=embeddings_vecs,
+        scope="personal",
     )
     return {"document": {"id": doc["id"], "title": doc["title"], "created_at": doc["created_at"]}}
 
@@ -1607,8 +1614,7 @@ async def create_kb_doc(request: Request, payload: dict = Body(...)) -> dict:
 @router.delete("/kb/documents/{doc_id}")
 def delete_kb_doc(request: Request, doc_id: str) -> dict:
     user = auth.require_user(request)
-    org = db.get_or_create_default_org(user["id"], user.get("username") or "")
-    if not db.delete_kb_document(doc_id, org.get("id")):
+    if not db.delete_personal_kb_document(doc_id, user["id"]):
         raise HTTPException(404, "文档不存在。")
     return {"ok": True}
 
@@ -1623,7 +1629,7 @@ async def search_kb(request: Request, payload: dict = Body(...)) -> dict:
     history = payload.get("history") if isinstance(payload.get("history"), list) else None
     locale = _output_language_for_prompt(q)
     out = await asyncio.to_thread(
-        kb_retrieval.retrieve, org.get("id"), q, history, 8, locale
+        kb_retrieval.retrieve, org.get("id"), q, history, 8, locale, user["id"]
     )
     return {
         "results": out["results"],

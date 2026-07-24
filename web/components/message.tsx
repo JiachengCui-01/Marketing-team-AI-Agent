@@ -4,9 +4,10 @@ import { User, Sparkles, FileText, Download } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/i18n";
 import { StatusChip, type StatusInfo } from "./status-chip";
-import { artifactDownloadUrl } from "@/lib/api";
+import { artifactDownloadUrl, type OaDraft } from "@/lib/api";
 import { AvatarImage } from "./auth-ui";
 import { CitationMarkdown } from "./citation-markdown";
+import { OaDraftCard } from "./oa-draft-card";
 
 export type MessageArtifact = {
   artifact_id: string;
@@ -21,6 +22,7 @@ export type ChatMessage = {
   pending?: boolean;
   status?: StatusInfo;
   artifacts?: MessageArtifact[];
+  drafts?: OaDraft[];
 };
 
 export function MessageBubble({
@@ -93,6 +95,13 @@ export function MessageBubble({
                     onDownload={onDownloadArtifact}
                     downloadLabel={t.download}
                   />
+                ))}
+              </div>
+            ) : null}
+            {message.drafts && message.drafts.length > 0 ? (
+              <div className="flex flex-col">
+                {message.drafts.map((d, i) => (
+                  <OaDraftCard key={i} draft={d} />
                 ))}
               </div>
             ) : null}

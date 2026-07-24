@@ -20,11 +20,10 @@ import { NewsPanel } from "@/components/news-panel";
 import { MarketingImagePanel } from "@/components/image-panel";
 import { MessagesPanel } from "@/components/messages-panel";
 import { ContactsPanel } from "@/components/contacts-panel";
-import { OaPanel } from "@/components/oa-panel";
 import { ApprovalsPanel } from "@/components/approvals-panel";
 import { TasksPanel } from "@/components/tasks-panel";
 import { CalendarPanel } from "@/components/calendar-panel";
-import { KbPanel } from "@/components/kb-panel";
+import { HeaderCalendar } from "@/components/header-calendar";
 import { Spinner } from "@/components/ui/spinner";
 import type { ChatMessage, MessageArtifact } from "@/components/message";
 import { deriveStatus } from "@/components/status-chip";
@@ -41,6 +40,7 @@ import {
   logoutUser,
   setAuthToken,
   streamUrl,
+  type OaDraft,
   type UploadResponse,
   type UserProfile,
 } from "@/lib/api";
@@ -105,11 +105,9 @@ export default function HomePage() {
     | "image"
     | "messages"
     | "contacts"
-    | "oa"
     | "approvals"
     | "tasks"
     | "calendar"
-    | "kb"
   >("chat");
   const [leftWidth, setLeftWidth] = useState(LEFT_MIN_WIDTH);
   const [rightWidth, setRightWidth] = useState(RIGHT_MIN_WIDTH);
@@ -491,6 +489,9 @@ export default function HomePage() {
               mime: artifact.mime,
             });
           }
+        } else if (e.event === "oa_draft") {
+          const draft = e.payload as unknown as OaDraft;
+          updatePending((msg) => ({ ...msg, drafts: [...(msg.drafts ?? []), draft] }));
         } else if (e.event === "result") {
           const finalText = String(e.payload.text ?? "");
           updatePending((msg) => ({
@@ -694,6 +695,9 @@ export default function HomePage() {
               {t.navSubtitle}
             </p>
           </div>
+          <div className="absolute left-1/2 -translate-x-1/2 hidden md:block">
+            <HeaderCalendar onOpen={() => setView("calendar")} />
+          </div>
           <div className="ml-auto flex items-center gap-1">
             <UserMenu
               user={user}
@@ -722,11 +726,8 @@ export default function HomePage() {
           onCreateGroup={store.createGroup}
           onRenameGroup={store.renameGroup}
           onDeleteGroup={handleDeleteGroup}
-          onOpenOa={() => setView("oa")}
           onOpenApprovals={() => setView("approvals")}
           onOpenTasks={() => setView("tasks")}
-          onOpenCalendar={() => setView("calendar")}
-          onOpenKb={() => setView("kb")}
           onOpenMessages={() => setView("messages")}
           onOpenContacts={() => setView("contacts")}
           onOpenNews={() => setView("news")}
@@ -763,16 +764,12 @@ export default function HomePage() {
           )
         ) : (
           <>
-        {view === "oa" ? (
-          <OaPanel key={user.id} onBack={() => setView("chat")} />
-        ) : view === "approvals" ? (
+        {view === "approvals" ? (
           <ApprovalsPanel key={user.id} onBack={() => setView("chat")} />
         ) : view === "tasks" ? (
           <TasksPanel key={user.id} onBack={() => setView("chat")} />
         ) : view === "calendar" ? (
           <CalendarPanel key={user.id} onBack={() => setView("chat")} />
-        ) : view === "kb" ? (
-          <KbPanel key={user.id} onBack={() => setView("chat")} />
         ) : view === "news" ? (
           <NewsPanel key={user.id} onBack={() => setView("chat")} />
         ) : view === "image" ? (
