@@ -179,6 +179,12 @@ const messages = {
     newsCancelTask: "取消任务",
     newsCancelledNotice:
       "自动总结任务已中断。当前内容将保留至次日总结时间，之后自动清空。如需继续使用，请设置新任务。",
+    // AI OA
+    oaCopilot: "工作台 Copilot",
+    approvals: "审批",
+    tasks: "任务待办",
+    calendar: "日程",
+    knowledgeBase: "知识库",
     // enterprise collaboration: messages + contacts
     messages: "消息",
     contacts: "通讯录",
@@ -507,6 +513,12 @@ const messages = {
     newsCancelTask: "Cancel task",
     newsCancelledNotice:
       "The automatic summary has been stopped. The current content stays until tomorrow's summary time, then clears. Set up a new task to resume.",
+    // AI OA
+    oaCopilot: "Workspace Copilot",
+    approvals: "Approvals",
+    tasks: "Tasks",
+    calendar: "Calendar",
+    knowledgeBase: "Knowledge base",
     // enterprise collaboration: messages + contacts
     messages: "Messages",
     contacts: "Contacts",

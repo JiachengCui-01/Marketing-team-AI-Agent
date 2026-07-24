@@ -22,13 +22,21 @@ async def orchestrator_event_stream(
     prompt: Any,
     request: Request | None = None,
     on_event_wrapper: Callable[[Callable[[str, dict], None]], Callable[[str, dict], None]] | None = None,
+    runner: Callable[..., str] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Yield orchestrator events as they happen.
 
     ``prompt`` may be a string or a list of content blocks (for image attachments).
     ``on_event_wrapper`` lets callers intercept events for side effects (persistence,
     artifact binding) while still letting them flow to the SSE client.
+    ``runner`` is the turn function ``(client, conversation, prompt, on_event)`` — defaults
+    to the marketing orchestrator; the OA copilot passes its own runner here.
     """
+    # Resolve at call time (not as a default arg) so tests can monkeypatch the
+    # module-level ``run_orchestrator`` symbol.
+    if runner is None:
+        runner = run_orchestrator
+
     queue: asyncio.Queue[Any] = asyncio.Queue()
     loop = asyncio.get_running_loop()
     cancelled = threading.Event()
@@ -49,7 +57,7 @@ async def orchestrator_event_stream(
 
     async def worker() -> None:
         try:
-            await asyncio.to_thread(run_orchestrator, client, conversation, prompt, on_event)
+            await asyncio.to_thread(runner, client, conversation, prompt, on_event)
         except Exception as exc:  # noqa: BLE001
             on_event("error", {"message": str(exc)})
         finally:

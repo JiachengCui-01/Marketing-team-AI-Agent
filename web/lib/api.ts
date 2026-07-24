@@ -1127,3 +1127,227 @@ export function streamUrl(
   if (token) url.searchParams.set("token", token);
   return url.toString();
 }
+
+// ---------- AI OA ----------
+
+export type ApprovalStep = {
+  step_index: number;
+  approver_id: string;
+  approver_name: string | null;
+  action: "pending" | "approved" | "rejected";
+  comment: string | null;
+  acted_at: number | null;
+};
+
+export type ApprovalRecord = {
+  id: string;
+  type: string;
+  title: string;
+  form: Record<string, unknown>;
+  status: "pending" | "approved" | "rejected";
+  current_step: number;
+  created_at: number;
+  updated_at: number | null;
+  applicant_id: string;
+  applicant_name: string | null;
+  steps: ApprovalStep[];
+};
+
+export type ApprovalDraft = {
+  kind: "approval";
+  type: string;
+  title: string;
+  fields: Record<string, unknown>;
+};
+
+export function oaStreamUrl(prompt: string): string {
+  const url = new URL(`${API_BASE}/api/oa/stream`, urlBase());
+  url.searchParams.set("prompt", prompt);
+  const token = getAuthToken();
+  if (token) url.searchParams.set("token", token);
+  return url.toString();
+}
+
+export async function listApprovals(
+  scope: "mine" | "pending" | "acted",
+): Promise<ApprovalRecord[]> {
+  const res = await fetch(`${API_BASE}/api/approvals?scope=${scope}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).approvals;
+}
+
+export async function createApproval(payload: {
+  type: string;
+  title: string;
+  fields: Record<string, unknown>;
+}): Promise<ApprovalRecord> {
+  const res = await fetch(`${API_BASE}/api/approvals`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).approval;
+}
+
+export async function actApproval(
+  id: string,
+  action: "approved" | "rejected",
+  comment?: string,
+): Promise<ApprovalRecord> {
+  const res = await fetch(`${API_BASE}/api/approvals/${id}/act`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ action, comment }),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).approval;
+}
+
+// ---------- AI OA: tasks ----------
+
+export type TaskRecord = {
+  id: string;
+  title: string;
+  detail: string | null;
+  priority: string;
+  status: "open" | "done";
+  due_at: number | null;
+  created_at: number;
+  creator_id: string;
+  creator_name: string | null;
+  assignee_id: string | null;
+  assignee_name: string | null;
+};
+
+export async function listTasks(scope: "all" | "assigned" | "created"): Promise<TaskRecord[]> {
+  const res = await fetch(`${API_BASE}/api/tasks?scope=${scope}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).tasks;
+}
+
+export async function createTask(payload: {
+  title: string;
+  detail?: string;
+  priority?: string;
+  assignee_name?: string;
+}): Promise<TaskRecord> {
+  const res = await fetch(`${API_BASE}/api/tasks`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).task;
+}
+
+export async function updateTask(id: string, status: "open" | "done"): Promise<TaskRecord> {
+  const res = await fetch(`${API_BASE}/api/tasks/${id}`, {
+    method: "PATCH",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).task;
+}
+
+// ---------- AI OA: calendar ----------
+
+export type CalendarEvent = {
+  id: string;
+  title: string;
+  start_at: number;
+  end_at: number | null;
+  location: string | null;
+  attendees: string[];
+  owner_id: string;
+  owner_name: string | null;
+  created_at: number;
+};
+
+export async function listCalendar(upcoming = true): Promise<CalendarEvent[]> {
+  const res = await fetch(`${API_BASE}/api/calendar?upcoming=${upcoming}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).events;
+}
+
+export async function createEvent(payload: {
+  title: string;
+  start: string;
+  end?: string;
+  location?: string;
+  attendees?: string[];
+}): Promise<CalendarEvent> {
+  const res = await fetch(`${API_BASE}/api/calendar`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).event;
+}
+
+// ---------- AI OA: knowledge base ----------
+
+export type KbDocument = {
+  id: string;
+  title: string;
+  created_at: number;
+  text_length?: number;
+};
+
+export type KbSearchResult = { doc_id: string; title: string; text: string };
+
+export type KbQueryRewrite = {
+  resolved: string;
+  expansions: string[];
+  intent: string;
+  source: string;
+};
+
+export type KbSearchResponse = {
+  results: KbSearchResult[];
+  rewrite: KbQueryRewrite | null;
+  method: string;
+};
+
+export async function listKbDocuments(): Promise<KbDocument[]> {
+  const res = await fetch(`${API_BASE}/api/kb/documents`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).documents;
+}
+
+export async function createKbDocument(payload: {
+  upload_id?: string;
+  title?: string;
+  text?: string;
+}): Promise<KbDocument> {
+  const res = await fetch(`${API_BASE}/api/kb/documents`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).document;
+}
+
+export async function deleteKbDocument(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/kb/documents/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+}
+
+export async function searchKb(
+  q: string,
+  history?: { role: string; text: string }[],
+): Promise<KbSearchResponse> {
+  const res = await fetch(`${API_BASE}/api/kb/search`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ q, history }),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return await res.json();
+}

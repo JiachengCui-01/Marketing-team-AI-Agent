@@ -26,6 +26,13 @@ dependencies = [
     "onnxruntime>=1.17.0",
 ]
 
+[project.optional-dependencies]
+# Local semantic retrieval for the knowledge base (heavy: pulls torch). The app
+# degrades to lexical retrieval when these are not installed.
+semantic = [
+    "sentence-transformers>=2.2.0",
+]
+
 [project.scripts]
 marketing-agent = "marketing_agent.cli:app"
 

@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import time
+from datetime import datetime
 from typing import AsyncIterator
 from urllib.parse import quote
 
@@ -14,12 +16,14 @@ from fastapi.responses import FileResponse
 from sse_starlette.sse import EventSourceResponse
 
 from marketing_agent.agents.image_skills import IMAGE_SKILLS, select_image_skill
+from marketing_agent.conversation import Conversation
 from marketing_agent.file_inputs import build_prompt_addendum, extract
+from marketing_agent.oa.agent import run_oa_copilot
 from marketing_agent.orchestrator import run_orchestrator
 from marketing_agent.tools import image_gen
 from marketing_agent.tools.pdf_tool import generate_pdf
 
-from . import auth, clarify, db, im_hub, image_processing, image_serve, llm, marketing_skills, memory, news, sessions, uploads
+from . import auth, clarify, db, im_hub, image_processing, image_serve, kb_retrieval, llm, marketing_skills, memory, news, sessions, uploads
 from .streaming import HEARTBEAT_INTERVAL_SECONDS, orchestrator_event_stream, to_sse
 
 logger = logging.getLogger(__name__)
@@ -1252,6 +1256,380 @@ def _derive_name(session_id: str, prompt: str) -> str | None:
         return None
     snippet = prompt.strip().splitlines()[0][:40] if prompt.strip() else "New chat"
     return snippet or "New chat"
+
+
+# ---------- AI OA copilot ----------
+
+@router.get("/oa/stream")
+async def stream_oa(request: Request, prompt: str):
+    """SSE stream for the enterprise OA copilot.
+
+    Reuses the orchestrator streaming bridge with the OA runner. Conversation state is
+    per-request for this MVP (single-turn); the copilot proposes drafts via ``oa_draft``
+    events that the client confirms through ``POST /api/approvals``.
+    """
+    user = auth.require_user(request)
+    if not prompt.strip():
+        raise HTTPException(400, "Empty prompt.")
+    client = _client()
+    conversation = Conversation()
+    runner = functools.partial(run_oa_copilot, user_id=user["id"])
+    event_stream = orchestrator_event_stream(
+        client, conversation, prompt, request=request, runner=runner
+    )
+    return EventSourceResponse(to_sse(_with_current_user(user["id"], event_stream)))
+
+
+# ---------- AI OA: approvals ----------
+
+def _approval_view(appr: dict) -> dict:
+    applicant = db.get_user(appr["applicant_id"])
+    steps = []
+    for s in appr.get("steps", []):
+        approver = db.get_user(s["approver_id"])
+        steps.append({**s, "approver_name": (approver or {}).get("username")})
+    return {
+        "id": appr["id"],
+        "type": appr["type"],
+        "title": appr["title"],
+        "form": appr.get("form", {}),
+        "status": appr["status"],
+        "current_step": appr["current_step"],
+        "created_at": appr["created_at"],
+        "updated_at": appr.get("updated_at"),
+        "applicant_id": appr["applicant_id"],
+        "applicant_name": (applicant or {}).get("username"),
+        "steps": steps,
+    }
+
+
+def _resolve_approvers(org: dict | None, applicant_id: str) -> list[str]:
+    """MVP single-step routing: the org owner approves; if the applicant is the owner,
+    the first other member approves."""
+    if not org:
+        return []
+    owner_id = org.get("owner_id")
+    if owner_id and owner_id != applicant_id:
+        return [owner_id]
+    for member in db.list_org_members(org["id"]):
+        if member["id"] != applicant_id:
+            return [member["id"]]
+    return []
+
+
+@router.get("/approvals")
+def list_approvals(request: Request, scope: str = "mine") -> dict:
+    user = auth.require_user(request)
+    if scope == "pending":
+        rows = db.list_approvals_pending_for(user["id"])
+    elif scope == "acted":
+        rows = db.list_approvals_acted_by(user["id"])
+    else:
+        rows = db.list_approvals_created_by(user["id"])
+    return {"approvals": [_approval_view(r) for r in rows]}
+
+
+@router.get("/approvals/{approval_id}")
+def get_approval(request: Request, approval_id: str) -> dict:
+    user = auth.require_user(request)
+    appr = db.get_approval(approval_id)
+    if appr is None:
+        raise HTTPException(404, "审批单不存在。")
+    approver_ids = {s["approver_id"] for s in appr.get("steps", [])}
+    if user["id"] != appr["applicant_id"] and user["id"] not in approver_ids:
+        raise HTTPException(403, "无权查看该审批。")
+    return {"approval": _approval_view(appr)}
+
+
+@router.post("/approvals")
+async def create_approval(request: Request, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    type_ = (str(payload.get("type") or "general").strip()) or "general"
+    title = str(payload.get("title") or "").strip()
+    if not title:
+        raise HTTPException(400, "审批标题不能为空。")
+    fields = payload.get("fields")
+    if fields is None:
+        fields = payload.get("form") or {}
+    if not isinstance(fields, dict):
+        raise HTTPException(400, "表单字段格式不正确。")
+    org = db.get_or_create_default_org(user["id"], user.get("username") or "")
+    approvers = _resolve_approvers(org, user["id"])
+    if not approvers:
+        raise HTTPException(400, "当前组织没有其他成员可作为审批人，请先在通讯录添加同事。")
+    appr = db.create_approval(user["id"], type_, title, fields, approvers, org_id=org.get("id"))
+    for uid in approvers:
+        im_hub.publish(
+            uid,
+            {
+                "event": "oa_notification",
+                "payload": {
+                    "kind": "approval_pending",
+                    "approval_id": appr["id"],
+                    "title": title,
+                    "from": user.get("username"),
+                },
+            },
+        )
+    return {"approval": _approval_view(appr)}
+
+
+@router.post("/approvals/{approval_id}/act")
+async def act_approval(request: Request, approval_id: str, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    action = str(payload.get("action") or "").strip()
+    if action not in ("approved", "rejected"):
+        raise HTTPException(400, "action 必须是 approved 或 rejected。")
+    comment = (str(payload.get("comment") or "").strip()) or None
+    updated = db.act_on_approval(approval_id, user["id"], action, comment)
+    if updated is None:
+        raise HTTPException(400, "无法处理该审批（可能不是当前审批人或已处理）。")
+    im_hub.publish(
+        updated["applicant_id"],
+        {
+            "event": "oa_notification",
+            "payload": {
+                "kind": "approval_update",
+                "approval_id": approval_id,
+                "title": updated["title"],
+                "status": updated["status"],
+            },
+        },
+    )
+    if updated["status"] == "pending":
+        for s in updated.get("steps", []):
+            if s["step_index"] == updated["current_step"] and s["action"] == "pending":
+                im_hub.publish(
+                    s["approver_id"],
+                    {
+                        "event": "oa_notification",
+                        "payload": {
+                            "kind": "approval_pending",
+                            "approval_id": approval_id,
+                            "title": updated["title"],
+                        },
+                    },
+                )
+    return {"approval": _approval_view(updated)}
+
+
+# ---------- AI OA: tasks ----------
+
+def _task_view(task: dict) -> dict:
+    creator = db.get_user(task["creator_id"])
+    assignee = db.get_user(task["assignee_id"]) if task.get("assignee_id") else None
+    return {
+        **{k: task[k] for k in ("id", "title", "detail", "priority", "status", "due_at", "created_at")},
+        "creator_id": task["creator_id"],
+        "creator_name": (creator or {}).get("username"),
+        "assignee_id": task.get("assignee_id"),
+        "assignee_name": (assignee or {}).get("username"),
+    }
+
+
+def _resolve_member_by_name(org: dict | None, name: str) -> str | None:
+    if not org or not name:
+        return None
+    needle = name.strip().lower()
+    for m in db.list_org_members(org["id"]):
+        if needle in ((m.get("username") or "").lower(), (m.get("real_name") or "").lower()):
+            return m["id"]
+    return None
+
+
+@router.get("/tasks")
+def list_tasks(request: Request, scope: str = "all") -> dict:
+    user = auth.require_user(request)
+    rows = db.list_tasks(user["id"], scope=scope)
+    return {"tasks": [_task_view(t) for t in rows]}
+
+
+@router.post("/tasks")
+async def create_task(request: Request, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    title = str(payload.get("title") or "").strip()
+    if not title:
+        raise HTTPException(400, "任务标题不能为空。")
+    org = db.get_or_create_default_org(user["id"], user.get("username") or "")
+    assignee_id = user["id"]
+    name = str(payload.get("assignee_name") or "").strip()
+    if name:
+        resolved = _resolve_member_by_name(org, name)
+        if resolved:
+            assignee_id = resolved
+    due_at = payload.get("due_at")
+    task = db.create_task(
+        creator_id=user["id"],
+        title=title,
+        detail=(str(payload.get("detail") or "").strip() or None),
+        priority=str(payload.get("priority") or "normal"),
+        due_at=float(due_at) if isinstance(due_at, (int, float)) else None,
+        assignee_id=assignee_id,
+        org_id=org.get("id"),
+    )
+    if assignee_id != user["id"]:
+        im_hub.publish(
+            assignee_id,
+            {
+                "event": "oa_notification",
+                "payload": {"kind": "task_assigned", "task_id": task["id"], "title": title,
+                            "from": user.get("username")},
+            },
+        )
+    return {"task": _task_view(task)}
+
+
+@router.patch("/tasks/{task_id}")
+def update_task(request: Request, task_id: str, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    status = str(payload.get("status") or "").strip()
+    if status not in ("open", "done"):
+        raise HTTPException(400, "status 必须是 open 或 done。")
+    updated = db.update_task_status(task_id, user["id"], status)
+    if updated is None:
+        raise HTTPException(400, "无法更新该任务（不存在或无权限）。")
+    return {"task": _task_view(updated)}
+
+
+# ---------- AI OA: calendar ----------
+
+def _event_view(event: dict) -> dict:
+    owner = db.get_user(event["owner_id"])
+    return {
+        **{k: event[k] for k in ("id", "title", "start_at", "end_at", "location", "created_at")},
+        "attendees": event.get("attendees", []),
+        "owner_id": event["owner_id"],
+        "owner_name": (owner or {}).get("username"),
+    }
+
+
+def _parse_iso(value) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+@router.get("/calendar")
+def list_calendar(request: Request, upcoming: bool = True) -> dict:
+    user = auth.require_user(request)
+    rows = db.list_events(user["id"], since=time.time() if upcoming else None)
+    return {"events": [_event_view(e) for e in rows]}
+
+
+@router.post("/calendar")
+async def create_calendar_event(request: Request, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    title = str(payload.get("title") or "").strip()
+    if not title:
+        raise HTTPException(400, "日程标题不能为空。")
+    start_at = _parse_iso(payload.get("start") or payload.get("start_at"))
+    if start_at is None:
+        raise HTTPException(400, "开始时间格式无效。")
+    end_at = _parse_iso(payload.get("end") or payload.get("end_at"))
+    attendees = payload.get("attendees")
+    org = db.get_or_create_default_org(user["id"], user.get("username") or "")
+    event = db.create_event(
+        owner_id=user["id"],
+        title=title,
+        start_at=start_at,
+        end_at=end_at,
+        location=(str(payload.get("location") or "").strip() or None),
+        attendees=[str(a) for a in attendees] if isinstance(attendees, list) else [],
+        org_id=org.get("id"),
+    )
+    return {"event": _event_view(event)}
+
+
+# ---------- AI OA: knowledge base ----------
+
+def _chunk_text(text: str, size: int = 600) -> list[str]:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return []
+    return [cleaned[i : i + size] for i in range(0, len(cleaned), size)]
+
+
+@router.get("/kb/documents")
+def list_kb_docs(request: Request) -> dict:
+    user = auth.require_user(request)
+    org = db.get_or_create_default_org(user["id"], user.get("username") or "")
+    return {"documents": db.list_kb_documents(org.get("id"))}
+
+
+@router.post("/kb/documents")
+async def create_kb_doc(request: Request, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    org = db.get_or_create_default_org(user["id"], user.get("username") or "")
+    upload_id = str(payload.get("upload_id") or "").strip()
+    title = str(payload.get("title") or "").strip()
+    text = str(payload.get("text") or "")
+    source_upload_id = None
+    if upload_id:
+        rec = db.get_upload(upload_id, user["id"])
+        if rec is None:
+            raise HTTPException(404, "文件不存在或无权访问。")
+        from pathlib import Path
+
+        info = extract(Path(rec["path"]))
+        if info["kind"] != "text":
+            raise HTTPException(400, "仅支持文本类文档（pdf/docx/txt/md/csv）。")
+        text = info["text"]
+        title = title or rec["original_name"]
+        source_upload_id = upload_id
+    text = text.strip()
+    if not text:
+        raise HTTPException(400, "文档内容为空。")
+    if not title:
+        title = "未命名文档"
+    chunks = _chunk_text(text)
+    # Embed chunks for semantic search (None when embeddings are unavailable → lexical only).
+    embeddings_vecs = await asyncio.to_thread(kb_retrieval.embed_chunks, chunks)
+    doc = db.create_kb_document(
+        org_id=org.get("id"),
+        uploader_id=user["id"],
+        title=title,
+        text_content=text,
+        chunks=chunks,
+        source_upload_id=source_upload_id,
+        embeddings=embeddings_vecs,
+    )
+    return {"document": {"id": doc["id"], "title": doc["title"], "created_at": doc["created_at"]}}
+
+
+@router.delete("/kb/documents/{doc_id}")
+def delete_kb_doc(request: Request, doc_id: str) -> dict:
+    user = auth.require_user(request)
+    org = db.get_or_create_default_org(user["id"], user.get("username") or "")
+    if not db.delete_kb_document(doc_id, org.get("id")):
+        raise HTTPException(404, "文档不存在。")
+    return {"ok": True}
+
+
+@router.post("/kb/search")
+async def search_kb(request: Request, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    org = db.get_or_create_default_org(user["id"], user.get("username") or "")
+    q = str(payload.get("q") or payload.get("query") or "").strip()
+    if not q:
+        raise HTTPException(400, "检索问题不能为空。")
+    history = payload.get("history") if isinstance(payload.get("history"), list) else None
+    locale = _output_language_for_prompt(q)
+    out = await asyncio.to_thread(
+        kb_retrieval.retrieve, org.get("id"), q, history, 8, locale
+    )
+    return {
+        "results": out["results"],
+        "rewrite": out.get("rewrite"),
+        "method": out.get("method"),
+    }
 
 
 # ---------- organizations / directory ----------

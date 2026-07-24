@@ -316,6 +316,90 @@ CREATE TABLE IF NOT EXISTS im_messages (
     FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_im_messages_conv ON im_messages(conversation_id, created_at);
+
+-- AI OA: approvals / tasks / calendar / knowledge base
+CREATE TABLE IF NOT EXISTS approvals (
+    id TEXT PRIMARY KEY,
+    org_id TEXT,
+    applicant_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    form_json TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'pending',
+    current_step INTEGER NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    FOREIGN KEY (applicant_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_approvals_applicant ON approvals(applicant_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status, created_at);
+
+CREATE TABLE IF NOT EXISTS approval_steps (
+    approval_id TEXT NOT NULL,
+    step_index INTEGER NOT NULL,
+    approver_id TEXT NOT NULL,
+    action TEXT NOT NULL DEFAULT 'pending',
+    comment TEXT,
+    acted_at REAL,
+    PRIMARY KEY (approval_id, step_index),
+    FOREIGN KEY (approval_id) REFERENCES approvals(id) ON DELETE CASCADE,
+    FOREIGN KEY (approver_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_approval_steps_approver ON approval_steps(approver_id, action);
+
+CREATE TABLE IF NOT EXISTS tasks (
+    id TEXT PRIMARY KEY,
+    org_id TEXT,
+    creator_id TEXT NOT NULL,
+    assignee_id TEXT,
+    title TEXT NOT NULL,
+    detail TEXT,
+    due_at REAL,
+    priority TEXT NOT NULL DEFAULT 'normal',
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    FOREIGN KEY (creator_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (assignee_id) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee_id, status);
+CREATE INDEX IF NOT EXISTS idx_tasks_creator ON tasks(creator_id, created_at);
+
+CREATE TABLE IF NOT EXISTS calendar_events (
+    id TEXT PRIMARY KEY,
+    org_id TEXT,
+    owner_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    start_at REAL NOT NULL,
+    end_at REAL,
+    location TEXT,
+    attendees_json TEXT NOT NULL DEFAULT '[]',
+    created_at REAL NOT NULL,
+    FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_calendar_owner ON calendar_events(owner_id, start_at);
+
+CREATE TABLE IF NOT EXISTS kb_documents (
+    id TEXT PRIMARY KEY,
+    org_id TEXT,
+    uploader_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    text_content TEXT NOT NULL DEFAULT '',
+    source_upload_id TEXT,
+    source_artifact_id TEXT,
+    created_at REAL NOT NULL,
+    FOREIGN KEY (uploader_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_kb_documents_org ON kb_documents(org_id, created_at);
+
+CREATE TABLE IF NOT EXISTS kb_chunks (
+    doc_id TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    embedding_json TEXT,
+    PRIMARY KEY (doc_id, chunk_index),
+    FOREIGN KEY (doc_id) REFERENCES kb_documents(id) ON DELETE CASCADE
+);
 """
 
 
@@ -1538,6 +1622,383 @@ def remove_org_member(org_id: str, target_user_id: str) -> bool:
         return cur.rowcount > 0
 
 
+# ---------- AI OA: approvals ----------
+
+def _approval_row(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
+    d = dict(row)
+    d["form"] = json.loads(d.pop("form_json") or "{}")
+    steps = conn.execute(
+        "SELECT step_index, approver_id, action, comment, acted_at "
+        "FROM approval_steps WHERE approval_id = ? ORDER BY step_index",
+        (d["id"],),
+    ).fetchall()
+    d["steps"] = [dict(s) for s in steps]
+    return d
+
+
+def create_approval(
+    applicant_id: str,
+    type_: str,
+    title: str,
+    form: dict,
+    approver_ids: Iterable[str],
+    org_id: str | None = None,
+) -> dict:
+    _ensure()
+    aid = uuid.uuid4().hex
+    now = time.time()
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO approvals (id, org_id, applicant_id, type, title, form_json, "
+            "status, current_step, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (aid, org_id, applicant_id, type_, title, json.dumps(form, ensure_ascii=False),
+             "pending", 0, now, now),
+        )
+        for idx, approver in enumerate(approver_ids):
+            conn.execute(
+                "INSERT INTO approval_steps (approval_id, step_index, approver_id, action) "
+                "VALUES (?, ?, ?, 'pending')",
+                (aid, idx, approver),
+            )
+        row = conn.execute("SELECT * FROM approvals WHERE id = ?", (aid,)).fetchone()
+        return _approval_row(conn, row)
+
+
+def get_approval(approval_id: str) -> dict | None:
+    _ensure()
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
+        return _approval_row(conn, row) if row else None
+
+
+def list_approvals_created_by(user_id: str) -> list[dict]:
+    _ensure()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM approvals WHERE applicant_id = ? ORDER BY created_at DESC",
+            (user_id,),
+        ).fetchall()
+        return [_approval_row(conn, r) for r in rows]
+
+
+def list_approvals_pending_for(user_id: str) -> list[dict]:
+    """Approvals where it is currently this user's turn to act."""
+    _ensure()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT a.* FROM approvals a
+            JOIN approval_steps s ON s.approval_id = a.id AND s.step_index = a.current_step
+            WHERE a.status = 'pending' AND s.approver_id = ? AND s.action = 'pending'
+            ORDER BY a.created_at DESC
+            """,
+            (user_id,),
+        ).fetchall()
+        return [_approval_row(conn, r) for r in rows]
+
+
+def list_approvals_acted_by(user_id: str) -> list[dict]:
+    _ensure()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT a.* FROM approvals a
+            JOIN approval_steps s ON s.approval_id = a.id
+            WHERE s.approver_id = ? AND s.action != 'pending'
+            ORDER BY a.updated_at DESC
+            """,
+            (user_id,),
+        ).fetchall()
+        return [_approval_row(conn, r) for r in rows]
+
+
+def act_on_approval(
+    approval_id: str, approver_id: str, action: str, comment: str | None = None
+) -> dict | None:
+    """Record an approver's decision and advance the workflow.
+
+    ``action`` is ``'approved'`` or ``'rejected'``. Returns the updated approval,
+    or ``None`` if the caller is not the current approver / it is already settled.
+    """
+    _ensure()
+    now = time.time()
+    with _connect() as conn:
+        appr = conn.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
+        if appr is None or appr["status"] != "pending":
+            return None
+        step = conn.execute(
+            "SELECT * FROM approval_steps WHERE approval_id = ? AND step_index = ?",
+            (approval_id, appr["current_step"]),
+        ).fetchone()
+        if step is None or step["approver_id"] != approver_id or step["action"] != "pending":
+            return None
+        conn.execute(
+            "UPDATE approval_steps SET action = ?, comment = ?, acted_at = ? "
+            "WHERE approval_id = ? AND step_index = ?",
+            (action, comment, now, approval_id, appr["current_step"]),
+        )
+        if action == "rejected":
+            conn.execute(
+                "UPDATE approvals SET status = 'rejected', updated_at = ? WHERE id = ?",
+                (now, approval_id),
+            )
+        else:
+            total = conn.execute(
+                "SELECT COUNT(*) AS c FROM approval_steps WHERE approval_id = ?", (approval_id,)
+            ).fetchone()["c"]
+            next_step = int(appr["current_step"]) + 1
+            if next_step >= total:
+                conn.execute(
+                    "UPDATE approvals SET status = 'approved', updated_at = ? WHERE id = ?",
+                    (now, approval_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE approvals SET current_step = ?, updated_at = ? WHERE id = ?",
+                    (next_step, now, approval_id),
+                )
+        row = conn.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
+        return _approval_row(conn, row)
+
+
+# ---------- AI OA: tasks ----------
+
+def create_task(
+    creator_id: str,
+    title: str,
+    detail: str | None = None,
+    priority: str = "normal",
+    due_at: float | None = None,
+    assignee_id: str | None = None,
+    org_id: str | None = None,
+) -> dict:
+    _ensure()
+    tid = uuid.uuid4().hex
+    now = time.time()
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO tasks (id, org_id, creator_id, assignee_id, title, detail, due_at, "
+            "priority, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)",
+            (tid, org_id, creator_id, assignee_id, title, detail, due_at, priority, now, now),
+        )
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (tid,)).fetchone()
+        return dict(row)
+
+
+def get_task(task_id: str) -> dict | None:
+    _ensure()
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def list_tasks(user_id: str, scope: str = "assigned") -> list[dict]:
+    _ensure()
+    with _connect() as conn:
+        if scope == "created":
+            where = "creator_id = ?"
+            args: tuple = (user_id,)
+        elif scope == "all":
+            where = "creator_id = ? OR assignee_id = ?"
+            args = (user_id, user_id)
+        else:  # assigned
+            where = "assignee_id = ?"
+            args = (user_id,)
+        rows = conn.execute(
+            f"SELECT * FROM tasks WHERE {where} ORDER BY "
+            "CASE status WHEN 'open' THEN 0 ELSE 1 END, created_at DESC",
+            args,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def update_task_status(task_id: str, user_id: str, status: str) -> dict | None:
+    """Mark a task open/done. Only the creator or assignee may change it."""
+    _ensure()
+    now = time.time()
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        if row is None or user_id not in (row["creator_id"], row["assignee_id"]):
+            return None
+        conn.execute(
+            "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?", (status, now, task_id)
+        )
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        return dict(row)
+
+
+# ---------- AI OA: calendar ----------
+
+def _event_row(row: sqlite3.Row) -> dict:
+    d = dict(row)
+    d["attendees"] = json.loads(d.pop("attendees_json") or "[]")
+    return d
+
+
+def create_event(
+    owner_id: str,
+    title: str,
+    start_at: float,
+    end_at: float | None = None,
+    location: str | None = None,
+    attendees: Iterable[str] | None = None,
+    org_id: str | None = None,
+) -> dict:
+    _ensure()
+    eid = uuid.uuid4().hex
+    now = time.time()
+    attendees_json = json.dumps(list(attendees or []), ensure_ascii=False)
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO calendar_events (id, org_id, owner_id, title, start_at, end_at, "
+            "location, attendees_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (eid, org_id, owner_id, title, start_at, end_at, location, attendees_json, now),
+        )
+        row = conn.execute("SELECT * FROM calendar_events WHERE id = ?", (eid,)).fetchone()
+        return _event_row(row)
+
+
+def list_events(owner_id: str, since: float | None = None) -> list[dict]:
+    _ensure()
+    with _connect() as conn:
+        if since is not None:
+            rows = conn.execute(
+                "SELECT * FROM calendar_events WHERE owner_id = ? AND start_at >= ? "
+                "ORDER BY start_at ASC",
+                (owner_id, since),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM calendar_events WHERE owner_id = ? ORDER BY start_at ASC",
+                (owner_id,),
+            ).fetchall()
+        return [_event_row(r) for r in rows]
+
+
+# ---------- AI OA: knowledge base ----------
+
+def create_kb_document(
+    org_id: str | None,
+    uploader_id: str,
+    title: str,
+    text_content: str,
+    chunks: Iterable[str] | None = None,
+    source_upload_id: str | None = None,
+    embeddings: list[list[float]] | None = None,
+) -> dict:
+    _ensure()
+    did = uuid.uuid4().hex
+    now = time.time()
+    chunk_list = list(chunks or [])
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO kb_documents (id, org_id, uploader_id, title, text_content, "
+            "source_upload_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (did, org_id, uploader_id, title, text_content, source_upload_id, now),
+        )
+        for idx, chunk in enumerate(chunk_list):
+            emb = None
+            if embeddings is not None and idx < len(embeddings) and embeddings[idx] is not None:
+                emb = json.dumps(embeddings[idx])
+            conn.execute(
+                "INSERT INTO kb_chunks (doc_id, chunk_index, text, embedding_json) VALUES (?, ?, ?, ?)",
+                (did, idx, chunk, emb),
+            )
+        row = conn.execute("SELECT * FROM kb_documents WHERE id = ?", (did,)).fetchone()
+        return dict(row)
+
+
+def list_kb_chunks_for_org(org_id: str | None) -> list[dict]:
+    """All chunks in an org's documents, with parsed embeddings, for retrieval."""
+    _ensure()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT c.doc_id, c.chunk_index, c.text, c.embedding_json, d.title
+            FROM kb_chunks c JOIN kb_documents d ON d.id = c.doc_id
+            WHERE d.org_id IS ?
+            ORDER BY c.doc_id, c.chunk_index
+            """,
+            (org_id,),
+        ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        raw = d.pop("embedding_json", None)
+        try:
+            d["embedding"] = json.loads(raw) if raw else None
+        except (TypeError, ValueError):
+            d["embedding"] = None
+        out.append(d)
+    return out
+
+
+def list_kb_documents(org_id: str | None) -> list[dict]:
+    _ensure()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, org_id, uploader_id, title, source_upload_id, created_at, "
+            "LENGTH(text_content) AS text_length FROM kb_documents "
+            "WHERE org_id IS ? ORDER BY created_at DESC",
+            (org_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def delete_kb_document(doc_id: str, org_id: str | None) -> bool:
+    _ensure()
+    with _connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM kb_documents WHERE id = ? AND org_id IS ?", (doc_id, org_id)
+        )
+        return cur.rowcount > 0
+
+
+def search_knowledge(org_id: str | None, query: str, limit: int = 5) -> list[dict]:
+    """Lexical retrieval over an org's document chunks.
+
+    No embedding provider is assumed; chunks are scored by overlap with the query's
+    terms and character bigrams (works for CJK and latin text). Good enough for an MVP.
+    """
+    _ensure()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT c.doc_id, c.chunk_index, c.text, d.title
+            FROM kb_chunks c JOIN kb_documents d ON d.id = c.doc_id
+            WHERE d.org_id IS ?
+            """,
+            (org_id,),
+        ).fetchall()
+    terms = _query_terms(query)
+    if not terms:
+        return []
+    scored = []
+    for r in rows:
+        text = str(r["text"] or "")
+        low = text.lower()
+        score = sum(low.count(term) for term in terms)
+        if score > 0:
+            scored.append({"doc_id": r["doc_id"], "title": r["title"], "text": text, "score": score})
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    return scored[:limit]
+
+
+def _query_terms(query: str) -> list[str]:
+    q = (query or "").lower().strip()
+    if not q:
+        return []
+    terms: set[str] = set()
+    for word in re.split(r"[^0-9a-z一-鿿]+", q):
+        if len(word) >= 2 and not all("一" <= ch <= "鿿" for ch in word):
+            terms.add(word)
+    # CJK character bigrams so Chinese queries match without a tokenizer.
+    cjk = [ch for ch in q if "一" <= ch <= "鿿"]
+    for i in range(len(cjk) - 1):
+        terms.add(cjk[i] + cjk[i + 1])
+    return list(terms)
+
+
 # ---------- external contacts ----------
 
 def _external_row(row: sqlite3.Row) -> dict:
@@ -1997,6 +2458,12 @@ def reset_for_tests() -> None:
                 with _connect() as conn:
                     conn.executescript(
                         """
+                        DROP TABLE IF EXISTS kb_chunks;
+                        DROP TABLE IF EXISTS kb_documents;
+                        DROP TABLE IF EXISTS calendar_events;
+                        DROP TABLE IF EXISTS tasks;
+                        DROP TABLE IF EXISTS approval_steps;
+                        DROP TABLE IF EXISTS approvals;
                         DROP TABLE IF EXISTS im_messages;
                         DROP TABLE IF EXISTS conversation_members;
                         DROP TABLE IF EXISTS conversations;
