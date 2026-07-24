@@ -111,11 +111,11 @@ export function TasksPanel({ onBack }: { onBack: () => void }) {
           <ArrowLeft size={15} />
           <span>{t.back}</span>
         </button>
-        <div className="flex items-center gap-2 ml-1">
-          <CheckSquare size={15} className="text-accent" />
-          <span className="text-sm font-medium">{t.tasks}</span>
+        <div className="flex items-center gap-2 mx-auto text-sm font-medium">
+          <CheckSquare size={15} className="text-feature-image" />
+          <span>{t.tasks}</span>
         </div>
-        <button onClick={() => setFormOpen((v) => !v)} className="btn-accent h-8 px-3 text-sm ml-auto">
+        <button onClick={() => setFormOpen((v) => !v)} className="btn-accent h-8 px-3 text-sm">
           <Plus size={14} />
           新建
         </button>
@@ -257,9 +257,9 @@ function TodoRow({
   const canTick = !done && !awaiting;
 
   const Checkbox = () => {
-    if (done) return <CheckCircle2 size={20} className="text-green-600 shrink-0" />;
+    if (done) return <CheckCircle2 size={20} className="text-success shrink-0" />;
     if (awaiting)
-      return <Clock3 size={20} className="text-amber-500 shrink-0" aria-label="待确认" />;
+      return <Clock3 size={20} className="text-feature-research shrink-0" aria-label="待确认" />;
     return (
       <button
         onClick={canTick ? onComplete : undefined}
@@ -290,7 +290,7 @@ function TodoRow({
             {tab === "created" && task.assignee_name && task.assignee_id !== task.creator_id ? (
               <span>指派给：{task.assignee_name}</span>
             ) : null}
-            {awaiting ? <span className="text-amber-600">待确认</span> : null}
+            {awaiting ? <span className="text-feature-research">待确认</span> : null}
           </div>
         </button>
         <div className="flex items-center gap-1 shrink-0">

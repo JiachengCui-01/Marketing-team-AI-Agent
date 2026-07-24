@@ -373,6 +373,7 @@ CREATE TABLE IF NOT EXISTS calendar_events (
     start_at REAL NOT NULL,
     end_at REAL,
     location TEXT,
+    description TEXT,
     attendees_json TEXT NOT NULL DEFAULT '[]',
     status TEXT NOT NULL DEFAULT 'active',
     created_at REAL NOT NULL,
@@ -454,8 +455,11 @@ def _migrate_kb_scope(conn: sqlite3.Connection) -> None:
 
 def _migrate_calendar_status(conn: sqlite3.Connection) -> None:
     if "calendar_events" in {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}:
-        if "status" not in _table_columns(conn, "calendar_events"):
+        cols = _table_columns(conn, "calendar_events")
+        if "status" not in cols:
             conn.execute("ALTER TABLE calendar_events ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
+        if "description" not in cols:
+            conn.execute("ALTER TABLE calendar_events ADD COLUMN description TEXT")
 
 
 def _migrate_news_summary_sources(conn: sqlite3.Connection) -> None:
@@ -1961,6 +1965,7 @@ def create_event(
     location: str | None = None,
     attendees: Iterable[str] | None = None,
     org_id: str | None = None,
+    description: str | None = None,
 ) -> dict:
     _ensure()
     eid = uuid.uuid4().hex
@@ -1969,8 +1974,8 @@ def create_event(
     with _connect() as conn:
         conn.execute(
             "INSERT INTO calendar_events (id, org_id, owner_id, title, start_at, end_at, "
-            "location, attendees_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (eid, org_id, owner_id, title, start_at, end_at, location, attendees_json, now),
+            "location, description, attendees_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (eid, org_id, owner_id, title, start_at, end_at, location, description, attendees_json, now),
         )
         row = conn.execute("SELECT * FROM calendar_events WHERE id = ?", (eid,)).fetchone()
         return _event_row(row)
@@ -2003,7 +2008,7 @@ def get_event(event_id: str) -> dict | None:
 def update_event(event_id: str, owner_id: str, fields: dict) -> dict | None:
     """Update an event's editable fields and/or status. Only the owner may edit."""
     _ensure()
-    allowed = ("title", "start_at", "end_at", "location", "status")
+    allowed = ("title", "start_at", "end_at", "location", "description", "status")
     sets = []
     args: list = []
     for key in allowed:

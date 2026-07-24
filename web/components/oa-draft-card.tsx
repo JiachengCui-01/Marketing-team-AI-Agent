@@ -8,6 +8,7 @@ import {
   createTask,
   type OaDraft,
 } from "@/lib/api";
+import { getDraftStatus, setDraftStatus } from "@/lib/oa-drafts";
 import { localizeError, useI18n } from "@/lib/i18n";
 
 const KIND_LABEL: Record<string, string> = {
@@ -30,9 +31,6 @@ function fmt(v: unknown): string {
 }
 
 type CardState = { status: "submitted" | "error" | "cancelled"; note: string };
-// Persist a draft card's terminal state for the session so it survives ChatPanel
-// remounts (e.g. switching to another view and back). Keyed by the draft's stable id.
-const committedStore = new Map<string, CardState>();
 
 function draftRows(draft: OaDraft): [string, string][] {
   if (draft.kind === "task") {
@@ -63,14 +61,14 @@ function draftRows(draft: OaDraft): [string, string][] {
 export function OaDraftCard({ draft }: { draft: OaDraft }) {
   const { locale } = useI18n();
   const cardKey = String(draft._id ?? `${draft.kind}:${draft.title}`);
-  const persisted = committedStore.get(cardKey);
+  const persisted = getDraftStatus(cardKey);
   const [status, setStatus] = useState<"pending" | "submitting" | "submitted" | "error" | "cancelled">(
     persisted?.status ?? "pending",
   );
   const [note, setNote] = useState(persisted?.note ?? "");
 
   const commit = (s: CardState) => {
-    committedStore.set(cardKey, s);
+    setDraftStatus(cardKey, s);
     setStatus(s.status);
     setNote(s.note);
   };
@@ -130,7 +128,7 @@ export function OaDraftCard({ draft }: { draft: OaDraft }) {
           {kindLabel} · {draft.title}
         </span>
         {badge ? (
-          <span className="ml-auto text-[11px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600">
+          <span className="ml-auto text-[11px] px-2 py-0.5 rounded-full bg-feature-research/15 text-feature-research">
             {badge}
           </span>
         ) : null}
@@ -145,7 +143,7 @@ export function OaDraftCard({ draft }: { draft: OaDraft }) {
       </dl>
 
       {status === "submitted" ? (
-        <div className="mt-2.5 pt-2.5 border-t border-border flex items-center gap-2 text-[13px] text-green-600">
+        <div className="mt-2.5 pt-2.5 border-t border-border flex items-center gap-2 text-[13px] text-success">
           <CheckCircle2 size={14} />
           <span>{note}</span>
         </div>

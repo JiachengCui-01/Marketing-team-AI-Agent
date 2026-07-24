@@ -2,14 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
-const ITEM_H = 36;
+const ITEM_H = 34;
 const VISIBLE = 5; // odd number → clear center row
 const PAD = Math.floor(VISIBLE / 2);
 const MIN_STEP = 5; // minute granularity
 
 type Opt = { value: number; label: string };
 
-/** A single scroll-snap wheel column with a 3D tilt + fade for a lively feel. */
 function Wheel({
   options,
   value,
@@ -35,12 +34,11 @@ function Wheel({
     items.forEach((node, i) => {
       const d = i - raw;
       const ad = Math.abs(d);
-      node.style.transform = `perspective(600px) rotateX(${Math.max(-60, Math.min(60, d * -22))}deg) scale(${Math.max(0.62, 1 - ad * 0.16)})`;
-      node.style.opacity = String(Math.max(0.2, 1 - ad * 0.34));
+      node.style.transform = `perspective(560px) rotateX(${Math.max(-62, Math.min(62, d * -24))}deg) scale(${Math.max(0.6, 1 - ad * 0.16)})`;
+      node.style.opacity = String(Math.max(0.18, 1 - ad * 0.36));
     });
   }, []);
 
-  // Keep the wheel aligned to the selected value when it changes externally.
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -92,72 +90,80 @@ function startOfDay(d: Date): Date {
   x.setHours(0, 0, 0, 0);
   return x;
 }
-
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
 }
-
-/** Parse a "YYYY-MM-DDTHH:MM" (or Date-parseable) string; null if invalid. */
-function parseValue(v: string | null | undefined): Date | null {
+function parseValue(v: string | Date | null | undefined): Date | null {
   if (!v) return null;
-  const d = new Date(v);
+  const d = v instanceof Date ? v : new Date(v);
   return isNaN(d.getTime()) ? null : d;
+}
+function ceilStep(m: number): number {
+  return Math.min(55, Math.ceil(m / MIN_STEP) * MIN_STEP);
+}
+function nextValidFrom(base: Date): Date {
+  const d = new Date(base);
+  d.setSeconds(0, 0);
+  // Round up to the next 5-min boundary; setMinutes(>=60) rolls into the next hour.
+  d.setMinutes(Math.ceil((base.getMinutes() + 1) / MIN_STEP) * MIN_STEP);
+  return d;
 }
 
 /**
- * Future-only date + time wheel. Emits a local "YYYY-MM-DDTHH:MM" string via onChange.
- * Past days/hours/minutes are never rendered, so a past time cannot be selected.
+ * Future-only date + time wheel. Emits a local "YYYY-MM-DDTHH:MM" string. Nothing
+ * before ``min`` (default = soonest valid time from now) is rendered/selectable, so
+ * the end picker can be constrained to after the start.
  */
 export function DateTimeWheel({
   value,
   onChange,
   zh = true,
+  min,
 }: {
   value: string | null;
   onChange: (iso: string) => void;
   zh?: boolean;
+  min?: string | Date;
 }) {
-  const now = useMemo(() => new Date(), []);
-  const today0 = startOfDay(now);
+  const floor = useMemo(() => parseValue(min) ?? nextValidFrom(new Date()), [min]);
+  const floorDay0 = startOfDay(floor);
 
   const days = useMemo(() => {
     const list: Date[] = [];
     for (let i = 0; i < 60; i++) {
-      const d = new Date(today0);
+      const d = new Date(floorDay0);
       d.setDate(d.getDate() + i);
       list.push(d);
     }
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [today0.getTime()]);
+  }, [floorDay0.getTime()]);
 
-  const selected = parseValue(value) ?? nextValidNow(now);
+  const selected = parseValue(value) ?? floor;
   const selDay0 = startOfDay(selected);
   let dayIdx = days.findIndex((d) => d.getTime() === selDay0.getTime());
   if (dayIdx < 0) dayIdx = 0;
-  const isToday = dayIdx === 0;
+  const onFloorDay = dayIdx === 0;
 
-  const minHour = isToday ? now.getHours() : 0;
+  const minHour = onFloorDay ? floor.getHours() : 0;
   const hours: Opt[] = [];
   for (let h = minHour; h <= 23; h++) hours.push({ value: h, label: pad2(h) });
-
   let selHour = selected.getHours();
   if (selHour < minHour) selHour = minHour;
 
-  const minMinute = isToday && selHour === now.getHours() ? ceilStep(now.getMinutes() + 1) : 0;
+  const minMinute = onFloorDay && selHour === floor.getHours() ? ceilStep(floor.getMinutes()) : 0;
   const minutes: Opt[] = [];
   for (let m = minMinute; m <= 59; m += MIN_STEP) minutes.push({ value: m, label: pad2(m) });
-  if (minutes.length === 0) minutes.push({ value: 0, label: "00" }); // hour fully passed guard
-
+  if (minutes.length === 0) minutes.push({ value: 0, label: "00" });
   let selMinute = ceilStep(selected.getMinutes());
   if (!minutes.some((o) => o.value === selMinute)) selMinute = minutes[0].value;
 
   const dayOpts: Opt[] = days.map((d, i) => ({
     value: i,
     label:
-      i === 0
+      startOfDay(new Date()).getTime() === d.getTime()
         ? zh ? "今天" : "Today"
-        : i === 1
+        : startOfDay(new Date(Date.now() + 86400000)).getTime() === d.getTime()
           ? zh ? "明天" : "Tomorrow"
           : zh
             ? `${d.getMonth() + 1}月${d.getDate()}日 周${"日一二三四五六"[d.getDay()]}`
@@ -166,20 +172,16 @@ export function DateTimeWheel({
 
   const emit = useCallback(
     (di: number, h: number, m: number) => {
-      const d = new Date(days[di] ?? today0);
+      const d = new Date(days[di] ?? floorDay0);
       d.setHours(h, m, 0, 0);
-      // Guard: never emit a past time.
-      const floor = nextValidNow(new Date());
       const safe = d.getTime() < floor.getTime() ? floor : d;
       onChange(
         `${safe.getFullYear()}-${pad2(safe.getMonth() + 1)}-${pad2(safe.getDate())}T${pad2(safe.getHours())}:${pad2(safe.getMinutes())}`,
       );
     },
-    [days, today0, onChange],
+    [days, floorDay0, floor, onChange],
   );
 
-  // Emit the default (soonest valid) selection when opened empty, so a user who
-  // doesn't scroll still gets a valid future time.
   const seededRef = useRef(false);
   useEffect(() => {
     if (!value && !seededRef.current) {
@@ -189,34 +191,21 @@ export function DateTimeWheel({
   }, [value, emit, dayIdx, selHour, selMinute]);
 
   return (
-    <div className="relative flex items-stretch justify-center gap-1 rounded-xl border border-border bg-bg-subtle px-2 py-1">
-      {/* center selection band */}
-      <div
-        className="pointer-events-none absolute left-2 right-2 rounded-lg bg-accent/10 border-y border-accent/30"
-        style={{ top: ITEM_H * PAD + 1, height: ITEM_H - 2 }}
-        aria-hidden
-      />
-      <Wheel options={dayOpts} value={dayIdx} onChange={(v) => emit(v, selHour, selMinute)} width={140} />
-      <Wheel options={hours} value={selHour} onChange={(v) => emit(dayIdx, v, selMinute)} width={56} />
-      <div className="flex items-center text-fg-muted text-sm" aria-hidden>
-        :
+    <div className="flex justify-center">
+      <div className="relative inline-flex items-stretch gap-1 rounded-xl border border-border bg-bg-subtle px-2 py-1">
+        {/* liquid-glass selection band, just wide enough for the wheels */}
+        <div
+          className="dtw-band pointer-events-none absolute inset-x-2 rounded-lg"
+          style={{ top: ITEM_H * PAD + 1, height: ITEM_H - 2 }}
+          aria-hidden
+        />
+        <Wheel options={dayOpts} value={dayIdx} onChange={(v) => emit(v, selHour, selMinute)} width={132} />
+        <Wheel options={hours} value={selHour} onChange={(v) => emit(dayIdx, v, selMinute)} width={50} />
+        <div className="flex items-center text-fg-muted text-sm" aria-hidden>
+          :
+        </div>
+        <Wheel options={minutes} value={selMinute} onChange={(v) => emit(dayIdx, selHour, v)} width={50} />
       </div>
-      <Wheel options={minutes} value={selMinute} onChange={(v) => emit(dayIdx, selHour, v)} width={56} />
     </div>
   );
-}
-
-function ceilStep(m: number): number {
-  return Math.min(55, Math.ceil(m / MIN_STEP) * MIN_STEP);
-}
-
-function nextValidNow(now: Date): Date {
-  const d = new Date(now);
-  const m = ceilStep(now.getMinutes() + 1);
-  if (m >= 60) {
-    d.setHours(d.getHours() + 1, 0, 0, 0);
-  } else {
-    d.setMinutes(m, 0, 0);
-  }
-  return d;
 }

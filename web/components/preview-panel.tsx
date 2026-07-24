@@ -360,7 +360,15 @@ function TraceBody({
 }
 
 function isVisibleTraceEvent(event: TraceEvent) {
-  return !["assistant_delta", "result", "heartbeat", "orchestrator_response", "delegating"].includes(event.event);
+  return ![
+    "assistant_delta",
+    "result",
+    "heartbeat",
+    "orchestrator_response",
+    "delegating",
+    "oa_sources", // data event for source capsules, not a trace step
+    "oa_draft", // data event for draft cards, not a trace step
+  ].includes(event.event);
 }
 
 type TraceTone = "orchestrator" | "content" | "analytics" | "research" | "success" | "error" | "artifact" | "neutral";

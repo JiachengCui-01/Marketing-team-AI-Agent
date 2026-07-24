@@ -47,6 +47,7 @@ import {
 import { localizeError, useI18n } from "@/lib/i18n";
 import type { I18nText } from "@/lib/i18n";
 import { Modal } from "@/components/modal";
+import { useDialogs } from "@/components/dialogs";
 import { Skeleton } from "@/components/ui/skeleton";
 
 type CategoryKey = "org" | "external" | "new" | "starred" | "mailbox" | "groups";
@@ -105,6 +106,7 @@ export function ContactsPanel({
   onMessageUser: (peerId: string) => void;
 }) {
   const { locale, t } = useI18n();
+  const { confirmDialog, host: dialogHost } = useDialogs();
   const [category, setCategory] = useState<CategoryKey>("org");
   const [org, setOrg] = useState<OrgInfo | null>(null);
   const [members, setMembers] = useState<OrgMember[]>([]);
@@ -192,7 +194,7 @@ export function ContactsPanel({
   }
 
   async function removeExternal(id: string) {
-    if (!window.confirm(t.imageDeleteConfirm)) return;
+    if (!(await confirmDialog({ title: t.delete, body: t.imageDeleteConfirm, danger: true, confirmLabel: t.delete }))) return;
     try {
       await deleteExternalContact(id);
       await load(category);
@@ -213,6 +215,7 @@ export function ContactsPanel({
 
   return (
     <>
+      {dialogHost}
       <aside className="flex-1 min-w-0 flex flex-col panel-card">
         <header className="col-header">
           <button onClick={onBack} className="btn-ghost px-2.5 py-1.5 text-sm">
@@ -1079,6 +1082,7 @@ function ManageOrgDialog({
   onChanged: () => void;
 }) {
   const { locale, t } = useI18n();
+  const { confirmDialog, host: dialogHost } = useDialogs();
   const [code, setCode] = useState("");
   const [newOrgName, setNewOrgName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1101,6 +1105,7 @@ function ManageOrgDialog({
 
   return (
     <Modal title={t.contactsManage} onClose={onClose}>
+      {dialogHost}
       <div className="space-y-4 text-sm">
         <div>
           <div className="text-xs font-medium text-fg-muted">{org.name}</div>
@@ -1157,8 +1162,9 @@ function ManageOrgDialog({
         {org.my_role !== "owner" ? (
           <div className="border-t border-border pt-3">
             <button
-              onClick={() => {
-                if (window.confirm(t.leaveOrgConfirm)) void run(() => leaveOrg());
+              onClick={async () => {
+                if (await confirmDialog({ title: t.leaveOrg, body: t.leaveOrgConfirm, danger: true, confirmLabel: t.leaveOrg }))
+                  void run(() => leaveOrg());
               }}
               disabled={busy}
               className="inline-flex items-center gap-1.5 rounded-lg border border-danger/40 px-4 py-2 text-sm text-danger hover:bg-danger/10"

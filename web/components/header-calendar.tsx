@@ -47,22 +47,25 @@ export function HeaderCalendar({ onOpen }: { onOpen: () => void }) {
 
   const zh = locale === "zh";
   const nowSec = Date.now() / 1000;
-  const activeEvents = events.filter((e) => e.status !== "done");
-  const todayCount = activeEvents.filter((e) => isToday(e.start_at)).length;
-  // The nearest task that has not started yet.
-  const next = activeEvents.filter((e) => e.start_at > nowSec).sort((a, b) => a.start_at - b.start_at)[0];
+  // Strictly today's active events only.
+  const todayEvents = events.filter((e) => e.status !== "done" && isToday(e.start_at));
+  const next = todayEvents.filter((e) => e.start_at > nowSec).sort((a, b) => a.start_at - b.start_at)[0];
 
-  const countText = zh ? `今日 ${todayCount} 项` : `${todayCount} today`;
   let summary: string;
-  if (!next) {
-    summary = zh ? `${countText} · 暂无待开始` : `${countText} · none upcoming`;
+  if (todayEvents.length === 0) {
+    summary = zh ? "今日无日程" : "No events today";
   } else {
-    const time = new Date(next.start_at * 1000).toLocaleTimeString(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-    const title = next.title.length > 10 ? next.title.slice(0, 10) + "…" : next.title;
-    summary = `${countText} · ${time} ${title}`;
+    const countText = zh ? `今日 ${todayEvents.length} 项` : `${todayEvents.length} today`;
+    if (!next) {
+      summary = zh ? `${countText} · 均已开始` : `${countText} · all started`;
+    } else {
+      const time = new Date(next.start_at * 1000).toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      const title = next.title.length > 10 ? next.title.slice(0, 10) + "…" : next.title;
+      summary = `${countText} · ${time} ${title}`;
+    }
   }
 
   return (

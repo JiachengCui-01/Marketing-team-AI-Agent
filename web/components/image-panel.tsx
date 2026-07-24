@@ -30,6 +30,7 @@ import {
 } from "@/lib/api";
 import { localizeError, useI18n } from "@/lib/i18n";
 import { Modal } from "@/components/modal";
+import { useDialogs } from "@/components/dialogs";
 import { ImageEditView } from "@/components/image-edit-view";
 import { ImageTemplatesModal } from "@/components/image-templates-modal";
 import { ImageUploadWorkspace } from "@/components/image-source-choice";
@@ -388,6 +389,7 @@ function HistoryModal({
   onOpen: (gen: ImageGeneration) => void;
 }) {
   const { locale, t } = useI18n();
+  const { confirmDialog, host: dialogHost } = useDialogs();
   const [items, setItems] = useState<ImageHistoryItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -402,7 +404,7 @@ function HistoryModal({
   }, [load]);
 
   async function remove(id: string) {
-    if (!window.confirm(t.imageDeleteConfirm)) return;
+    if (!(await confirmDialog({ title: t.delete, body: t.imageDeleteConfirm, danger: true, confirmLabel: t.delete }))) return;
     try {
       await deleteImageGeneration(id);
       load();
@@ -413,6 +415,7 @@ function HistoryModal({
 
   return (
     <Modal title={t.imageHistoryTitle} onClose={onClose} wide>
+      {dialogHost}
       {error ? <p className="mb-3 text-sm text-danger">{error}</p> : null}
       {items === null ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">

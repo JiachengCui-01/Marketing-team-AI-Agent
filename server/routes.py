@@ -1570,6 +1570,7 @@ def _event_view(event: dict) -> dict:
     owner = db.get_user(event["owner_id"])
     return {
         **{k: event[k] for k in ("id", "title", "start_at", "end_at", "location", "created_at")},
+        "description": event.get("description"),
         "status": event.get("status", "active"),
         "attendees": event.get("attendees", []),
         "owner_id": event["owner_id"],
@@ -1626,6 +1627,7 @@ async def create_calendar_event(request: Request, payload: dict = Body(...)) -> 
         location=(str(payload.get("location") or "").strip() or None),
         attendees=[str(a) for a in attendees] if isinstance(attendees, list) else [],
         org_id=org.get("id"),
+        description=(str(payload.get("description") or "").strip() or None),
     )
     return {"event": _event_view(event)}
 
@@ -1650,6 +1652,8 @@ async def update_calendar_event(request: Request, event_id: str, payload: dict =
         fields["end_at"] = _parse_iso(payload.get("end") or payload.get("end_at"))
     if "location" in payload:
         fields["location"] = str(payload.get("location") or "").strip() or None
+    if "description" in payload:
+        fields["description"] = str(payload.get("description") or "").strip() or None
     if "status" in payload:
         status = str(payload.get("status") or "").strip()
         if status not in ("active", "done"):

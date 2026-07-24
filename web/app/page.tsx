@@ -45,6 +45,7 @@ import {
   type UserProfile,
 } from "@/lib/api";
 import { openEventStream } from "@/lib/sse";
+import { appendDraft, listDrafts } from "@/lib/oa-drafts";
 
 const ACTIVE_KEY = "marketing-agent-active-session";
 const LEFT_MIN_WIDTH = 256;
@@ -283,15 +284,18 @@ export default function HomePage() {
       if (messagesBySession[id]) return;
       try {
         const { messages: stored } = await getSessionMessages(id);
-        setMessagesBySession((current) => ({
-          ...current,
-          [id]: stored.map((m) => ({
-            id: newId(),
-            role: m.role,
-            content: m.content,
-            artifacts: m.artifacts,
-          })),
+        const hydrated: ChatMessage[] = stored.map((m) => ({
+          id: newId(),
+          role: m.role,
+          content: m.content,
+          artifacts: m.artifacts,
         }));
+        // Restore any AI draft cards for this session (persisted client-side).
+        const savedDrafts = listDrafts(id);
+        if (savedDrafts.length > 0) {
+          hydrated.push({ id: newId(), role: "assistant", content: "", drafts: savedDrafts });
+        }
+        setMessagesBySession((current) => ({ ...current, [id]: hydrated }));
       } catch {
         setMessagesBySession((current) => ({ ...current, [id]: [] }));
       }
@@ -490,8 +494,10 @@ export default function HomePage() {
             });
           }
         } else if (e.event === "oa_draft") {
-          // Stable id lets the draft card keep its confirmed state across view switches.
+          // Stable id lets the draft card keep its confirmed state across view switches
+          // and page reloads (persisted per session in localStorage).
           const draft = { ...(e.payload as unknown as OaDraft), _id: newId() };
+          appendDraft(sid, draft);
           updatePending((msg) => ({ ...msg, drafts: [...(msg.drafts ?? []), draft] }));
         } else if (e.event === "oa_sources") {
           const sources = (e.payload.sources ?? []) as { title: string; doc_id: string }[];

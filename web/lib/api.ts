@@ -1314,6 +1314,7 @@ export type CalendarEvent = {
   start_at: number;
   end_at: number | null;
   location: string | null;
+  description: string | null;
   status: "active" | "done";
   attendees: string[];
   owner_id: string;
@@ -1333,6 +1334,7 @@ export async function createEvent(payload: {
   end?: string;
   location?: string;
   attendees?: string[];
+  description?: string;
 }): Promise<CalendarEvent> {
   const res = await fetch(`${API_BASE}/api/calendar`, {
     method: "POST",
@@ -1345,7 +1347,14 @@ export async function createEvent(payload: {
 
 export async function updateEvent(
   id: string,
-  payload: { title?: string; start?: string; end?: string; location?: string; status?: "active" | "done" },
+  payload: {
+    title?: string;
+    start?: string;
+    end?: string;
+    location?: string;
+    description?: string;
+    status?: "active" | "done";
+  },
 ): Promise<CalendarEvent> {
   const res = await fetch(`${API_BASE}/api/calendar/${id}`, {
     method: "PATCH",

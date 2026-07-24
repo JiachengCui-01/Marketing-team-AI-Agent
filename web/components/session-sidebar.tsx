@@ -20,6 +20,7 @@ import {
   CheckSquare,
 } from "lucide-react";
 import { ContextMenu, type MenuItem } from "./context-menu";
+import { useDialogs } from "./dialogs";
 import type { GroupRecord, SessionRecord } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
@@ -79,6 +80,7 @@ export function SessionSidebar({
   messageUnread?: number;
 }) {
   const { t } = useI18n();
+  const { promptDialog, confirmDialog, host: dialogHost } = useDialogs();
   const sidebarRef = useRef<HTMLElement | null>(null);
   const [menu, setMenu] = useState<MenuState>(null);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
@@ -211,7 +213,7 @@ export function SessionSidebar({
         label: t.newGroup,
         icon: FolderPlus,
         onClick: async () => {
-          const name = window.prompt(t.groupNamePrompt);
+          const name = await promptDialog({ title: t.newGroup, placeholder: t.groupNamePrompt });
           if (!name) return;
           const newId = await onCreateGroup(name.trim());
           if (typeof newId === "string") onMoveSession(id, newId);
@@ -223,9 +225,9 @@ export function SessionSidebar({
       {
         label: t.rename,
         icon: Pencil,
-        onClick: () => {
+        onClick: async () => {
           const current = sessions.find((s) => s.id === id);
-          const name = window.prompt(t.renameChatPrompt, current?.name ?? "");
+          const name = await promptDialog({ title: t.rename, defaultValue: current?.name ?? "", placeholder: t.renameChatPrompt });
           if (name && name.trim()) onRenameSession(id, name.trim());
         },
       },
@@ -240,8 +242,8 @@ export function SessionSidebar({
         label: t.deleteChat,
         icon: Trash2,
         danger: true,
-        onClick: () => {
-          if (window.confirm(t.deleteChatConfirm))
+        onClick: async () => {
+          if (await confirmDialog({ title: t.deleteChat, body: t.deleteChatConfirm, confirmLabel: t.deleteChat, danger: true }))
             onDeleteSession(id);
         },
       },
@@ -253,9 +255,9 @@ export function SessionSidebar({
       {
         label: t.renameGroup,
         icon: Pencil,
-        onClick: () => {
+        onClick: async () => {
           const current = groups.find((g) => g.id === id);
-          const name = window.prompt(t.renameGroupPrompt, current?.name ?? "");
+          const name = await promptDialog({ title: t.renameGroup, defaultValue: current?.name ?? "", placeholder: t.renameGroupPrompt });
           if (name && name.trim()) onRenameGroup(id, name.trim());
         },
       },
@@ -264,12 +266,8 @@ export function SessionSidebar({
         label: t.deleteGroup,
         icon: Trash2,
         danger: true,
-        onClick: () => {
-          if (
-            window.confirm(
-              t.deleteGroupConfirm,
-            )
-          )
+        onClick: async () => {
+          if (await confirmDialog({ title: t.deleteGroup, body: t.deleteGroupConfirm, confirmLabel: t.deleteGroup, danger: true }))
             onDeleteGroup(id);
         },
       },
@@ -292,7 +290,7 @@ export function SessionSidebar({
         </button>
         <button
           onClick={async () => {
-            const name = window.prompt(t.groupNamePrompt);
+            const name = await promptDialog({ title: t.newGroup, placeholder: t.groupNamePrompt });
             if (name && name.trim()) await onCreateGroup(name.trim());
           }}
           className="btn-ghost w-8 h-8 border border-border"
@@ -361,7 +359,12 @@ export function SessionSidebar({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto py-2 px-1.5 text-sm">
+      <div className="mx-3 mt-2 mb-1 border-t border-border" />
+      <div className="px-3 pb-1 text-[10px] uppercase tracking-wider text-fg-subtle">
+        {t.conversations}
+      </div>
+
+      <div className="flex-1 overflow-y-auto py-1 px-1.5 text-sm">
         {groups.length === 0 && sessions.length === 0 ? (
           <p className="px-3 py-6 text-xs text-fg-subtle text-center">
             {t.noChats}
@@ -433,6 +436,7 @@ export function SessionSidebar({
           onClose={() => setMenu(null)}
         />
       )}
+      {dialogHost}
     </aside>
   );
 }

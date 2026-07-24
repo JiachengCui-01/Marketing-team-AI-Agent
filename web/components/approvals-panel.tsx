@@ -118,11 +118,11 @@ export function ApprovalsPanel({ onBack }: { onBack: () => void }) {
           <ArrowLeft size={15} />
           <span>{t.back}</span>
         </button>
-        <div className="flex items-center gap-2 ml-1">
-          <FileCheck2 size={15} className="text-accent" />
-          <span className="text-sm font-medium">{t.approvals}</span>
+        <div className="flex items-center gap-2 mx-auto text-sm font-medium">
+          <FileCheck2 size={15} className="text-feature-image" />
+          <span>{t.approvals}</span>
         </div>
-        <button onClick={openNew} className="btn-accent h-8 px-3 text-sm ml-auto">
+        <button onClick={openNew} className="btn-accent h-8 px-3 text-sm">
           <Plus size={14} />
           发起审批
         </button>
@@ -206,12 +206,12 @@ export function ApprovalsPanel({ onBack }: { onBack: () => void }) {
                 <span
                   className={`ml-auto text-[11px] px-2 py-0.5 rounded-full ${
                     a.status === "approved"
-                      ? "bg-green-500/15 text-green-600"
+                      ? "bg-success/15 text-success"
                       : a.status === "rejected"
                         ? "bg-danger/15 text-danger"
                         : a.status === "withdrawn"
                           ? "bg-bg-elevated text-fg-subtle"
-                          : "bg-amber-500/15 text-amber-600"
+                          : "bg-feature-research/15 text-feature-research"
                   }`}
                 >
                   {STATUS_LABEL[a.status] ?? a.status}
