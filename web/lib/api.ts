@@ -1342,6 +1342,18 @@ export async function listCalendar(upcoming = false): Promise<CalendarEvent[]> {
   return (await res.json()).events;
 }
 
+// A naive datetime like "2026-07-25T21:00" means the user's *local* time. The
+// server parses ISO strings and would read a naive value in its own zone (UTC on
+// Render), shifting the event by the local offset. Resolve it to an absolute UTC
+// instant here — the browser is in the user's zone, so `new Date(naive)` reads it
+// as local — so the stored instant matches what the user picked. Invalid/blank
+// values pass through unchanged for the server to reject.
+function toUtcInstant(v: string | undefined): string | undefined {
+  if (v == null || v === "") return v;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? v : d.toISOString();
+}
+
 export async function createEvent(payload: {
   title: string;
   start: string;
@@ -1353,7 +1365,11 @@ export async function createEvent(payload: {
   const res = await fetch(`${API_BASE}/api/calendar`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      ...payload,
+      start: toUtcInstant(payload.start),
+      end: toUtcInstant(payload.end),
+    }),
   });
   if (!res.ok) throw new Error(await parseJsonError(res));
   return (await res.json()).event;
@@ -1373,7 +1389,11 @@ export async function updateEvent(
   const res = await fetch(`${API_BASE}/api/calendar/${id}`, {
     method: "PATCH",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      ...payload,
+      start: toUtcInstant(payload.start),
+      end: toUtcInstant(payload.end),
+    }),
   });
   if (!res.ok) throw new Error(await parseJsonError(res));
   return (await res.json()).event;
