@@ -1747,6 +1747,24 @@ async def create_kb_doc(request: Request, payload: dict = Body(...)) -> dict:
     return {"document": {"id": doc["id"], "title": doc["title"], "created_at": doc["created_at"]}}
 
 
+@router.get("/kb/documents/{doc_id}")
+def get_kb_doc(request: Request, doc_id: str) -> dict:
+    """Full text of a KB document, for previewing a cited source in the side panel."""
+    user = auth.require_user(request)
+    org = db.get_current_org(user["id"])
+    doc = db.get_kb_document(doc_id, user["id"], org["id"] if org else None)
+    if doc is None:
+        raise HTTPException(404, "文档不存在或无权访问。")
+    return {
+        "document": {
+            "id": doc["id"],
+            "title": doc["title"],
+            "text_content": doc["text_content"],
+            "scope": doc["scope"],
+        }
+    }
+
+
 @router.delete("/kb/documents/{doc_id}")
 def delete_kb_doc(request: Request, doc_id: str) -> dict:
     user = auth.require_user(request)

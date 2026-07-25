@@ -9,6 +9,7 @@ import { artifactDownloadUrl, type OaDraft } from "@/lib/api";
 import { AvatarImage } from "./auth-ui";
 import { CitationMarkdown } from "./citation-markdown";
 import { OaDraftCard } from "./oa-draft-card";
+import { usePreviewOpener } from "@/lib/preview-context";
 
 export type MessageArtifact = {
   artifact_id: string;
@@ -44,6 +45,7 @@ export function MessageBubble({
   userAvatar?: string | null;
 }) {
   const { t } = useI18n();
+  const previewOpener = usePreviewOpener();
   const isUser = message.role === "user";
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.content);
@@ -176,14 +178,16 @@ export function MessageBubble({
                 <div className="text-[11px] text-fg-subtle mb-1.5">{t.knowledgeBase}</div>
                 <div className="flex flex-wrap gap-2">
                   {message.kbSources.map((s) => (
-                    <span
+                    <button
                       key={s.doc_id}
-                      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-bg-subtle/60 px-2.5 py-1 text-xs text-fg-muted"
+                      type="button"
+                      onClick={() => previewOpener?.openKb(s.doc_id, s.title)}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-bg-subtle/60 px-2.5 py-1 text-xs text-fg-muted transition hover:border-accent/40 hover:text-fg"
                       title={s.title}
                     >
                       <BookOpen size={12} className="text-accent shrink-0" />
                       <span className="truncate max-w-[20ch]">{s.title}</span>
-                    </span>
+                    </button>
                   ))}
                 </div>
               </div>

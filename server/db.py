@@ -2150,6 +2150,26 @@ def list_personal_kb_documents(user_id: str) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+def get_kb_document(doc_id: str, user_id: str, org_id: str | None) -> dict | None:
+    """Return a KB document's full content if the user may read it: either they
+    uploaded it (personal) or it is an org-shared doc in their current org."""
+    _ensure()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id, org_id, uploader_id, title, text_content, scope, created_at "
+            "FROM kb_documents WHERE id = ?",
+            (doc_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    doc = dict(row)
+    if doc["uploader_id"] == user_id:
+        return doc
+    if doc["scope"] == "org" and doc["org_id"] is not None and doc["org_id"] == org_id:
+        return doc
+    return None
+
+
 def delete_kb_document(doc_id: str, org_id: str | None) -> bool:
     _ensure()
     with _connect() as conn:

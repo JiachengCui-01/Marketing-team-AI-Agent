@@ -17,6 +17,10 @@ import {
   FileSpreadsheet,
   File as FileIcon,
   Eye,
+  Globe,
+  BookOpen,
+  ExternalLink,
+  X,
   Layers3,
   PanelRight,
   PanelRightClose,
@@ -27,18 +31,32 @@ import type { StreamEvent } from "@/lib/sse";
 import {
   artifactDownloadUrl,
   artifactPreviewUrl,
+  getKbDocument,
   uploadDownloadUrl,
   uploadPreviewUrl,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Modal } from "@/components/modal";
+import { CitationMarkdown } from "@/components/citation-markdown";
 
 export type TraceEvent = StreamEvent & { ts: number };
 
 export type PreviewItem =
   | { source: "artifact"; id: string; filename: string; mime: string }
-  | { source: "upload"; id: string; filename: string; mime: string };
+  | { source: "upload"; id: string; filename: string; mime: string }
+  | { source: "web"; id: string; filename: string; url: string }
+  | { source: "kb"; id: string; filename: string; docId: string };
+
+export function previewKey(item: PreviewItem): string {
+  return `${item.source}:${item.id}`;
+}
+
+function tabIcon(item: PreviewItem): LucideIcon {
+  if (item.source === "web") return Globe;
+  if (item.source === "kb") return BookOpen;
+  return iconForMime(item.mime);
+}
 
 const SPECIALIST_META: Record<string, { key: "content" | "analytics" | "research"; icon: LucideIcon }> = {
   delegate_to_content_agent: { key: "content", icon: PenLine },
@@ -63,33 +81,40 @@ function specialistIcon(name?: string) {
 export function PreviewPanel({
   events,
   totals,
-  preview,
+  items,
+  activeId,
   defaultTab,
   collapsed,
   width,
   onToggle,
+  onSelectTab,
+  onCloseTab,
   onDownloadArtifact,
 }: {
   events: TraceEvent[];
   totals: { input: number; output: number };
-  preview: PreviewItem | null;
+  items: PreviewItem[];
+  activeId: string | null;
   defaultTab?: "preview" | "trace";
   collapsed: boolean;
   width?: number;
   onToggle: () => void;
+  onSelectTab?: (key: string) => void;
+  onCloseTab?: (key: string) => void;
   onDownloadArtifact?: (item: Extract<PreviewItem, { source: "artifact" }>) => void;
 }) {
   const { t } = useI18n();
+  const active = items.find((i) => previewKey(i) === activeId) ?? items[items.length - 1] ?? null;
   const [tab, setTab] = useState<"preview" | "trace">(
-    defaultTab ?? (preview ? "preview" : "trace"),
+    defaultTab ?? (active ? "preview" : "trace"),
   );
   const lastIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const id = preview ? `${preview.source}:${preview.id}` : null;
+    const id = active ? previewKey(active) : null;
     if (id && id !== lastIdRef.current) setTab("preview");
     lastIdRef.current = id;
-  }, [preview]);
+  }, [active]);
 
   if (collapsed) {
     return (
@@ -115,7 +140,7 @@ export function PreviewPanel({
         <TabButton active={tab === "preview"} onClick={() => setTab("preview")} icon={Eye} label={t.preview} />
         <TabButton active={tab === "trace"} onClick={() => setTab("trace")} icon={Activity} label={t.trace} />
         <span className="ml-auto text-[10px] text-fg-subtle pr-2">
-          {tab === "trace" ? t.live : preview ? preview.filename : t.noPreview}
+          {tab === "trace" ? t.live : active ? active.filename : t.noPreview}
         </span>
         <button
           onClick={onToggle}
@@ -128,11 +153,71 @@ export function PreviewPanel({
       </header>
 
       {tab === "preview" ? (
-        <PreviewBody item={preview} onDownloadArtifact={onDownloadArtifact} />
+        <>
+          {items.length > 1 ? (
+            <PreviewTabs
+              items={items}
+              activeKey={active ? previewKey(active) : null}
+              onSelect={onSelectTab}
+              onClose={onCloseTab}
+            />
+          ) : null}
+          <PreviewBody item={active} onDownloadArtifact={onDownloadArtifact} />
+        </>
       ) : (
         <TraceBody events={events} totals={totals} />
       )}
     </aside>
+  );
+}
+
+function PreviewTabs({
+  items,
+  activeKey,
+  onSelect,
+  onClose,
+}: {
+  items: PreviewItem[];
+  activeKey: string | null;
+  onSelect?: (key: string) => void;
+  onClose?: (key: string) => void;
+}) {
+  return (
+    <div className="flex items-stretch gap-1 overflow-x-auto border-b border-border bg-bg-subtle/40 px-1.5 py-1">
+      {items.map((item) => {
+        const key = previewKey(item);
+        const Icon = tabIcon(item);
+        const isActive = key === activeKey;
+        return (
+          <div
+            key={key}
+            className={`group inline-flex max-w-[160px] shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] transition ${
+              isActive
+                ? "border-border bg-bg-elevated text-fg"
+                : "border-transparent text-fg-muted hover:bg-bg-elevated/60"
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => onSelect?.(key)}
+              className="inline-flex min-w-0 items-center gap-1.5"
+              title={item.filename}
+            >
+              <Icon size={12} className="shrink-0" />
+              <span className="truncate">{item.filename}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onClose?.(key)}
+              className="shrink-0 text-fg-subtle transition hover:text-fg"
+              aria-label="close"
+            >
+              <X size={11} />
+            </button>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -189,6 +274,9 @@ function PreviewBody({
     );
   }
 
+  if (item.source === "web") return <WebPreview item={item} />;
+  if (item.source === "kb") return <KbPreview item={item} />;
+
   const previewUrl = item.source === "artifact" ? artifactPreviewUrl(item.id) : uploadPreviewUrl(item.id);
   const downloadUrl = item.source === "artifact" ? artifactDownloadUrl(item.id) : uploadDownloadUrl(item.id);
   const Icon = iconForMime(item.mime);
@@ -228,6 +316,95 @@ function PreviewBody({
             <p className="text-sm text-fg-muted">{item.filename}</p>
             <p className="mt-1 text-xs text-fg-subtle">{t.noInlinePreview}</p>
           </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WebPreview({ item }: { item: Extract<PreviewItem, { source: "web" }> }) {
+  const { t } = useI18n();
+  let domain = item.url;
+  try {
+    domain = new URL(item.url).hostname.replace(/^www\./, "");
+  } catch {
+    // keep raw url as label
+  }
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      <div className="px-3 py-2 border-b border-border flex items-center gap-2">
+        <Globe size={14} className="text-accent shrink-0" />
+        <span className="text-xs font-medium truncate flex-1" title={item.url}>
+          {item.filename || domain}
+        </span>
+        <a
+          href={item.url}
+          target="_blank"
+          rel="noreferrer"
+          className="btn-accent px-2.5 py-1 text-xs"
+          title={t.openInNewTab}
+        >
+          <ExternalLink size={12} />
+          <span>{t.openInNewTab}</span>
+        </a>
+      </div>
+      <div className="flex-1 overflow-hidden bg-bg">
+        <iframe
+          src={item.url}
+          title={item.filename || domain}
+          className="w-full h-full border-0"
+          sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+          referrerPolicy="no-referrer"
+        />
+      </div>
+    </div>
+  );
+}
+
+function KbPreview({ item }: { item: Extract<PreviewItem, { source: "kb" }> }) {
+  const { t } = useI18n();
+  const [doc, setDoc] = useState<{ title: string; text_content: string } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDoc(null);
+    setErr(null);
+    getKbDocument(item.docId)
+      .then((d) => {
+        if (!cancelled) setDoc({ title: d.title, text_content: d.text_content });
+      })
+      .catch((e) => {
+        if (!cancelled) setErr(String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [item.docId]);
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      <div className="px-3 py-2 border-b border-border flex items-center gap-2">
+        <BookOpen size={14} className="text-accent shrink-0" />
+        <span className="text-xs font-medium truncate flex-1" title={item.filename}>
+          {doc?.title || item.filename}
+        </span>
+      </div>
+      <div className="flex-1 overflow-auto bg-bg p-4">
+        {err ? (
+          <p className="text-xs text-danger">{err}</p>
+        ) : !doc ? (
+          <div className="space-y-2">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} variant="preview" className="h-4 w-full" />
+            ))}
+          </div>
+        ) : doc.text_content.trim() ? (
+          <div className="prose-chat text-sm">
+            <CitationMarkdown content={doc.text_content} />
+          </div>
+        ) : (
+          <p className="text-xs text-fg-subtle">{t.noInlinePreview}</p>
         )}
       </div>
     </div>

@@ -1437,6 +1437,14 @@ export async function listKbDocuments(): Promise<KbDocument[]> {
   return (await res.json()).documents;
 }
 
+export async function getKbDocument(
+  id: string,
+): Promise<{ id: string; title: string; text_content: string; scope: string }> {
+  const res = await fetch(`${API_BASE}/api/kb/documents/${id}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).document;
+}
+
 export async function createKbDocument(payload: {
   upload_id?: string;
   title?: string;

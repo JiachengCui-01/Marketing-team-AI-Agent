@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { useTheme } from "next-themes";
 import {
@@ -12,9 +12,11 @@ import { ChatPanel } from "@/components/chat-panel";
 import {
   PreviewPanel,
   classifyTotals,
+  previewKey,
   type TraceEvent,
   type PreviewItem,
 } from "@/components/preview-panel";
+import { PreviewOpenerProvider, type PreviewOpener } from "@/lib/preview-context";
 import { SessionSidebar } from "@/components/session-sidebar";
 import { NewsPanel } from "@/components/news-panel";
 import { MarketingImagePanel } from "@/components/image-panel";
@@ -97,7 +99,8 @@ export default function HomePage() {
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const [workspaceFileIds, setWorkspaceFileIds] = useState<string[]>([]);
   const [workspaceName, setWorkspaceName] = useState<string | null>(null);
-  const [preview, setPreview] = useState<PreviewItem | null>(null);
+  const [previewTabs, setPreviewTabs] = useState<PreviewItem[]>([]);
+  const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [switchOpen, setSwitchOpen] = useState(false);
@@ -165,6 +168,42 @@ export default function HomePage() {
       }));
     },
     [],
+  );
+
+  // Open a source (file, web page, or KB document) as a browser-like tab in the
+  // right preview panel. Deduplicates by key so re-clicking just re-focuses the tab.
+  const openPreview = useCallback((item: PreviewItem) => {
+    const key = previewKey(item);
+    setPreviewTabs((tabs) => (tabs.some((t) => previewKey(t) === key) ? tabs : [...tabs, item]));
+    setActivePreviewId(key);
+    setPreviewCollapsed(false);
+  }, []);
+
+  const closePreviewTab = useCallback(
+    (key: string) => {
+      const idx = previewTabs.findIndex((t) => previewKey(t) === key);
+      const next = previewTabs.filter((t) => previewKey(t) !== key);
+      setPreviewTabs(next);
+      if (activePreviewId === key) {
+        const neighbor = next[idx] ?? next[idx - 1] ?? null;
+        setActivePreviewId(neighbor ? previewKey(neighbor) : null);
+      }
+    },
+    [previewTabs, activePreviewId],
+  );
+
+  const resetPreview = useCallback(() => {
+    setPreviewTabs([]);
+    setActivePreviewId(null);
+  }, []);
+
+  const previewOpener = useMemo<PreviewOpener>(
+    () => ({
+      openWeb: (url, title) => openPreview({ source: "web", id: url, url, filename: title || url }),
+      openKb: (docId, title) =>
+        openPreview({ source: "kb", id: docId, docId, filename: title || "文档" }),
+    }),
+    [openPreview],
   );
 
   // Attach persisted message ids to the live (just-streamed) messages so they
@@ -310,7 +349,7 @@ export default function HomePage() {
       setView("chat");
       setActiveId(id);
       window.localStorage.setItem(activeKey(), id);
-      setPreview(null);
+      resetPreview();
       if (messagesBySession[id]) return;
       try {
         const { messages: stored } = await getSessionMessages(id);
@@ -337,7 +376,7 @@ export default function HomePage() {
   const handleNewChat = useCallback(async () => {
     setView("chat");
     setAttached([]);
-    setPreview(null);
+    resetPreview();
     setActiveId(null);
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(activeKey());
@@ -517,7 +556,7 @@ export default function HomePage() {
           };
           updatePending((msg) => ({ ...msg, artifacts: [...(msg.artifacts ?? []), artifact] }));
           if (activeIdRef.current === sid) {
-            setPreview({
+            openPreview({
               source: "artifact",
               id: artifact.artifact_id,
               filename: artifact.filename,
@@ -621,7 +660,7 @@ export default function HomePage() {
   );
 
   const onPreviewUpload = useCallback((f: UploadResponse) => {
-    setPreview({
+    openPreview({
       source: "upload",
       id: f.file_id,
       filename: f.original_name,
@@ -630,7 +669,7 @@ export default function HomePage() {
   }, []);
 
   const onPreviewArtifact = useCallback((a: MessageArtifact) => {
-    setPreview({
+    openPreview({
       source: "artifact",
       id: a.artifact_id,
       filename: a.filename,
@@ -660,7 +699,7 @@ export default function HomePage() {
       });
       if (id === activeId) {
         setActiveId(null);
-        setPreview(null);
+        resetPreview();
         window.localStorage.removeItem(activeKey());
       }
     },
@@ -693,7 +732,7 @@ export default function HomePage() {
       });
       if (activeId && affected.some((s) => s.id === activeId)) {
         setActiveId(null);
-        setPreview(null);
+        resetPreview();
         window.localStorage.removeItem(activeKey());
       }
     },
@@ -713,7 +752,7 @@ export default function HomePage() {
       setMessagesBySession({});
       setTraceBySession({});
       setRunningSessions({});
-      setPreview(null);
+      resetPreview();
       setAttached([]);
       void store.refresh();
     },
@@ -730,7 +769,7 @@ export default function HomePage() {
     setMessagesBySession({});
     setTraceBySession({});
     setRunningSessions({});
-    setPreview(null);
+    resetPreview();
     setAttached([]);
   }, []);
 
@@ -767,6 +806,7 @@ export default function HomePage() {
   }
 
   return (
+    <PreviewOpenerProvider value={previewOpener}>
     <main className="h-screen flex flex-col bg-bg-subtle">
       <header className="relative z-50 bg-bg-subtle px-1.5 pt-1.5">
         <div className="frost-bar h-14 rounded-2xl border border-border px-4 py-3 flex items-center gap-3">
@@ -862,7 +902,7 @@ export default function HomePage() {
           <MarketingImagePanel
             key={user.id}
             onBack={() => setView("chat")}
-            onPreview={setPreview}
+            onPreview={openPreview}
           />
         ) : (
           <ChatPanel
@@ -906,10 +946,13 @@ export default function HomePage() {
         <PreviewPanel
           events={trace}
           totals={totals}
-          preview={preview}
+          items={previewTabs}
+          activeId={activePreviewId}
           collapsed={previewCollapsed}
           width={rightWidth}
           onToggle={() => setPreviewCollapsed((c) => !c)}
+          onSelectTab={setActivePreviewId}
+          onCloseTab={closePreviewTab}
           onDownloadArtifact={
             workspaceName
               ? (item) =>
@@ -920,7 +963,7 @@ export default function HomePage() {
                   )
               : undefined
           }
-          defaultTab={preview ? "preview" : "trace"}
+          defaultTab={previewTabs.length ? "preview" : "trace"}
         />
           </>
         )}
@@ -931,6 +974,7 @@ export default function HomePage() {
         onAuthenticated={handleAuthenticated}
       />
     </main>
+    </PreviewOpenerProvider>
   );
 }
 

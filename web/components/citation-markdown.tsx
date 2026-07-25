@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 import { ExternalLink, Link2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/i18n";
+import { usePreviewOpener } from "@/lib/preview-context";
 
 export type CitationSource = {
   url: string;
@@ -251,6 +252,7 @@ function CitationPopover({
   onClose: () => void;
 }) {
   const { locale } = useI18n();
+  const opener = usePreviewOpener();
   const position = popoverPosition(anchor);
 
   const title = locale === "zh" ? "引用" : "Citations";
@@ -274,6 +276,16 @@ function CitationPopover({
             href={source.url}
             target="_blank"
             rel="noreferrer"
+            onClick={(event) => {
+              // Open the cited page inside the right-side preview panel (as a
+              // browser-like tab) instead of navigating away. Falls back to a new
+              // tab when no preview panel is available (e.g. on mobile layouts).
+              if (opener) {
+                event.preventDefault();
+                opener.openWeb(source.url, source.displayText || source.domain);
+                onClose();
+              }
+            }}
             className="flex gap-2 rounded-md border border-border/70 bg-bg-subtle/50 p-2 transition hover:border-accent/40 hover:bg-bg-subtle"
           >
             <img src={source.faviconUrl} alt="" className="mt-0.5 h-4 w-4 rounded-sm" />
