@@ -130,12 +130,18 @@ export function MessageBubble({
 
       <div
         className={cn(
-          "min-w-0 max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-relaxed transition-all duration-300",
-          isUser
-            ? "bg-accent text-accent-fg rounded-tr-sm shadow-lg shadow-accent/25 hover:shadow-xl hover:shadow-accent/35"
-            : "bg-bg-elevated text-fg border border-border rounded-tl-sm shadow-sm hover:shadow-md hover:border-accent/30",
+          "flex min-w-0 max-w-[78%] flex-col gap-1",
+          isUser ? "items-end" : "items-start",
         )}
       >
+        <div
+          className={cn(
+            "min-w-0 max-w-full w-fit rounded-2xl px-4 py-3 text-sm leading-relaxed transition-all duration-300",
+            isUser
+              ? "bg-accent text-accent-fg rounded-tr-sm shadow-lg shadow-accent/25 hover:shadow-xl hover:shadow-accent/35"
+              : "bg-bg-elevated text-fg border border-border rounded-tl-sm shadow-sm hover:shadow-md hover:border-accent/30",
+          )}
+        >
         {showStatus ? (
           <StatusChip status={message.status!} />
         ) : showTypingDots ? (
@@ -184,17 +190,19 @@ export function MessageBubble({
             ) : null}
           </>
         )}
+        </div>
+        {editable ? (
+          <button
+            onClick={startEdit}
+            className="btn-ghost inline-flex h-6 items-center gap-1 rounded-full px-2 text-[11px] text-fg-subtle opacity-0 transition group-hover:opacity-100"
+            aria-label={t.editMessage}
+            title={t.editMessage}
+          >
+            <Pencil size={12} />
+            <span>{t.editMessage}</span>
+          </button>
+        ) : null}
       </div>
-      {editable ? (
-        <button
-          onClick={startEdit}
-          className="btn-ghost mt-1 h-7 w-7 shrink-0 self-start rounded-full opacity-0 transition group-hover:opacity-100"
-          aria-label={t.editMessage}
-          title={t.editMessage}
-        >
-          <Pencil size={13} />
-        </button>
-      ) : null}
     </div>
   );
 }
