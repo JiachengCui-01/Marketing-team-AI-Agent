@@ -79,6 +79,16 @@ def prepare_for_turn(session_id: str, user_id: str) -> Conversation | None:
         return conv
 
 
+def invalidate(session_id: str) -> None:
+    """Drop the in-memory Conversation so the next turn rebuilds it from SQLite.
+
+    Call after mutating the persisted transcript out-of-band (e.g. truncating
+    history for an edit-and-regenerate).
+    """
+    with _CACHE_LOCK:
+        _CACHE.pop(session_id, None)
+
+
 def delete(session_id: str, user_id: str | None = None) -> bool:
     with _CACHE_LOCK:
         _CACHE.pop(session_id, None)

@@ -40,6 +40,7 @@ import {
   logoutUser,
   setAuthToken,
   streamUrl,
+  truncateSession,
   type OaDraft,
   type UploadResponse,
   type UserProfile,
@@ -166,6 +167,35 @@ export default function HomePage() {
     [],
   );
 
+  // Attach persisted message ids to the live (just-streamed) messages so they
+  // become editable. Server messages arrive in the same order as the rendered
+  // turns; walk both by role (a stopped assistant with no server row is simply
+  // skipped, which never affects user turns since every prompt is persisted).
+  const reconcileServerIds = useCallback(
+    async (sessionId: string) => {
+      try {
+        const { messages: stored } = await getSessionMessages(sessionId);
+        setSessionMessages(sessionId, (local) => {
+          let j = 0;
+          return local.map((msg) => {
+            while (j < stored.length && stored[j].role !== msg.role) j++;
+            if (j < stored.length) {
+              const serverId = stored[j].id;
+              j++;
+              return serverId != null && msg.server_id !== serverId
+                ? { ...msg, server_id: serverId }
+                : msg;
+            }
+            return msg;
+          });
+        });
+      } catch {
+        /* best-effort; ids also fill in whenever the session is reloaded */
+      }
+    },
+    [setSessionMessages],
+  );
+
   const maxSidebarWidth = useCallback((side: "left" | "right", min: number) => {
     if (typeof window === "undefined") return min;
     const divisor = side === "right" ? 2 : 4;
@@ -286,6 +316,7 @@ export default function HomePage() {
         const { messages: stored } = await getSessionMessages(id);
         const hydrated: ChatMessage[] = stored.map((m) => ({
           id: newId(),
+          server_id: m.id,
           role: m.role,
           content: m.content,
           artifacts: m.artifacts,
@@ -357,9 +388,9 @@ export default function HomePage() {
     [activeId, busy, ensureSession, setSessionMessages, store, t],
   );
 
-  const handleSend = useCallback(async (override?: string) => {
+  const handleSend = useCallback(async (override?: string, opts?: { force?: boolean }) => {
     const text = (override ?? input).trim();
-    if (!text || busy) return;
+    if (!text || (busy && !opts?.force)) return;
     setInput("");
 
     let sid: string;
@@ -532,6 +563,7 @@ export default function HomePage() {
         setRunningSessions((current) => ({ ...current, [sid]: false }));
         closeRefs.current.delete(sid);
         store.touch();
+        void reconcileServerIds(sid);
       },
       (err) => {
         console.error("stream error", err);
@@ -543,7 +575,51 @@ export default function HomePage() {
     closeRefs.current.set(sid, close);
     // Clear attachments after sending.
     setAttached([]);
-  }, [input, busy, activeId, attached, workspaceFileIds, selectedSkillIds, ensureSession, setSessionMessages, setSessionTrace, store, t]);
+  }, [input, busy, activeId, attached, workspaceFileIds, selectedSkillIds, ensureSession, setSessionMessages, setSessionTrace, reconcileServerIds, store, t]);
+
+  // Abort the running turn but keep whatever streamed so far (like ChatGPT's Stop).
+  // The fetch abort makes the server see a disconnect and cancel the model call.
+  const handleStop = useCallback(() => {
+    const sid = activeId;
+    if (!sid) return;
+    closeRefs.current.get(sid)?.();
+    closeRefs.current.delete(sid);
+    setRunningSessions((current) => ({ ...current, [sid]: false }));
+    setSessionMessages(sid, (msgs) =>
+      msgs.map((m) =>
+        m.pending ? { ...m, pending: false, status: undefined, content: m.content || t.stopped } : m,
+      ),
+    );
+    void reconcileServerIds(sid);
+  }, [activeId, setSessionMessages, reconcileServerIds, t]);
+
+  // Edit an earlier user turn and regenerate from there: truncate the persisted
+  // transcript at that message, mirror the cut locally, then resend the new text.
+  const handleEditMessage = useCallback(
+    async (message: ChatMessage, newText: string) => {
+      const sid = activeId;
+      const text = newText.trim();
+      if (!sid || !text) return;
+      closeRefs.current.get(sid)?.();
+      closeRefs.current.delete(sid);
+      setRunningSessions((current) => ({ ...current, [sid]: false }));
+      if (message.server_id != null) {
+        try {
+          await truncateSession(sid, message.server_id);
+        } catch (e) {
+          console.error("truncate failed", e);
+        }
+      }
+      setSessionMessages(sid, (msgs) => {
+        const idx = msgs.findIndex((m) => m.id === message.id);
+        return idx < 0 ? msgs : msgs.slice(0, idx);
+      });
+      setSessionTrace(sid, () => []);
+      await handleSend(text, { force: true });
+    },
+    [activeId, handleSend, setSessionMessages, setSessionTrace],
+  );
+
   const onPreviewUpload = useCallback((f: UploadResponse) => {
     setPreview({
       source: "upload",
@@ -794,6 +870,8 @@ export default function HomePage() {
             input={input}
             setInput={setInput}
             onSend={handleSend}
+            onStop={handleStop}
+            onEditMessage={handleEditMessage}
             busy={busy}
             attached={attached}
             onAttach={(f) => setAttached((a) => [...a, f])}

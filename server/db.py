@@ -782,6 +782,25 @@ def list_messages(session_id: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def truncate_messages_from(session_id: str, from_message_id: int) -> int:
+    """Delete the message with ``from_message_id`` and every later message in the
+    session (used when a user edits an earlier turn and regenerates from there).
+
+    Also drops the cached memory summary so the working context is rebuilt from
+    the surviving transcript rather than a summary that counts removed turns.
+    """
+    _ensure()
+    with _connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM messages WHERE session_id = ? AND id >= ?",
+            (session_id, from_message_id),
+        )
+        conn.execute(
+            "DELETE FROM session_memory_summaries WHERE session_id = ?", (session_id,)
+        )
+        return cur.rowcount
+
+
 # ---------- memory ----------
 
 def get_session_memory_summary(session_id: str, user_id: str) -> dict | None:

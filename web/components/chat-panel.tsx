@@ -8,6 +8,7 @@ import {
   MessageSquare,
   Send,
   Sparkles,
+  Square,
   X,
 } from "lucide-react";
 import { createPortal } from "react-dom";
@@ -48,6 +49,8 @@ export function ChatPanel({
   input,
   setInput,
   onSend,
+  onStop,
+  onEditMessage,
   busy,
   attached,
   onAttach,
@@ -67,6 +70,8 @@ export function ChatPanel({
   input: string;
   setInput: (v: string) => void;
   onSend: (override?: string) => void;
+  onStop?: () => void;
+  onEditMessage?: (message: ChatMessage, newText: string) => void;
   busy: boolean;
   attached: UploadResponse[];
   onAttach: (f: UploadResponse) => void;
@@ -457,6 +462,8 @@ export function ChatPanel({
                 message={m}
                 onPreviewArtifact={onPreviewArtifact}
                 onDownloadArtifact={onDownloadArtifact}
+                onEditMessage={onEditMessage}
+                canEdit={!busy}
                 userAvatar={userAvatar}
               />
             ))}
@@ -568,18 +575,29 @@ export function ChatPanel({
                   {copy.clarifyChecking}
                 </span>
               ) : null}
-              <button
-                onClick={submitWithClarifyCheck}
-                disabled={busy || clarifyChecking || !input.trim()}
-                className={`btn-accent h-8 w-8 disabled:cursor-not-allowed${clarifyChecking ? "" : " ml-auto"}`}
-                aria-label={t.send}
-              >
-                {busy || clarifyChecking ? (
-                  <Loader2 size={15} className="animate-spin text-feature-content transition-all duration-300" />
-                ) : (
-                  <Send size={15} className="transition-all duration-200 group-hover:scale-110" />
-                )}
-              </button>
+              {busy && onStop ? (
+                <button
+                  onClick={onStop}
+                  className={`btn-accent h-8 w-8${clarifyChecking ? "" : " ml-auto"}`}
+                  aria-label={t.stopGenerating}
+                  title={t.stopGenerating}
+                >
+                  <Square size={12} className="fill-current" />
+                </button>
+              ) : (
+                <button
+                  onClick={submitWithClarifyCheck}
+                  disabled={busy || clarifyChecking || !input.trim()}
+                  className={`btn-accent h-8 w-8 disabled:cursor-not-allowed${clarifyChecking ? "" : " ml-auto"}`}
+                  aria-label={t.send}
+                >
+                  {busy || clarifyChecking ? (
+                    <Loader2 size={15} className="animate-spin text-feature-content transition-all duration-300" />
+                  ) : (
+                    <Send size={15} className="transition-all duration-200 group-hover:scale-110" />
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </div>

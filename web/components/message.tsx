@@ -1,6 +1,7 @@
 "use client";
 
-import { User, Sparkles, FileText, Download, BookOpen } from "lucide-react";
+import { useState } from "react";
+import { User, Sparkles, FileText, Download, BookOpen, Pencil } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/i18n";
 import { StatusChip, type StatusInfo } from "./status-chip";
@@ -17,6 +18,7 @@ export type MessageArtifact = {
 
 export type ChatMessage = {
   id: string;
+  server_id?: number;
   role: "user" | "assistant";
   content: string;
   pending?: boolean;
@@ -30,15 +32,72 @@ export function MessageBubble({
   message,
   onPreviewArtifact,
   onDownloadArtifact,
+  onEditMessage,
+  canEdit,
   userAvatar,
 }: {
   message: ChatMessage;
   onPreviewArtifact?: (a: MessageArtifact) => void;
   onDownloadArtifact?: (a: MessageArtifact) => void;
+  onEditMessage?: (message: ChatMessage, newText: string) => void;
+  canEdit?: boolean;
   userAvatar?: string | null;
 }) {
   const { t } = useI18n();
   const isUser = message.role === "user";
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(message.content);
+  // Only settled user turns that are persisted (have a server id) can be edited.
+  const editable =
+    isUser && !!canEdit && !!onEditMessage && message.server_id != null && !message.pending;
+
+  const startEdit = () => {
+    setDraft(message.content);
+    setEditing(true);
+  };
+  const submitEdit = () => {
+    const next = draft.trim();
+    if (!next) return;
+    setEditing(false);
+    if (next !== message.content) onEditMessage!(message, next);
+  };
+
+  if (isUser && editing) {
+    return (
+      <div className="flex min-w-0 flex-col items-end gap-2">
+        <textarea
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              submitEdit();
+            } else if (e.key === "Escape") {
+              setEditing(false);
+            }
+          }}
+          rows={Math.min(8, Math.max(2, draft.split("\n").length))}
+          className="w-full max-w-[78%] resize-none rounded-2xl border border-accent/40 bg-bg-elevated px-4 py-3 text-sm leading-relaxed outline-none focus:border-accent"
+        />
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setEditing(false)}
+            className="btn-ghost rounded-lg border border-border px-3 py-1 text-xs"
+          >
+            {t.cancel}
+          </button>
+          <button
+            onClick={submitEdit}
+            disabled={!draft.trim()}
+            className="btn-accent rounded-lg px-3 py-1 text-xs disabled:opacity-40"
+          >
+            {t.editResend}
+          </button>
+        </div>
+      </div>
+    );
+  }
   const showStatus =
     message.pending && !!message.status && message.content.length === 0;
   const showTypingDots =
@@ -47,7 +106,7 @@ export function MessageBubble({
   return (
     <div
       className={cn(
-        "flex min-w-0 gap-3 animate-fade-in transition-all duration-300",
+        "group flex min-w-0 items-start gap-3 animate-fade-in transition-all duration-300",
         isUser ? "flex-row-reverse" : "flex-row",
       )}
     >
@@ -126,6 +185,16 @@ export function MessageBubble({
           </>
         )}
       </div>
+      {editable ? (
+        <button
+          onClick={startEdit}
+          className="btn-ghost mt-1 h-7 w-7 shrink-0 self-start rounded-full opacity-0 transition group-hover:opacity-100"
+          aria-label={t.editMessage}
+          title={t.editMessage}
+        >
+          <Pencil size={13} />
+        </button>
+      ) : null}
     </div>
   );
 }

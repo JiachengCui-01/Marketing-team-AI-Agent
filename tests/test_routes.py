@@ -49,6 +49,43 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(created.status_code, 200, created.text)
         return created.json()["session_id"]
 
+    def test_truncate_session_from_message(self) -> None:
+        session_id = self._create_session()
+        db.add_message(session_id, "user", "第一问")
+        db.add_message(session_id, "assistant", "第一答")
+        db.add_message(session_id, "user", "第二问")
+        db.add_message(session_id, "assistant", "第二答")
+
+        listed = self.client.get(f"/api/sessions/{session_id}/messages", headers=self.headers)
+        self.assertEqual(listed.status_code, 200, listed.text)
+        messages = listed.json()["messages"]
+        self.assertEqual(len(messages), 4)
+        # The endpoint exposes stable server ids used to anchor the truncation.
+        self.assertTrue(all(isinstance(m["id"], int) for m in messages))
+        second_user_id = messages[2]["id"]
+
+        resp = self.client.post(
+            f"/api/sessions/{session_id}/truncate",
+            headers=self.headers,
+            json={"from_message_id": second_user_id},
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json()["deleted"], 2)
+
+        remaining = self.client.get(
+            f"/api/sessions/{session_id}/messages", headers=self.headers
+        ).json()["messages"]
+        self.assertEqual([m["content"] for m in remaining], ["第一问", "第一答"])
+
+    def test_truncate_session_rejects_non_integer(self) -> None:
+        session_id = self._create_session()
+        resp = self.client.post(
+            f"/api/sessions/{session_id}/truncate",
+            headers=self.headers,
+            json={"from_message_id": "abc"},
+        )
+        self.assertEqual(resp.status_code, 400, resp.text)
+
     def test_health(self) -> None:
         response = self.client.get("/api/health")
         self.assertEqual(response.status_code, 200)

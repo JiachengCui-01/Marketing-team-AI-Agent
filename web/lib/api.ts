@@ -128,6 +128,7 @@ export type GroupRecord = {
 };
 
 export type StoredMessage = {
+  id?: number;
   role: "user" | "assistant";
   content: string;
   artifacts?: MessageArtifact[];
@@ -358,6 +359,19 @@ export async function getSessionMessages(
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error(`getSessionMessages ${res.status}`);
+  return res.json();
+}
+
+export async function truncateSession(
+  id: string,
+  fromMessageId: number,
+): Promise<{ deleted: number }> {
+  const res = await fetch(`${API_BASE}/api/sessions/${id}/truncate`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ from_message_id: fromMessageId }),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
   return res.json();
 }
 

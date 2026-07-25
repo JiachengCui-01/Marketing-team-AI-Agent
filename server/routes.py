@@ -477,20 +477,35 @@ def get_session_messages(request: Request, session_id: str) -> dict:
                         if block.get("type") == "text" and block.get("text"):
                             texts.append(block["text"])
                 if texts:
-                    out.append({"role": role, "content": "\n\n".join(texts)})
+                    out.append({"id": row["id"], "role": role, "content": "\n\n".join(texts)})
                 # Skip tool-result-only user turns from UI rendering.
                 continue
             content = parsed if isinstance(parsed, str) else content
         except Exception:  # noqa: BLE001
             pass
         if role in ("user", "assistant") and isinstance(content, str):
-            out.append({"role": role, "content": content})
+            out.append({"id": row["id"], "role": role, "content": content})
     if artifacts:
         for message in reversed(out):
             if message["role"] == "assistant":
                 message["artifacts"] = artifacts
                 break
     return {"session_id": session_id, "messages": out}
+
+
+@router.post("/sessions/{session_id}/truncate")
+def truncate_session(request: Request, session_id: str, payload: dict = Body(...)) -> dict:
+    """Drop a message and everything after it, so the client can edit an earlier
+    prompt and regenerate the conversation from that point."""
+    user = auth.require_user(request)
+    if db.get_session(session_id, user["id"]) is None:
+        raise HTTPException(404, "Session not found.")
+    raw = payload.get("from_message_id")
+    if not isinstance(raw, int) or isinstance(raw, bool):
+        raise HTTPException(400, "from_message_id 必须是整数。")
+    deleted = db.truncate_messages_from(session_id, raw)
+    sessions.invalidate(session_id)
+    return {"deleted": deleted}
 
 
 # ---------- uploads ----------
