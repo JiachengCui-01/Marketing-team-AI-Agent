@@ -20,3 +20,6 @@ web/.turbo/
 web/tsconfig.tsbuildinfo
 
 .vercel
+
+# Personal .docx generators (interview prep / project write-ups) — not app code
+scripts/build_*_doc.py
