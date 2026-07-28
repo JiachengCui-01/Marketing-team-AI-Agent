@@ -2,15 +2,6 @@
 
 > 面向企业营销团队的**多智能体 AI 工作台**：一个入口里既有「内容 / 分析 / 研究」营销专家协作，又有「审批 / 任务 / 日程 / 知识问答」的 OA 助手，外加实时 IM 消息与通讯录协同 —— **全过程可追踪、写操作先草稿后确认、结果持久化兜底**。
 
-<p align="center">
-  <img width="900" alt="Marketing Agent 首页" src="https://github.com/user-attachments/assets/ccf69672-5d64-4a06-b806-0f9e0f8d6289" />
-</p>
-
-<p align="center">
-  <b>技术栈</b>：Python 3.11 · FastAPI · SSE · Anthropic Claude SDK · Google Gemini · Next.js 14 · React 18 · Tailwind · SQLite &nbsp;|&nbsp;
-  <b>部署</b>：后端 Render · 前端 Vercel
-</p>
-
 ---
 
 ## 1. 项目背景
@@ -43,10 +34,6 @@
 - **行业新闻自动摘要**：配置每日行业/主题、简报或详报、推送时间与时区，定时抓取并生成**分级来源**摘要，可手动刷新、可撤销回滚。
 - **营销图 AI 生成**：文生图（Gemini）、上传参考图、一键抠图去背景、按平台风格（淘宝 / 小红书 / 亚马逊 / Instagram）套模板画布合成、生成历史与再编辑。
 - **实时协同**：IM 消息（人↔人 / 群聊、未读数、已读回执、文件消息，基于 SSE 实时推送）+ 通讯录（组织成员 / 外部联系人 / 联系人申请 / 星标 / 我的群组）。
-
-<p align="center">
-  <img width="900" alt="通讯录 · 组织与联系人分类" src="https://github.com/user-attachments/assets/a90ce9e9-0367-402d-9690-ee6ef1fbea32" />
-</p>
 - **账户与个性化**：注册登录、组织与邀请码、可解释且可关闭的**营销记忆**（自动学习你的品牌/渠道偏好，附证据台账）。
 
 ## 4. 产品架构
@@ -80,42 +67,52 @@
 - **OA Copilot（`oa/agent.py`）**：聊天实际运行者，复用编排器的分派/流式机制，额外挂载 OA 工具，一个助手同时覆盖办公流程与营销分派。
 - **三类专家（`agents/`）**：内容（渠道 SOP 技能）、分析（数据不进 prompt，上传到 Files API 在沙箱里跑 pandas 算 CTR/CVR/ROAS）、研究（服务端 web_search + `source_scoring` 分级）。
 
-## 5. 典型任务流程
-
-> 均为企业营销团队真实场景。
-
+## 5. 典型任务流程示例：
 **场景 A · 研究 → 分析 → 文案（一句话完成一条营销链路）**
 用户："帮我调研下竞品近期的投放打法，结合我们上周的投放数据，写 3 条小红书文案。"
 → 编排器 `intake/planning` → 并行 `delegating` 研究 Agent（web_search 查竞品）+ 分析 Agent（跑上周数据）→ `specialist_done` → 内容 Agent 产出文案 → `synthesis` 汇总为带**来源引用**的回答（含竞品简报 PDF）。全过程在右侧 Trace 可见。
 
-<p align="center">
-  <img width="900" alt="营销专家对话 + 右侧 Agent Trace" src="https://github.com/user-attachments/assets/8fbeccac-6cf0-4727-b008-1289350b51b6" />
-</p>
-
 **场景 B · 对话式办公（请假 / 排会，草稿→确认）**
-用户："周五下午 3 点安排一个投放复盘会，叫上市场组。"
+用户："生成日程"
 → OA 生成**日程草稿卡**（时区感知）→ 用户核对时间点「确认创建」→ 才落库、日历中出现。审批、任务同理，AI 从不擅自"已提交"。
-
-<p align="center">
-  <img width="900" alt="对话中创建日程，草稿确认后落库" src="https://github.com/user-attachments/assets/7918ffcc-1d85-4ea0-ac85-6fa1f18b7a5c" />
-</p>
+<img width="1280" height="697" alt="image" src="https://github.com/user-attachments/assets/d617f699-e0fa-4554-a6d2-a70707c2069a" />
+手动确认后，同步到日程中，并在顶部导航栏提供今日最近日程的预览：
+<img width="1278" height="698" alt="image" src="https://github.com/user-attachments/assets/03ca47b3-d336-4953-9a38-c14e75bf425c" />
+<img width="1280" height="698" alt="image" src="https://github.com/user-attachments/assets/52cfdcf5-701c-46e0-82e0-b3bce5cc805f" />
+审批流程展示：
+<img width="1280" height="692" alt="image" src="https://github.com/user-attachments/assets/bb2235af-24bb-4fde-a52a-b38538289d08" />
+<img width="1280" height="698" alt="image" src="https://github.com/user-attachments/assets/fe9ac547-fcc0-4bcb-aa75-b12c87f3e585" />
 
 **场景 C · 知识问答（内部制度秒查，来源可溯）**
 用户："公司的报销制度、额度和流程是什么？"→ 检索知识库 → 回答附**来源 capsule** → 点引用在预览区直接打开原始文档。
+<img width="1280" height="696" alt="image" src="https://github.com/user-attachments/assets/c109cf91-f21c-4d96-9cec-7ee9bf53ad1b" />
 
 **场景 D · 行业新闻日报**
 配置每日行业摘要（行业、简报/详报、时间、时区）→ 定时抓取 → 生成**分级来源**摘要推送，可手动"立即刷新"。
-
-<p align="center">
-  <img width="900" alt="24 小时行业新闻自动收集与摘要" src="https://github.com/user-attachments/assets/ae1832b2-a6f0-4512-913e-05ffad7062e9" />
-</p>
+<img width="1280" height="695" alt="image" src="https://github.com/user-attachments/assets/88e46ffb-2791-4837-a753-7297b00e8960" />
+可配置自动总结的内容主题、详细程度、自动推送时间：
+<img width="1280" height="696" alt="image" src="https://github.com/user-attachments/assets/ca727eac-7a5b-4e68-bf43-7386390a71ec" />
+<img width="1280" height="696" alt="24 小时行业新闻自动收集与摘要" src="https://github.com/user-attachments/assets/ae1832b2-a6f0-4512-913e-05ffad7062e9" />
 
 **场景 E · 营销图生成**
-上传产品图 → 一键抠图 → 选平台模板（小红书/淘宝/亚马逊/Instagram）→ 生成 → 历史与再编辑。
+上传产品图 → 可选是否一键抠图 → 可以选平台模板（小红书/淘宝/亚马逊/Instagram）/或者直接在下方输入栏输入需求→ 生成 → 历史与再编辑。
+<img width="1277" height="696" alt="image" src="https://github.com/user-attachments/assets/5cc04a40-1da3-494a-b387-9546e428ffa4" />
+模板生成：
+<img width="1280" height="695" alt="image" src="https://github.com/user-attachments/assets/647dafdf-f86a-4384-94c9-81a84c50f9d2" />
+生成后二次AI编辑生成和手动细节修改：
+<img width="1280" height="692" alt="image" src="https://github.com/user-attachments/assets/a4807f17-3e66-44a0-9d1f-59fb4dec830f" />
+历史生成记录查看：
+<img width="1280" height="694" alt="image" src="https://github.com/user-attachments/assets/4d3bbb8a-5d58-43e7-a4a1-0f13a5068f03" />
 
-<p align="center">
-  <img width="900" alt="营销图 AI 生成" src="https://github.com/user-attachments/assets/e62ecde1-6415-423f-bad4-97abf03a07bd" />
-</p>
+**场景 F · 实时协同**
+IM 消息（人↔人 / 群聊、未读数、已读回执、文件消息，基于 SSE 实时推送）+ 通讯录（组织成员 / 外部联系人 / 联系人申请 / 星标 / 我的群组）。
+<img width="1280" height="697" alt="image" src="https://github.com/user-attachments/assets/e8335873-19bd-4bcb-906b-2fb580c59c38" />
+<img width="1275" height="700" alt="image" src="https://github.com/user-attachments/assets/5899b403-5292-44ea-9f5f-01eb4bbd4a1c" />
+
+**场景 G · 个性化**
+可个性化设置系统主题、管理个人记忆、知识库以及个人画像自定义。
+<img width="1280" height="694" alt="image" src="https://github.com/user-attachments/assets/de1c2b72-04d1-4d0c-886f-3496077f89a7" />
+
 
 ## 6. 技术栈
 
@@ -235,7 +232,7 @@ render.yaml · vercel.json     部署配置
   - **SSE vs WebSocket**：本项目是"服务器→客户端"单向推送（追踪/增量/草稿），SSE 更轻、自动重连、走标准 HTTP，故选 SSE；IM 也复用同一套。真正需要双向低延迟（如输入中状态）时可升级 WebSocket。
   - **单进程 pub/sub**：`im_hub` 用进程内内存 hub，简单够用；水平扩展需换 Redis。
   - **本地 embedding 可选**：`sentence-transformers` 依赖重，设为可选并对检索做多级降级，保证无 GPU 环境也能跑。
-- **不足与改进**：审批路由目前是单级 MVP；KB 组织级共享待增强；自动化 UI 截图受沙箱分辨率限制，正式截图仍以真机全屏为准。
+- **不足与改进**：审批路由目前是单级 MVP；KB 组织级共享待增强；完善系统功能，如后续获得许可和企业数据后，加入AI化的BI与客户成功功能。
 
 ---
 
