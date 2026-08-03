@@ -57,7 +57,7 @@ export function useDialogs() {
             value={state.value}
             placeholder={state.placeholder}
             onChange={(e) => setState({ ...state, value: e.target.value })}
-            className="w-full h-10 px-3 rounded-lg bg-bg-elevated border border-border text-sm outline-none focus:border-accent"
+            className="field w-full h-10 px-3 rounded-lg text-sm"
           />
           <div className="mt-4 flex justify-end gap-2">
             <button type="button" onClick={() => settle(null)} className="btn-ghost px-4 py-2 text-sm border border-border">
@@ -82,7 +82,7 @@ export function useDialogs() {
             onClick={() => settle(true)}
             className={
               state.danger
-                ? "rounded-lg bg-danger px-4 py-2 text-sm font-medium text-white"
+                ? "rounded-lg bg-danger px-4 py-2 text-sm font-medium text-accent-fg"
                 : "btn-accent px-4 py-2 text-sm"
             }
           >

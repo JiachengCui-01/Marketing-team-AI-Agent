@@ -143,7 +143,7 @@ export function ApprovalsPanel({ onBack }: { onBack: () => void }) {
             value={form.type}
             onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}
             disabled={!!form.id}
-            className="h-9 px-2 rounded-lg bg-bg-elevated border border-border text-sm outline-none focus:border-accent disabled:opacity-60"
+            className="field h-9 px-2 rounded-lg text-sm disabled:opacity-60"
           >
             <option value="leave">请假</option>
             <option value="expense">报销</option>
@@ -154,14 +154,14 @@ export function ApprovalsPanel({ onBack }: { onBack: () => void }) {
             value={form.title}
             onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
             placeholder="标题，例如：年假申请（3 天）"
-            className="w-full h-9 px-3 rounded-lg bg-bg-elevated border border-border text-sm outline-none focus:border-accent"
+            className="field w-full h-9 px-3 rounded-lg text-sm"
           />
           <textarea
             value={form.detail}
             onChange={(e) => setForm((f) => ({ ...f, detail: e.target.value }))}
             placeholder="事由 / 说明"
             rows={2}
-            className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-sm outline-none focus:border-accent resize-none"
+            className="field w-full px-3 py-2 rounded-lg text-sm resize-none"
           />
           <div className="flex justify-end">
             <button onClick={submit} disabled={saving || !form.title.trim()} className="btn-accent h-8 px-4 text-sm disabled:opacity-50">

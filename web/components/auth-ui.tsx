@@ -384,7 +384,7 @@ function RegisterPanel({
               onChange={(e) => set("bio", e.target.value)}
               rows={3}
               placeholder={t.bioHint}
-              className="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent"
+              className="field mt-1 w-full rounded-lg px-3 py-2 text-sm text-fg"
             />
           </label>
         </div>
@@ -1061,7 +1061,7 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
                 >
                   <span
                     className={cn(
-                      "absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-white shadow-md transition-transform duration-200 ease-macos",
+                      "absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-accent-fg shadow-md transition-transform duration-200 ease-macos",
                       memoryEnabled ? "translate-x-5" : "translate-x-0",
                     )}
                   />
@@ -1105,7 +1105,10 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
                           <span
                             className={cn(
                               "rounded-full px-1.5 py-0.5 font-medium",
-                              item.promoted ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+                              // Tokens, not palette classes with a dark: variant —
+                              // the variant only fires on .dark, so aurora and
+                              // crystal used to get the light branch.
+                              item.promoted ? "bg-success/10 text-success" : "bg-warn/10 text-warn",
                             )}
                           >
                             {item.promoted ? labels.memoryPromoted : labels.memoryPending}
@@ -1134,7 +1137,7 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
                     rows={1}
                     disabled={memoryLoading}
                     placeholder={memoryLoading ? labels.loading : field.label}
-                    className="mt-1 w-full resize-none rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none placeholder:text-fg-subtle focus:border-accent disabled:opacity-60"
+                    className="field mt-1 w-full resize-none rounded-lg px-3 py-2 text-sm text-fg placeholder:text-fg-subtle disabled:opacity-60"
                   />
                 </label>
               ))}
@@ -1145,7 +1148,7 @@ function SettingsDialog({ userAccount, onClose }: { userAccount: string; onClose
                 type="button"
                 onClick={() => setConfirmClearMemory(true)}
                 disabled={memorySaving || memoryLoading}
-                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-danger px-4 py-2 text-sm font-medium text-white transition-all duration-150 ease-macos hover:shadow-lg hover:shadow-danger/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-danger px-4 py-2 text-sm font-medium text-accent-fg transition-all duration-150 ease-macos hover:shadow-lg hover:shadow-danger/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Trash2 size={15} />
                 {labels.memoryClear}
@@ -1254,7 +1257,7 @@ function ProfileDialog({
             onChange={(e) => set("bio", e.target.value)}
             rows={3}
             placeholder={t.bioHint}
-            className="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent"
+            className="field mt-1 w-full rounded-lg px-3 py-2 text-sm text-fg"
           />
         </label>
       </div>
@@ -1307,7 +1310,7 @@ function DeleteAccountDialog({
         <button type="button" onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-sm text-fg-muted hover:bg-bg-subtle">
           {t.cancel}
         </button>
-        <button type="button" onClick={submit} disabled={!enabled} className="rounded-lg bg-danger px-4 py-2 text-sm font-medium text-white disabled:opacity-40">
+        <button type="button" onClick={submit} disabled={!enabled} className="rounded-lg bg-danger px-4 py-2 text-sm font-medium text-accent-fg disabled:opacity-40">
           {t.confirmDeleteAccount}
         </button>
       </div>
@@ -1377,8 +1380,10 @@ function TextInput({
         autoComplete={autoComplete}
         placeholder={placeholder}
         className={cn(
-          "mt-1 w-full rounded-lg border bg-bg px-3 py-2 text-sm text-fg outline-none placeholder:text-fg-subtle focus:border-accent",
-          error ? "border-danger" : "border-border",
+          "field mt-1 w-full rounded-lg px-3 py-2 text-sm text-fg placeholder:text-fg-subtle",
+          // .field paints its border from a gradient layer, so the error state
+          // has to move to that layer or it would silently disappear.
+          error && "field-danger",
         )}
       />
       {error ? <span className="mt-1 block text-[11px] text-danger">{error}</span> : null}
@@ -1426,7 +1431,7 @@ function ConfirmDialog({
         <button
           type="button"
           onClick={onConfirm}
-          className={cn("rounded-lg px-4 py-2 text-sm font-medium text-white", danger ? "bg-danger" : "bg-accent")}
+          className={cn("rounded-lg px-4 py-2 text-sm font-medium text-accent-fg", danger ? "bg-danger" : "bg-accent")}
         >
           {confirmLabel}
         </button>

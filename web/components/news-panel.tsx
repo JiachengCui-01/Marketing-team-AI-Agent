@@ -318,7 +318,7 @@ function NewsSettingsDialog({
             value={industry}
             onChange={(e) => setIndustry(e.target.value)}
             placeholder={t.newsIndustryHint}
-            className="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none placeholder:text-fg-subtle focus:border-accent"
+            className="field mt-1 w-full rounded-lg px-3 py-2 text-sm text-fg placeholder:text-fg-subtle"
           />
         </label>
 
@@ -327,7 +327,7 @@ function NewsSettingsDialog({
           <select
             value={detailLevel}
             onChange={(e) => setDetailLevel(e.target.value as "brief" | "detailed")}
-            className="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent"
+            className="field mt-1 w-full rounded-lg px-3 py-2 text-sm text-fg"
           >
             <option value="brief">{t.newsDetailBrief}</option>
             <option value="detailed">{t.newsDetailDetailed}</option>
@@ -340,7 +340,7 @@ function NewsSettingsDialog({
             type="time"
             value={summaryTime}
             onChange={(e) => setSummaryTime(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent"
+            className="field mt-1 w-full rounded-lg px-3 py-2 text-sm text-fg"
           />
           <span className="mt-1 block text-[11px] text-fg-subtle">{t.newsTimeHint}</span>
         </label>

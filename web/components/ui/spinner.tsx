@@ -1,17 +1,27 @@
 "use client";
 
-import { BarChart3, FileUp, ImageIcon, Loader2, Newspaper, Sparkles } from "lucide-react";
+// Duotone identity icons — the filled underlayer gives the loading marks weight
+// at small sizes, where a bare stroke reads as a scratch.
+import {
+  ChartBar,
+  FileArrowUp,
+  ImageSquare,
+  CircleNotch,
+  Newspaper,
+  Sparkle,
+  type Icon,
+} from "@phosphor-icons/react";
 
 type LoadingVariant = "default" | "account" | "chat" | "upload" | "news" | "image" | "preview";
 
-const variantMeta: Record<LoadingVariant, { accent: string; icon: typeof Loader2 }> = {
-  default: { accent: "text-accent", icon: Loader2 },
-  account: { accent: "text-feature-content", icon: Sparkles },
-  chat: { accent: "text-feature-content", icon: Sparkles },
-  upload: { accent: "text-feature-analytics", icon: FileUp },
+const variantMeta: Record<LoadingVariant, { accent: string; icon: Icon }> = {
+  default: { accent: "text-accent", icon: CircleNotch },
+  account: { accent: "text-feature-content", icon: Sparkle },
+  chat: { accent: "text-feature-content", icon: Sparkle },
+  upload: { accent: "text-feature-analytics", icon: FileArrowUp },
   news: { accent: "text-feature-news", icon: Newspaper },
-  image: { accent: "text-feature-image", icon: ImageIcon },
-  preview: { accent: "text-feature-research", icon: BarChart3 },
+  image: { accent: "text-feature-image", icon: ImageSquare },
+  preview: { accent: "text-feature-research", icon: ChartBar },
 };
 
 /** Consistent spinner used across loading states. */
@@ -31,7 +41,11 @@ export function Spinner({
   return (
     <span className={`inline-flex items-center gap-2 text-fg-subtle ${className}`}>
       <span className={`loading-orb loading-orb-${variant} animate-pulse-ring`} aria-hidden>
-        <Icon size={size} className={`${accent} ${variant === "default" ? "animate-spin" : "animate-float-soft"} transition-all duration-300`} />
+        <Icon
+          size={size}
+          weight={variant === "default" ? "bold" : "duotone"}
+          className={`${accent} ${variant === "default" ? "animate-spin" : "animate-float-soft"} transition-all duration-300`}
+        />
       </span>
       {label ? <span className="text-sm font-medium">{label}</span> : null}
     </span>

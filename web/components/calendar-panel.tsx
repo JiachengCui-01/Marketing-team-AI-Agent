@@ -182,7 +182,7 @@ export function CalendarPanel({ onBack }: { onBack: () => void }) {
             value={value.replace("T", " ")}
             onChange={(e) => onChange(e.target.value.trim().replace(" ", "T"))}
             placeholder="2026-07-26 14:30"
-            className="w-full h-9 px-3 rounded-lg bg-bg-elevated border border-border text-sm outline-none focus:border-accent"
+            className="field w-full h-9 px-3 rounded-lg text-sm"
           />
         ) : (
           <DateTimeWheel value={value || null} onChange={onChange} zh={zh} min={min} />
@@ -236,7 +236,7 @@ export function CalendarPanel({ onBack }: { onBack: () => void }) {
             value={form.title}
             onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
             placeholder={zh ? "标题，例如：团队周会" : "Title, e.g. Team sync"}
-            className="w-full h-9 px-3 rounded-lg bg-bg-elevated border border-border text-sm outline-none focus:border-accent"
+            className="field w-full h-9 px-3 rounded-lg text-sm"
           />
 
           <div className="flex flex-wrap gap-3">
@@ -248,14 +248,14 @@ export function CalendarPanel({ onBack }: { onBack: () => void }) {
             value={form.location}
             onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
             placeholder={zh ? "地点（可选）" : "Location (optional)"}
-            className="w-full h-9 px-3 rounded-lg bg-bg-elevated border border-border text-sm outline-none focus:border-accent"
+            className="field w-full h-9 px-3 rounded-lg text-sm"
           />
           <textarea
             value={form.description}
             onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
             placeholder={zh ? "备注 / 议程 / 详情（可选）" : "Notes / agenda / details (optional)"}
             rows={2}
-            className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-sm outline-none focus:border-accent resize-none"
+            className="field w-full px-3 py-2 rounded-lg text-sm resize-none"
           />
 
           {formError ? <p className="text-xs text-danger">{formError}</p> : null}

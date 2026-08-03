@@ -2,96 +2,177 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --bg: 250 250 250;
-  --bg-subtle: 244 244 245;
-  --bg-elevated: 255 255 255;
+/* ============================================================================
+   THEME TOKENS — four themes, each with its own hue story.
+   Values are space-separated RGB triples (no rgb()) so Tailwind can inject
+   <alpha-value>. Every fg/bg pair below was checked against WCAG: body text
+   >= 4.5:1, icons and large text >= 3:1. Aurora/Crystal were additionally
+   checked against their frosted-panel composite, not just --bg-elevated.
+   ---------------------------------------------------------------------------
+   Beyond the palette, four tokens exist to retire hardcoded literals:
+     --sheen        top-highlight colour (was a hardcoded white ~16x, which
+                    reads dirty grey on dark)
+     --shadow       shadow tint (was bare black, plus a stray slate literal)
+     --glow/--glow-2 focus-sweep hue; deliberately NOT --accent, because a
+                    theme's identity colour and its accent can differ (Aurora
+                    accents violet but its identity is magenta)
+     --accent-2     second stop for gradient buttons and progress rails
+     --field-solid  opaque field surface required by the gradient-border trick
+   ========================================================================= */
+
+/* Light 明亮 — warm daylight: warm-tinted neutrals under a cobalt accent. */
+:root,
+.theme-preview-light {
+  --bg: 252 251 248;
+  --bg-subtle: 245 243 238;
+  --bg-elevated: 255 255 254;
   --field-bg: 255 255 255;
-  --field-bg-soft: 248 248 251;
-  --fg: 24 24 27;
-  --fg-muted: 82 82 91;
-  --fg-subtle: 161 161 170;
-  --border: 228 228 231;
-  --accent: 79 70 229;
+  --field-bg-soft: 250 248 244;
+  --fg: 28 26 23;
+  --fg-muted: 92 86 78;
+  --fg-subtle: 148 141 130;
+  --border: 230 226 218;
+  --accent: 11 106 199;
   --accent-fg: 255 255 255;
-  --success: 22 163 74;
-  --warn: 202 138 4;
-  --danger: 220 38 38;
-  /* Feature-identity hues (restrained, light) */
-  --feature-news: 37 99 235;        /* blue-600 */
-  --feature-image: 124 58 237;      /* violet-600 */
-  --feature-content: 79 70 229;     /* indigo-600 (matches accent) */
-  --feature-analytics: 13 148 136;  /* teal-600 */
-  --feature-research: 217 119 6;    /* amber-600 */
+  --success: 21 128 61;
+  --warn: 176 84 8;
+  --danger: 199 34 42;
+  --feature-news: 21 101 192;
+  --feature-image: 132 48 200;
+  --feature-content: 11 106 199;    /* tracks --accent */
+  --feature-analytics: 13 137 122;
+  --feature-research: 176 88 8;
+
+  --glow: 56 132 214;
+  --glow-2: 120 190 250;
+  --accent-2: 6 148 214;
+  --sheen: 255 255 255;
+  --shadow: 60 50 35;               /* warm shadow, not neutral black */
+  --icon-idle: 124 116 104;
+  --field-solid: 255 255 255;
+
+  /* Low sun: a warm wash from the upper left, cool sky from the right.
+     Sizes are percentages so the same value also works as the settings
+     preview swatch — see .theme-preview::before. */
+  --body-wash:
+    radial-gradient(120% 92% at 12% -12%, rgb(255 232 189 / 0.55), transparent 62%),
+    radial-gradient(96% 78% at 96% -4%, rgb(206 228 255 / 0.5), transparent 58%),
+    rgb(var(--bg));
 }
 
-.dark {
-  /* Softer neutral-cool dark ramp — no pure black, so input wells and panels read
-     naturally (previously --bg was near-black 9,9,11 which looked harsh). */
-  --bg: 21 22 26;
-  --bg-subtle: 32 33 38;
-  --bg-elevated: 43 44 50;
-  --field-bg: 49 50 58;
-  --field-bg-soft: 55 56 64;
-  --fg: 245 245 248;
-  --fg-muted: 165 166 176;
-  --fg-subtle: 118 119 129;
-  --border: 56 57 65;
-  --accent: 129 140 248;
-  --accent-fg: 24 24 27;
-  --success: 74 222 128;
-  --warn: 250 204 21;
-  --danger: 248 113 113;
-  /* Feature-identity hues (restrained, dark — lighter for contrast) */
-  --feature-news: 96 165 250;       /* blue-400 */
-  --feature-image: 167 139 250;     /* violet-400 */
-  --feature-content: 129 140 248;   /* indigo-400 (matches accent) */
-  --feature-analytics: 45 212 191;  /* teal-300 */
-  --feature-research: 251 191 36;   /* amber-400 */
+/* Dark 暗色 — cool night: blue-grey ramp under a periwinkle accent.
+   No pure black, so input wells and panels still read as surfaces. */
+.dark,
+.theme-preview-dark {
+  --bg: 15 18 28;
+  --bg-subtle: 21 25 37;
+  --bg-elevated: 30 35 50;
+  --field-bg: 38 44 62;
+  --field-bg-soft: 45 52 72;
+  --fg: 233 237 246;
+  --fg-muted: 158 168 190;
+  --fg-subtle: 113 124 148;
+  --border: 50 58 80;
+  --accent: 138 152 255;
+  --accent-fg: 12 15 24;
+  --success: 52 211 153;
+  --warn: 251 191 36;
+  --danger: 251 113 133;
+  --feature-news: 96 165 250;
+  --feature-image: 192 132 252;
+  --feature-content: 138 152 255;   /* tracks --accent */
+  --feature-analytics: 45 212 191;
+  --feature-research: 251 191 36;
+
+  --glow: 138 152 255;
+  --glow-2: 199 210 254;
+  --accent-2: 120 220 235;
+  --sheen: 190 205 255;             /* cool sheen; pure white looks grimy here */
+  --shadow: 0 2 10;
+  --icon-idle: 132 144 172;
+  --field-solid: 38 44 62;          /* == --field-bg, opaque */
+
+  /* Night sky: a deep indigo bloom with a distant cyan cast. */
+  --body-wash:
+    radial-gradient(120% 94% at 10% -10%, rgb(64 82 170 / 0.28), transparent 62%),
+    radial-gradient(94% 80% at 92% 2%, rgb(34 118 150 / 0.2), transparent 60%),
+    rgb(var(--bg));
 }
 
-.aurora {
-  --bg: 249 247 255;
-  --bg-subtle: 91 45 223;
+/* Aurora 极光 — northern lights: pale lavender ground, violet -> magenta. */
+.aurora,
+.theme-preview-aurora {
+  --bg: 250 247 255;
+  --bg-subtle: 243 238 253;         /* was a deep saturated purple, which turned
+                                       every bg-bg-subtle well into a violet slab */
   --bg-elevated: 255 255 255;
   --field-bg: 255 255 255;
-  --field-bg-soft: 250 248 255;
-  --fg: 25 21 42;
-  --fg-muted: 78 70 105;
-  --fg-subtle: 136 126 164;
-  --border: 224 217 244;
-  --accent: 103 58 231;
+  --field-bg-soft: 250 246 255;
+  --fg: 26 20 45;
+  --fg-muted: 82 70 112;
+  --fg-subtle: 118 106 150;
+  --border: 226 216 246;
+  --accent: 104 40 200;
   --accent-fg: 255 255 255;
-  --success: 16 185 129;
-  --warn: 217 119 6;
-  --danger: 225 29 72;
+  --success: 4 132 92;
+  --warn: 171 92 6;
+  --danger: 201 24 74;
   --feature-news: 37 99 235;
-  --feature-image: 219 39 119;
-  --feature-content: 103 58 231;
-  --feature-analytics: 8 145 178;
-  --feature-research: 245 158 11;
+  --feature-image: 201 28 105;
+  --feature-content: 104 40 200;    /* tracks --accent */
+  --feature-analytics: 7 126 155;
+  --feature-research: 168 96 4;
+
+  --glow: 168 85 247;
+  --glow-2: 244 114 182;            /* magenta core — the theme's identity hue */
+  --accent-2: 201 28 105;
+  --sheen: 255 255 255;
+  --shadow: 40 12 80;
+  --icon-idle: 118 104 150;
+  --field-solid: 255 255 255;
+
+  --body-wash:
+    radial-gradient(circle at 18% 18%, rgb(255 255 255 / 0.42), transparent 28%),
+    radial-gradient(circle at 88% 18%, rgb(255 55 125 / 0.7), transparent 32%),
+    radial-gradient(circle at 12% 76%, rgb(73 94 255 / 0.74), transparent 36%),
+    linear-gradient(135deg, #2b00d7 0%, #7a42f4 42%, #fb1b70 78%, #0516c9 100%);
 }
 
-.crystal {
-  --bg: 250 253 255;
-  --bg-subtle: 222 245 255;
+/* Crystal 晴空 — clear sky: icy white ground, blue -> cyan. */
+.crystal,
+.theme-preview-crystal {
+  --bg: 249 253 255;
+  --bg-subtle: 235 246 253;
   --bg-elevated: 255 255 255;
   --field-bg: 255 255 255;
   --field-bg-soft: 244 251 255;
-  --fg: 15 23 42;
-  --fg-muted: 71 85 105;
-  --fg-subtle: 148 163 184;
-  --border: 210 229 240;
-  --accent: 37 99 235;
+  --fg: 12 26 43;
+  --fg-muted: 62 82 105;
+  --fg-subtle: 108 129 152;
+  --border: 205 227 240;
+  --accent: 8 102 214;
   --accent-fg: 255 255 255;
-  --success: 5 150 105;
-  --warn: 202 138 4;
-  --danger: 220 38 38;
-  --feature-news: 14 165 233;
-  --feature-image: 59 130 246;
-  --feature-content: 37 99 235;
-  --feature-analytics: 6 182 212;
-  --feature-research: 217 119 6;
+  --success: 4 132 95;
+  --warn: 171 115 7;
+  --danger: 201 31 45;
+  --feature-news: 6 130 200;
+  --feature-image: 45 110 225;
+  --feature-content: 8 102 214;     /* tracks --accent */
+  --feature-analytics: 5 140 166;
+  --feature-research: 181 109 7;
+
+  --glow: 56 170 240;
+  --glow-2: 140 220 255;
+  --accent-2: 5 170 200;
+  --sheen: 255 255 255;
+  --shadow: 12 50 90;
+  --icon-idle: 100 130 158;
+  --field-solid: 255 255 255;
+
+  --body-wash:
+    radial-gradient(circle at 76% 28%, rgb(73 207 255 / 0.58), transparent 34%),
+    radial-gradient(circle at 45% 88%, rgb(24 93 255 / 0.72), transparent 38%),
+    linear-gradient(180deg, #ffffff 0%, #fafdff 42%, #dff7ff 68%, #1670ff 100%);
 }
 
 html, body {
@@ -101,19 +182,12 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-.aurora body {
-  background:
-    radial-gradient(circle at 18% 18%, rgb(255 255 255 / 0.42), transparent 28%),
-    radial-gradient(circle at 88% 18%, rgb(255 55 125 / 0.70), transparent 32%),
-    radial-gradient(circle at 12% 76%, rgb(73 94 255 / 0.74), transparent 36%),
-    linear-gradient(135deg, #2b00d7 0%, #7a42f4 42%, #fb1b70 78%, #0516c9 100%);
-}
-
-.crystal body {
-  background:
-    radial-gradient(circle at 76% 28%, rgb(73 207 255 / 0.58), transparent 34%),
-    radial-gradient(circle at 45% 88%, rgb(24 93 255 / 0.72), transparent 38%),
-    linear-gradient(180deg, #ffffff 0%, #fafdff 42%, #dff7ff 68%, #1670ff 100%);
+/* Every theme now carries a body treatment matching its name, defined once as
+   --body-wash in the token block above and reused by the settings preview
+   swatch. Panels sit on top at high opacity, so text contrast is unaffected. */
+body {
+  background: var(--body-wash);
+  background-attachment: fixed;
 }
 
 @keyframes session-running-pulse {
@@ -149,11 +223,23 @@ html, body {
   }
 }
 
-/* Keyboard focus ring only (avoids ring on mouse click). */
+/* Keyboard focus ring for everything that is NOT a form field.
+   `outline` follows border-radius natively, so unlike the previous box-shadow
+   version this no longer forces `border-radius: 8px` and squares off
+   rounded-xl (14px) / rounded-2xl (18px) elements while they are focused.
+   Fields opt out below — they own the diagonal sweep at the end of this file. */
 *:focus-visible {
+  outline: 2px solid rgb(var(--glow) / 0.5);
+  outline-offset: 2px;
+}
+
+/* :is() takes the specificity of its most specific argument, so this is (0,2,0)
+   and beats the (0,1,0) universal rule above. Without it, an input inside an
+   .input-shell would draw its own ring inside the shell's ring — the stacked
+   double-ring that read as one thick line. */
+:is(input, textarea, select, .field, .input-shell, .chat-composer-input-row):focus-visible,
+:is(.input-shell, .chat-composer-input-row) :is(input, textarea, select):focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px rgb(var(--bg-elevated)), 0 0 0 4px rgb(var(--accent) / 0.45);
-  border-radius: 8px;
 }
 
 @layer components {
@@ -167,9 +253,9 @@ html, body {
     backdrop-filter: blur(16px) saturate(1.3);
     -webkit-backdrop-filter: blur(16px) saturate(1.3);
     box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.06),
-      0 12px 34px -22px rgb(0 0 0 / 0.5),
-      0 0 46px -26px rgb(var(--accent) / 0.22);
+      inset 0 1px 0 rgb(var(--sheen) / 0.06),
+      0 12px 34px -22px rgb(var(--shadow) / 0.5),
+      0 0 46px -26px rgb(var(--glow) / 0.22);
   }
   /* Unified column header — frosted bar, same height + baseline across all columns. */
   .col-header {
@@ -186,8 +272,8 @@ html, body {
     backdrop-filter: blur(16px) saturate(1.3);
     -webkit-backdrop-filter: blur(16px) saturate(1.3);
     box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.05),
-      0 8px 26px -22px rgb(var(--accent) / 0.22);
+      inset 0 1px 0 rgb(var(--sheen) / 0.05),
+      0 8px 26px -22px rgb(var(--glow) / 0.22);
   }
   /* Prominent input container — solid, clearly bordered (esp. in dark, where
      --border == --bg-elevated), with an accent focus ring. */
@@ -198,32 +284,33 @@ html, body {
       rgb(var(--field-bg) / 0.88);
     border-color: rgb(var(--border) / 0.95);
     box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.045),
-      0 1px 2px rgb(0 0 0 / 0.06),
-      0 6px 18px -14px rgb(0 0 0 / 0.35);
+      inset 0 1px 0 rgb(var(--sheen) / 0.045),
+      0 1px 2px rgb(var(--shadow) / 0.06),
+      0 6px 18px -14px rgb(var(--shadow) / 0.35);
   }
+  /* Settled focus state. The travelling glow is drawn by the ::after ring at the
+     bottom of this file; once it finishes, all that is left is a hairline edge
+     and a whisper of drop-glow — no persistent ring. */
   .input-shell:focus-within {
-    border-color: rgb(var(--accent));
-    box-shadow: 
-      inset 0 1px 0 rgb(255 255 255 / 0.045),
-      0 0 0 3px rgb(var(--accent) / 0.2),
-      0 8px 24px -12px rgb(var(--accent) / 0.32);
+    border-color: rgb(var(--glow) / 0.48);
+    box-shadow:
+      inset 0 1px 0 rgb(var(--sheen) / 0.045),
+      0 0 0 1px rgb(var(--glow) / 0.09),
+      0 6px 20px -16px rgb(var(--glow) / 0.38);
   }
   .chat-composer-shell:focus-within {
     border-color: rgb(var(--border) / 0.95);
     box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.045),
-      0 1px 2px rgb(0 0 0 / 0.06),
-      0 6px 18px -14px rgb(0 0 0 / 0.35);
+      inset 0 1px 0 rgb(var(--sheen) / 0.045),
+      0 1px 2px rgb(var(--shadow) / 0.06),
+      0 6px 18px -14px rgb(var(--shadow) / 0.35);
   }
   .chat-composer-input-row {
     @apply rounded-xl border border-transparent transition-all duration-200 ease-macos;
   }
   .chat-composer-input-row:focus-within {
-    border-color: rgb(var(--accent));
-    box-shadow:
-      0 0 0 2px rgb(var(--accent) / 0.18),
-      0 8px 22px -18px rgb(var(--accent) / 0.35);
+    border-color: rgb(var(--glow) / 0.48);
+    box-shadow: 0 0 0 1px rgb(var(--glow) / 0.08);
   }
   .clarify-inline-panel {
     @apply rounded-2xl border p-3 shadow-xl backdrop-blur-xl;
@@ -231,11 +318,11 @@ html, body {
     background:
       linear-gradient(180deg, rgb(var(--fg) / 0.035), rgb(var(--accent) / 0.035)),
       rgb(var(--bg-elevated) / 0.94);
-    border-color: rgb(var(--accent) / 0.18);
+    border-color: rgb(var(--glow) / 0.18);
     box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.08),
-      0 14px 34px -26px rgb(var(--accent) / 0.5),
-      0 8px 18px -16px rgb(0 0 0 / 0.35);
+      inset 0 1px 0 rgb(var(--sheen) / 0.08),
+      0 14px 34px -26px rgb(var(--glow) / 0.5),
+      0 8px 18px -16px rgb(var(--shadow) / 0.35);
   }
   .clarify-choice-row {
     @apply rounded-xl border px-2.5 py-2 transition-all duration-150 ease-macos;
@@ -248,13 +335,72 @@ html, body {
     background: rgb(var(--accent) / 0.08);
     box-shadow: 0 8px 18px -16px rgb(var(--accent) / 0.5);
   }
-  /* Ghost icon/label button: bg + color shift on hover, subtle press. */
+  /* Ghost icon/label button: a theme-tinted wash on hover rather than a flat
+     elevated block, so it picks up each theme's glow hue. */
   .btn-ghost {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-lg text-fg-muted transition-all duration-150 ease-macos hover:bg-bg-elevated hover:text-fg active:scale-95 active:opacity-80;
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg text-fg-muted transition-all duration-150 ease-macos hover:text-fg active:scale-95 active:opacity-80;
   }
-  /* Primary accent button. */
+  .btn-ghost:hover {
+    background: rgb(var(--glow) / 0.1);
+  }
+  /* App mark: a gradient chip with an inner sheen, so the logo reads as an
+     object rather than a flat accent square. */
+  .app-mark {
+    background: linear-gradient(135deg, rgb(var(--accent)), rgb(var(--accent-2)));
+    box-shadow:
+      inset 0 1px 0 rgb(var(--sheen) / 0.35),
+      0 6px 16px -10px rgb(var(--glow) / 0.7);
+  }
+  /* Current workspace view in the nav rail. The icon carries the theme colour;
+     this supplies the surface it sits on. */
+  .nav-item-active {
+    color: rgb(var(--fg));
+    background: linear-gradient(
+      100deg,
+      rgb(var(--accent) / 0.16),
+      rgb(var(--accent-2) / 0.08)
+    );
+    box-shadow:
+      inset 0 0 0 1px rgb(var(--glow) / 0.18),
+      0 4px 14px -12px rgb(var(--glow) / 0.5);
+  }
+  .nav-item-active:hover {
+    background: linear-gradient(
+      100deg,
+      rgb(var(--accent) / 0.22),
+      rgb(var(--accent-2) / 0.12)
+    );
+  }
+  /* Primary button: a two-stop accent gradient plus a sheen that sweeps across
+     on hover. The lift/press amounts are unchanged from before. */
   .btn-accent {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent text-accent-fg font-medium transition-all duration-150 ease-macos hover:shadow-lg hover:shadow-accent/30 hover:-translate-y-px active:scale-95 active:shadow-sm disabled:opacity-40 disabled:active:scale-100 disabled:hover:shadow-none disabled:hover:translate-y-0;
+    @apply relative overflow-hidden inline-flex items-center justify-center gap-1.5 rounded-lg text-accent-fg font-medium transition-all duration-150 ease-macos hover:shadow-lg hover:shadow-accent/30 hover:-translate-y-px active:scale-95 active:shadow-sm disabled:opacity-40 disabled:active:scale-100 disabled:hover:shadow-none disabled:hover:translate-y-0;
+    background-image: linear-gradient(135deg, rgb(var(--accent)), rgb(var(--accent-2)));
+    /* Establishes a stacking context so the sheen below can sit at z-index -1:
+       above this gradient, but behind the label. Without it the sheen would
+       paint over the text and wash out the button content. */
+    isolation: isolate;
+  }
+  .btn-accent::after {
+    content: "";
+    @apply pointer-events-none absolute inset-0;
+    z-index: -1;
+    background: linear-gradient(
+      to bottom right,
+      transparent 35%,
+      rgb(var(--sheen) / 0.32) 50%,
+      transparent 65%
+    );
+    background-size: 260% 260%;
+    background-position: 100% 100%;
+    opacity: 0;
+    transition:
+      background-position 520ms var(--sweep-ease),
+      opacity 180ms linear;
+  }
+  .btn-accent:hover:not(:disabled)::after {
+    background-position: 0% 0%;
+    opacity: 1;
   }
   /* Card that lifts slightly on hover. */
   .hover-lift {
@@ -279,7 +425,7 @@ html, body {
       linear-gradient(180deg, rgb(var(--fg) / 0.018), transparent 55%),
       rgb(var(--bg-elevated) / 0.78);
     border-color: rgb(var(--border) / 0.82);
-    box-shadow: 0 6px 20px -18px rgb(0 0 0 / 0.45);
+    box-shadow: 0 6px 20px -18px rgb(var(--shadow) / 0.45);
   }
   .trace-node:hover .trace-card {
     border-color: rgb(var(--accent) / 0.36);
@@ -392,7 +538,14 @@ html, body {
   .skeleton::after {
     content: "";
     @apply absolute inset-0 -translate-x-full animate-shimmer;
-    background: linear-gradient(90deg, transparent, rgb(var(--fg) / 0.08), transparent);
+    /* Tinted with the theme glow rather than --fg, which turned grey on dark. */
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgb(var(--glow) / 0.16),
+      rgb(var(--glow-2) / 0.1),
+      transparent
+    );
   }
   .skeleton-news {
     background: linear-gradient(90deg, rgb(var(--feature-news) / 0.08), rgb(var(--bg-subtle)), rgb(var(--feature-news) / 0.05));
@@ -454,8 +607,14 @@ html, body {
   .loading-rail::after {
     content: "";
     @apply absolute inset-y-0 left-0 w-1/2 animate-rail-sweep rounded-full;
-    background: linear-gradient(90deg, transparent, rgb(var(--accent) / 0.72), transparent);
-    box-shadow: 0 0 12px rgb(var(--accent) / 0.4);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgb(var(--accent) / 0.72),
+      rgb(var(--accent-2) / 0.85),
+      transparent
+    );
+    box-shadow: 0 0 12px rgb(var(--glow) / 0.45);
   }
   .loading-card-news .loading-rail::after {
     background: linear-gradient(90deg, transparent, rgb(var(--feature-news) / 0.70), transparent);
@@ -500,17 +659,19 @@ html, body {
 ::-webkit-scrollbar-thumb { background: rgb(var(--border)); border-radius: 8px; }
 ::-webkit-scrollbar-thumb:hover { background: rgb(var(--fg-subtle)); }
 
-/* Dark-mode form surfaces: avoid pure-black input wells while preserving contrast. */
-.dark input:not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]),
-.dark textarea,
-.dark select {
+/* Dark-mode form surfaces: avoid pure-black input wells while preserving contrast.
+   `.field` is exempt — these selectors are (0,2,1) and would otherwise re-set
+   background-color over the gradient-border stack that .field (0,1,0) builds. */
+.dark input:not(.field):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+.dark textarea:not(.field),
+.dark select:not(.field) {
   background-color: rgb(var(--field-bg) / 0.78);
   border-color: rgb(var(--border) / 0.95);
 }
 
-.dark input:not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]):focus,
-.dark textarea:focus,
-.dark select:focus {
+.dark input:not(.field):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]):focus,
+.dark textarea:not(.field):focus,
+.dark select:not(.field):focus {
   background-color: rgb(var(--field-bg-soft) / 0.86);
 }
 
@@ -532,32 +693,86 @@ html, body {
   background: transparent;
 }
 
+/* Shared frosted-glass base for the two atmospheric themes. The signature
+   treatments that follow diverge per theme; this is only what they agree on. */
 .aurora .panel-card,
-.crystal .panel-card {
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 0.16), transparent 46%),
-    rgb(var(--bg-elevated) / 0.72);
-  border-color: rgb(255 255 255 / 0.38);
-  backdrop-filter: blur(20px) saturate(1.35);
-  -webkit-backdrop-filter: blur(20px) saturate(1.35);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.38),
-    0 16px 44px -24px rgb(31 41 55 / 0.55),
-    0 0 56px -24px rgb(var(--accent) / 0.35);
-}
-
+.crystal .panel-card,
 .aurora .frost-bar,
 .crystal .frost-bar {
   background:
-    linear-gradient(180deg, rgb(255 255 255 / 0.16), transparent 46%),
+    linear-gradient(180deg, rgb(var(--sheen) / 0.16), transparent 46%),
     rgb(var(--bg-elevated) / 0.72);
-  border-color: rgb(255 255 255 / 0.38);
+  border-color: rgb(var(--sheen) / 0.38);
   backdrop-filter: blur(20px) saturate(1.35);
   -webkit-backdrop-filter: blur(20px) saturate(1.35);
   box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.38),
-    0 16px 44px -24px rgb(31 41 55 / 0.55),
-    0 0 56px -24px rgb(var(--accent) / 0.35);
+    inset 0 1px 0 rgb(var(--sheen) / 0.38),
+    0 16px 44px -24px rgb(var(--shadow) / 0.45),
+    0 0 56px -24px rgb(var(--glow) / 0.35);
+}
+
+/* Aurora 极光 — a violet-to-magenta light runs along the panel edge, the way
+   the real thing drapes over a horizon. Painted with the same masked-ring
+   technique as the focus sweep, held static so it reads as material, not motion. */
+.aurora .panel-card {
+  position: relative;
+}
+
+@supports (mask-composite: exclude) or (-webkit-mask-composite: xor) {
+  .aurora .panel-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      140deg,
+      rgb(var(--glow) / 0.75) 0%,
+      rgb(var(--glow-2) / 0.6) 38%,
+      rgb(var(--sheen) / 0.15) 62%,
+      rgb(73 94 255 / 0.6) 100%
+    );
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+    z-index: 1;
+  }
+}
+
+/* Crystal 晴空 — a hard specular line across the top and a low-angle facet
+   glint, like light catching cut glass. */
+.crystal .panel-card {
+  position: relative;
+  box-shadow:
+    inset 0 1px 0 rgb(var(--sheen) / 0.75),
+    inset 0 0 0 1px rgb(var(--sheen) / 0.28),
+    0 16px 44px -24px rgb(var(--shadow) / 0.4),
+    0 0 56px -24px rgb(var(--glow) / 0.4);
+}
+
+.crystal .panel-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    104deg,
+    transparent 30%,
+    rgb(var(--sheen) / 0.22) 44%,
+    rgb(var(--glow-2) / 0.12) 50%,
+    transparent 62%
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Panel chrome has to sit above both signature layers. */
+.aurora .panel-card > *,
+.crystal .panel-card > * {
+  position: relative;
+  z-index: 2;
 }
 
 .aurora .auth-loading-screen,
@@ -591,13 +806,13 @@ html, body {
 .aurora .panel-card footer,
 .crystal .panel-card footer {
   background:
-    linear-gradient(180deg, rgb(255 255 255 / 0.08), rgb(var(--accent) / 0.035)),
+    linear-gradient(180deg, rgb(var(--sheen) / 0.08), rgb(var(--accent) / 0.035)),
     rgb(var(--bg-elevated) / 0.18);
   border-color: rgb(var(--accent) / 0.12);
   backdrop-filter: blur(18px) saturate(1.25);
   -webkit-backdrop-filter: blur(18px) saturate(1.25);
   box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.18),
+    inset 0 1px 0 rgb(var(--sheen) / 0.18),
     inset 0 -1px 0 rgb(var(--accent) / 0.08),
     0 8px 18px -18px rgb(var(--accent) / 0.35);
 }
@@ -605,11 +820,11 @@ html, body {
 .aurora .panel-card .input-shell,
 .crystal .panel-card .input-shell {
   background:
-    linear-gradient(180deg, rgb(255 255 255 / 0.09), rgb(var(--accent) / 0.035)),
+    linear-gradient(180deg, rgb(var(--sheen) / 0.09), rgb(var(--accent) / 0.035)),
     rgb(var(--field-bg) / 0.20);
   border-color: rgb(var(--accent) / 0.16);
   box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.18),
+    inset 0 1px 0 rgb(var(--sheen) / 0.18),
     0 10px 24px -20px rgb(var(--accent) / 0.38);
 }
 
@@ -623,28 +838,28 @@ html, body {
 .aurora .user-menu-popover,
 .crystal .user-menu-popover {
   background:
-    linear-gradient(180deg, rgb(255 255 255 / 0.18), rgb(var(--accent) / 0.08)),
+    linear-gradient(180deg, rgb(var(--sheen) / 0.18), rgb(var(--accent) / 0.08)),
     rgb(var(--bg-elevated) / 0.72);
-  border-color: rgb(255 255 255 / 0.36);
+  border-color: rgb(var(--sheen) / 0.36);
   backdrop-filter: blur(22px) saturate(1.22);
   -webkit-backdrop-filter: blur(22px) saturate(1.22);
   box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.34),
+    inset 0 1px 0 rgb(var(--sheen) / 0.34),
     inset 0 -1px 0 rgb(var(--accent) / 0.10),
-    0 18px 42px -24px rgb(31 41 55 / 0.42),
+    0 18px 42px -24px rgb(var(--shadow) / 0.42),
     0 0 42px -28px rgb(var(--accent) / 0.48);
 }
 
 .aurora .user-menu-trigger,
 .crystal .user-menu-trigger {
   background:
-    linear-gradient(180deg, rgb(255 255 255 / 0.08), rgb(var(--accent) / 0.025)),
+    linear-gradient(180deg, rgb(var(--sheen) / 0.08), rgb(var(--accent) / 0.025)),
     rgb(var(--bg-elevated) / 0.18);
   border-color: rgb(var(--accent) / 0.12);
   backdrop-filter: blur(16px) saturate(1.25);
   -webkit-backdrop-filter: blur(16px) saturate(1.25);
   box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.16),
+    inset 0 1px 0 rgb(var(--sheen) / 0.16),
     0 8px 18px -18px rgb(var(--accent) / 0.35);
 }
 
@@ -660,10 +875,15 @@ html, body {
   overflow: hidden;
 }
 
+/* Each .theme-preview-* class carries its theme's full token block (see the
+   selector lists at the top of this file), so the swatch renders straight from
+   the real palette. It used to hardcode a fourth copy of every theme's colours,
+   which drifted the moment a palette changed. */
 .theme-preview::before {
   content: "";
   position: absolute;
   inset: 0;
+  background: var(--body-wash);
 }
 
 .theme-preview-top {
@@ -673,8 +893,8 @@ html, body {
   top: 10px;
   height: 14px;
   border-radius: 7px;
-  background: rgb(255 255 255 / 0.68);
-  box-shadow: 0 6px 18px rgb(0 0 0 / 0.10);
+  background: rgb(var(--bg-elevated) / 0.72);
+  box-shadow: 0 6px 18px rgb(var(--shadow) / 0.16);
 }
 
 .theme-preview-body {
@@ -687,35 +907,16 @@ html, body {
 
 .theme-preview-body span {
   border-radius: 8px;
-  background: rgb(255 255 255 / 0.72);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.45);
+  background: rgb(var(--bg-elevated) / 0.76);
+  box-shadow: inset 0 1px 0 rgb(var(--sheen) / 0.45);
 }
 
-.theme-preview-light::before {
-  background: linear-gradient(135deg, #fafafa, #f0f1f5);
-}
-
-.theme-preview-dark::before {
-  background: linear-gradient(135deg, #15161a, #2f3038);
-}
-
-.theme-preview-dark .theme-preview-top,
-.theme-preview-dark .theme-preview-body span {
-  background: rgb(70 72 82 / 0.88);
-}
-
-.theme-preview-aurora::before {
+/* A dab of the theme's accent so the four swatches stay distinguishable even
+   where two palettes share a similar ground. */
+.theme-preview-body span:nth-child(2) {
   background:
-    radial-gradient(circle at 82% 18%, rgb(255 38 111 / 0.86), transparent 34%),
-    radial-gradient(circle at 18% 74%, rgb(61 93 255 / 0.92), transparent 40%),
-    linear-gradient(135deg, #3100d8, #8a51f6 45%, #fa1d77 78%, #061fd0);
-}
-
-.theme-preview-crystal::before {
-  background:
-    radial-gradient(circle at 76% 36%, rgb(67 201 255 / 0.76), transparent 36%),
-    radial-gradient(circle at 46% 92%, rgb(37 99 235 / 0.86), transparent 42%),
-    linear-gradient(180deg, #ffffff, #effcff 48%, #3fbfff 72%, #1769ff);
+    linear-gradient(140deg, rgb(var(--accent) / 0.22), rgb(var(--accent-2) / 0.12)),
+    rgb(var(--bg-elevated) / 0.76);
 }
 
 /* Hidden scrollbar for wheel pickers and similar snap scrollers. */
@@ -733,32 +934,398 @@ html, body {
   mask-image: linear-gradient(180deg, transparent, #000 22%, #000 78%, transparent);
 }
 .dtw-band {
-  background: linear-gradient(180deg, rgb(var(--accent) / 0.22), rgb(var(--accent) / 0.06));
+  background: linear-gradient(180deg, rgb(var(--accent) / 0.22), rgb(var(--accent-2) / 0.08));
   border: 1px solid rgb(var(--accent) / 0.4);
   -webkit-backdrop-filter: blur(6px) saturate(1.4);
   backdrop-filter: blur(6px) saturate(1.4);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.5),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.06),
-    0 4px 14px rgb(var(--accent) / 0.16);
+    inset 0 1px 0 rgb(var(--sheen) / 0.5),
+    inset 0 -1px 0 rgb(var(--shadow) / 0.06),
+    0 4px 14px rgb(var(--glow) / 0.18);
 }
 
-/* Aurora's --bg-subtle is a deep purple meant to sit behind frosted panels. The
-   calendar form and wheel shell use it directly, so frost them over the purple
-   body instead of rendering a flat saturated block. */
-.aurora .cal-form {
-  background: rgb(255 255 255 / 0.72);
-  border-color: rgb(255 255 255 / 0.55);
+/* The calendar form, wheel shell and event rows sit directly on the vivid body
+   gradient, so frost them rather than letting a flat surface colour read as a
+   solid block against it. Crystal needs this as much as Aurora does. */
+.aurora .cal-form,
+.crystal .cal-form {
+  background: rgb(var(--sheen) / 0.72);
+  border-color: rgb(var(--sheen) / 0.55);
   -webkit-backdrop-filter: blur(16px) saturate(1.3);
   backdrop-filter: blur(16px) saturate(1.3);
 }
-.aurora .dtw-shell {
-  background: rgb(255 255 255 / 0.55);
-  border-color: rgb(255 255 255 / 0.5);
+.aurora .dtw-shell,
+.crystal .dtw-shell {
+  background: rgb(var(--sheen) / 0.55);
+  border-color: rgb(var(--sheen) / 0.5);
 }
-.aurora .cal-row {
-  background: rgb(255 255 255 / 0.66);
-  border-color: rgb(255 255 255 / 0.5);
+.aurora .cal-row,
+.crystal .cal-row {
+  background: rgb(var(--sheen) / 0.66);
+  border-color: rgb(var(--sheen) / 0.5);
   -webkit-backdrop-filter: blur(12px) saturate(1.3);
   backdrop-filter: blur(12px) saturate(1.3);
+}
+
+/* ============================================================================
+   FOCUS SWEEP
+   ---------------------------------------------------------------------------
+   A glow leaves the top-left corner, travels the diagonal, exits bottom-right,
+   and stops. Only the element's edge is painted; nothing stays highlighted.
+
+   PLACEMENT IS LOAD-BEARING. `@tailwind utilities` is on line 3, so plain CSS
+   down here is emitted after every utility class. That lets `.field:focus`
+   (0,2,0) beat `focus:border-accent` (0,2,0) on source order alone — no
+   !important, no specificity games. Moving any of this into
+   `@layer components` would hoist it to line 2 and silently break it.
+   ========================================================================= */
+
+/* Registered so it can be interpolated; a plain custom property would jump. */
+@property --field-solid-a {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+
+:root {
+  --glow-ring-w: 1px;
+  --glow-band: 6%;      /* of the gradient image => ~24% of the element diagonal */
+  --sweep-dur: 620ms;
+  /* Near-linear with a soft out. Deliberately NOT ease-macos
+     (cubic-bezier(.32,.72,0,1)) — that curve is so front-loaded the glow would
+     jump to the far corner in ~150ms and then crawl. */
+  --sweep-ease: cubic-bezier(0.45, 0.05, 0.3, 1);
+
+  /* `to bottom right` (corner keyword), never 135deg. Per the CSS Images spec a
+     corner keyword places gradient 0% exactly on the top-left corner and 100%
+     exactly on the bottom-right, with the band perpendicular to the true
+     diagonal — automatically correct for a 36px-tall input and a 200px-tall
+     textarea alike. A fixed 135deg would misalign both ends and read as a
+     vertical flash on wide, short fields.
+     Both implementations below consume this one value; that is what keeps the
+     wrapper version and the bare-field version looking identical. */
+  --sweep-img: linear-gradient(
+    to bottom right,
+    rgb(var(--glow) / 0) calc(50% - var(--glow-band) * 2.4),
+    rgb(var(--glow) / 0.28) calc(50% - var(--glow-band)),
+    rgb(var(--glow-2) / 0.95) 50%,
+    rgb(var(--glow) / 0.28) calc(50% + var(--glow-band)),
+    rgb(var(--glow) / 0) calc(50% + var(--glow-band) * 2.4)
+  );
+}
+
+/* With background-size: 200% 200%, position 100% 100% puts the band core on the
+   top-left corner and 0% 0% puts it on the bottom-right. The direction is
+   100 -> 0; reversing it would sweep bottom-right to top-left. */
+@keyframes sweep-diagonal {
+  0% {
+    background-position: 100% 100%;
+    opacity: 0;
+  }
+  9% {
+    opacity: 1;
+  }
+  74% {
+    opacity: 1;
+  }
+  100% {
+    background-position: 0% 0%;
+    opacity: 0;
+  }
+}
+
+/* ---- Wrapper DIVs: a masked 1px ring ------------------------------------ */
+
+.input-shell,
+.chat-composer-input-row {
+  position: relative;
+  --ring-r: 0.875rem; /* rounded-xl, per tailwind.config borderRadius */
+}
+
+@supports (mask-composite: exclude) or (-webkit-mask-composite: xor) {
+  .input-shell:focus-within::after,
+  .chat-composer-input-row:focus-within::after {
+    content: "";
+    position: absolute;
+    /* inset:0 would land on the padding box and miss the 1px border entirely. */
+    inset: calc(-1 * var(--glow-ring-w));
+    border-radius: calc(var(--ring-r) + var(--glow-ring-w));
+    padding: var(--glow-ring-w);
+
+    background-image: var(--sweep-img);
+    background-size: 200% 200%;
+    background-repeat: no-repeat;
+    background-origin: border-box;
+    background-position: 100% 100%;
+
+    /* ORDER MATTERS: the `mask` / `-webkit-mask` shorthands reset
+       mask-composite, so the composite longhands must come after them.
+       Reversed, the ring renders as a solid filled rectangle with no error. */
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+
+    pointer-events: none;
+    z-index: 2;
+    animation: sweep-diagonal var(--sweep-dur) var(--sweep-ease) both;
+  }
+}
+
+/* The composer shell delegates its ring to the inner row. */
+.chat-composer-shell:focus-within::after {
+  content: none;
+}
+
+/* ---- Bare fields: a gradient border via background-clip ------------------
+   input/textarea/select are replaced elements — Chrome renders neither
+   ::before nor ::after on them, so the masked-ring approach is unavailable.
+   Three background layers stand in: an opaque surface clipped to the padding
+   box, the shared sweep clipped to the border box, and a base ring. */
+
+.field {
+  /* background-color is always clipped by the LAST layer's clip value
+     (border-box here), so any bg-* utility would paint over the border and
+     hide the ring. Layer 1 carries the surface instead. */
+  background-color: transparent;
+
+  border-width: 1px;
+  border-style: solid;
+  border-color: transparent;
+  /* No border-radius here on purpose — inherit whatever rounded-* the element
+     already carries; background-clip follows it automatically. */
+
+  --field-ring: var(--border) / 0.95;
+
+  background-image:
+    linear-gradient(rgb(var(--field-solid) / var(--field-solid-a, 1)) 0 0),
+    var(--sweep-img),
+    linear-gradient(rgb(var(--field-ring)) 0 0);
+  background-origin: border-box;
+  background-clip: padding-box, border-box, border-box;
+  background-size: auto, 200% 200%, auto;
+  background-position: 0 0, 100% 100%, 0 0;
+  background-repeat: no-repeat;
+
+  outline: none;
+  transition:
+    box-shadow 160ms var(--sweep-ease),
+    --field-solid-a 140ms linear;
+}
+
+.field:focus {
+  --field-ring: var(--glow) / 0.55;
+  box-shadow:
+    0 0 0 1px rgb(var(--glow) / 0.08),
+    0 4px 14px -12px rgb(var(--glow) / 0.35);
+  animation: sweep-diagonal-field var(--sweep-dur) var(--sweep-ease) both;
+}
+
+/* Multi-layer backgrounds: every keyframe must restate ALL layer positions. */
+@keyframes sweep-diagonal-field {
+  0% {
+    background-position: 0 0, 100% 100%, 0 0;
+  }
+  100% {
+    background-position: 0 0, 0% 0%, 0 0;
+  }
+}
+
+/* .field forces border-color: transparent, so error states have to move to the
+   ring layer or they would silently vanish. */
+.field-danger {
+  --field-ring: var(--danger) / 0.8;
+}
+.field-accent {
+  --field-ring: var(--accent) / 0.4;
+}
+
+/* Selects: Safari's native menulist ignores custom backgrounds outright, so the
+   ring would not render at all. appearance:none is required; the chevron is
+   rebuilt from two gradient wedges tinted with --fg-muted, which tracks the
+   theme without needing an SVG data URI. */
+select.field {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 2rem;
+  background-image:
+    linear-gradient(45deg, transparent 50%, rgb(var(--fg-muted)) 50%),
+    linear-gradient(135deg, rgb(var(--fg-muted)) 50%, transparent 50%),
+    linear-gradient(rgb(var(--field-solid) / var(--field-solid-a, 1)) 0 0),
+    var(--sweep-img),
+    linear-gradient(rgb(var(--field-ring)) 0 0);
+  background-size: 5px 5px, 5px 5px, auto, 200% 200%, auto;
+  background-position:
+    right 15px center,
+    right 10px center,
+    0 0,
+    100% 100%,
+    0 0;
+  background-clip: border-box, border-box, padding-box, border-box, border-box;
+}
+
+select.field:focus {
+  animation: sweep-diagonal-select var(--sweep-dur) var(--sweep-ease) both;
+}
+
+@keyframes sweep-diagonal-select {
+  0% {
+    background-position: right 15px center, right 10px center, 0 0, 100% 100%, 0 0;
+  }
+  100% {
+    background-position: right 15px center, right 10px center, 0 0, 0% 0%, 0 0;
+  }
+}
+
+/* ---- Glass themes: solidify on focus -------------------------------------
+   Aurora/Crystal render in-panel fields at alpha 0.16. The padding-box surface
+   layer sits ON TOP of the border-box sweep, so at that alpha ~84% of the band
+   bleeds straight through the field interior. Raising the surface to 0.93 while
+   focused drops the bleed to ~0.07 (invisible) and is a legibility win besides.
+   Specificity (0,3,0) ties `.aurora .panel-card .bg-bg`; source order wins. */
+.aurora .panel-card .field,
+.crystal .panel-card .field {
+  background-color: transparent;
+  --field-solid-a: 0.18;
+  --field-ring: var(--accent) / 0.16;
+  -webkit-backdrop-filter: blur(12px) saturate(1.18);
+  backdrop-filter: blur(12px) saturate(1.18);
+}
+
+.aurora .panel-card .field:focus,
+.crystal .panel-card .field:focus {
+  --field-solid-a: 0.93;
+}
+
+.aurora .panel-card .input-shell:focus-within,
+.crystal .panel-card .input-shell:focus-within {
+  --field-solid-a: 0.93;
+}
+
+/* ---- Fallback where mask-composite is unavailable ------------------------
+   An outer-shadow sweep. Follows border-radius, works on every element type,
+   and is immune to translucency because outer shadows paint outside the border
+   box. Honest caveat: mid-travel it reads as an even halo rather than a crisp
+   band, so this is graceful degradation, not a match. */
+@supports not ((mask-composite: exclude) or (-webkit-mask-composite: xor)) {
+  .input-shell:focus-within,
+  .chat-composer-input-row:focus-within,
+  .field:focus {
+    animation: sweep-shadow var(--sweep-dur) var(--sweep-ease) both;
+  }
+
+  @keyframes sweep-shadow {
+    0% {
+      box-shadow: -8px -8px 12px -7px rgb(var(--glow-2) / 0), 0 0 0 1px rgb(var(--glow) / 0);
+    }
+    18% {
+      box-shadow: -6px -6px 12px -5px rgb(var(--glow-2) / 0.8), 0 0 0 1px rgb(var(--glow) / 0.34);
+    }
+    50% {
+      box-shadow: 0 0 14px -4px rgb(var(--glow-2) / 0.55), 0 0 0 1px rgb(var(--glow) / 0.28);
+    }
+    82% {
+      box-shadow: 6px 6px 12px -5px rgb(var(--glow-2) / 0.8), 0 0 0 1px rgb(var(--glow) / 0.34);
+    }
+    100% {
+      box-shadow: 8px 8px 12px -7px rgb(var(--glow-2) / 0), 0 0 0 1px rgb(var(--glow) / 0.09);
+    }
+  }
+}
+
+/* ============================================================================
+   REDUCED MOTION
+   ---------------------------------------------------------------------------
+   Two things a naive block gets wrong here, both avoided below:
+
+   1. `.skeleton::after` and `.loading-rail::after` get their animation from
+      `@apply animate-shimmer` / `animate-rail-sweep` inside @layer components,
+      so those utility classes are NOT in the DOM. They have to be neutralised
+      through the component selector.
+   2. `animate-spin` is the only load feedback at 30+ call sites, and
+      `animate-dot-drift` is the typing indicator. Stopping them outright reads
+      as a frozen UI, so they are slowed rather than killed. For the same reason
+      this does not use the popular `animation-duration: .01ms !important`
+      blanket, which would freeze every spinner mid-rotation.
+   ========================================================================= */
+@media (prefers-reduced-motion: reduce) {
+  /* Focus sweep: skip the travel, keep the settled residual. */
+  .input-shell:focus-within::after,
+  .chat-composer-input-row:focus-within::after {
+    display: none;
+  }
+  .field:focus,
+  select.field:focus {
+    animation: none;
+  }
+  .btn-accent::after {
+    transition: opacity 120ms linear;
+  }
+
+  /* Loaders whose animation comes from @apply (class absent from the DOM). */
+  .skeleton::after {
+    animation: none;
+    opacity: 0.35;
+  }
+  .loading-rail::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.45;
+  }
+
+  .session-running-indicator,
+  .session-running-indicator::after,
+  .clarify-inline-panel {
+    animation: none;
+  }
+  .session-running-indicator::after {
+    opacity: 0.45;
+  }
+
+  .animate-pulse-ring,
+  .animate-float-soft,
+  .animate-pulse,
+  .animate-fade-in,
+  .animate-scale-in,
+  .animate-bounce-in {
+    animation: none;
+  }
+
+  /* Keep the signal, drop the movement. */
+  .animate-dot-drift,
+  .animate-dot-pulse {
+    animation: rm-fade 1.4s ease-in-out infinite;
+  }
+  .animate-spin {
+    animation-duration: 1.8s;
+  }
+
+  /* Global button lift. Same selectors as the rule in @layer components, so
+     these win on source order. */
+  button:not(:disabled):not(.btn-ghost):hover,
+  button:not(:disabled):active,
+  .btn-accent:hover,
+  .btn-accent:active,
+  .btn-ghost:active,
+  .hover-lift:hover,
+  .trace-node:hover .trace-card {
+    transform: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition-duration: 80ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@keyframes rm-fade {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
 }

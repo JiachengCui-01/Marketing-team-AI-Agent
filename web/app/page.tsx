@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Sparkles } from "lucide-react";
+import { Sparkle } from "@phosphor-icons/react";
 import { useTheme } from "next-themes";
 import {
   AuthScreen,
@@ -808,10 +808,10 @@ export default function HomePage() {
   return (
     <PreviewOpenerProvider value={previewOpener}>
     <main className="h-screen flex flex-col bg-bg-subtle">
-      <header className="relative z-50 bg-bg-subtle px-1.5 pt-1.5">
+      <header className="relative z-50 bg-bg-subtle px-2 pt-2">
         <div className="frost-bar h-14 rounded-2xl border border-border px-4 py-3 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-accent text-accent-fg flex items-center justify-center">
-            <Sparkles size={16} />
+          <div className="app-mark w-8 h-8 rounded-lg text-accent-fg flex items-center justify-center">
+            <Sparkle size={17} weight="fill" />
           </div>
           <div>
             <h1 className="text-sm font-semibold tracking-tight">
@@ -835,7 +835,7 @@ export default function HomePage() {
         </div>
       </header>
 
-      <div className="flex flex-1 gap-1 p-1.5 bg-bg-subtle overflow-hidden">
+      <div className="flex flex-1 gap-2 p-2 bg-bg-subtle overflow-hidden">
         <SessionSidebar
           sessions={store.sessions}
           groups={store.groups}
@@ -858,6 +858,7 @@ export default function HomePage() {
           onOpenContacts={() => setView("contacts")}
           onOpenNews={() => setView("news")}
           onOpenImage={() => setView("image")}
+          view={view}
           messageUnread={im.unreadTotal}
         />
         {!collapsed ? (

@@ -136,20 +136,20 @@ export function TasksPanel({ onBack }: { onBack: () => void }) {
             value={form.title}
             onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
             placeholder="任务标题"
-            className="w-full h-9 px-3 rounded-lg bg-bg-elevated border border-border text-sm outline-none focus:border-accent"
+            className="field w-full h-9 px-3 rounded-lg text-sm"
           />
           <textarea
             value={form.detail}
             onChange={(e) => setForm((f) => ({ ...f, detail: e.target.value }))}
             placeholder="详情（可选）"
             rows={2}
-            className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-sm outline-none focus:border-accent resize-none"
+            className="field w-full px-3 py-2 rounded-lg text-sm resize-none"
           />
           <div className="flex gap-2">
             <select
               value={form.priority}
               onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value }))}
-              className="h-9 px-2 rounded-lg bg-bg-elevated border border-border text-sm outline-none focus:border-accent"
+              className="field h-9 px-2 rounded-lg text-sm"
             >
               <option value="low">优先级：低</option>
               <option value="normal">优先级：中</option>
@@ -159,7 +159,7 @@ export function TasksPanel({ onBack }: { onBack: () => void }) {
               value={form.assignee_name}
               onChange={(e) => setForm((f) => ({ ...f, assignee_name: e.target.value }))}
               placeholder="指派给（留空=自己）"
-              className="flex-1 h-9 px-3 rounded-lg bg-bg-elevated border border-border text-sm outline-none focus:border-accent"
+              className="field flex-1 h-9 px-3 rounded-lg text-sm"
             />
           </div>
           <label className="block text-[11px] text-fg-muted">
@@ -168,7 +168,7 @@ export function TasksPanel({ onBack }: { onBack: () => void }) {
               type="datetime-local"
               value={form.due}
               onChange={(e) => setForm((f) => ({ ...f, due: e.target.value }))}
-              className="w-full h-9 px-2 rounded-lg bg-bg-elevated border border-border text-sm outline-none focus:border-accent"
+              className="field w-full h-9 px-2 rounded-lg text-sm"
             />
           </label>
           <div className="flex justify-end">

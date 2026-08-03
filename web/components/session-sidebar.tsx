@@ -12,13 +12,18 @@ import {
   FolderInput,
   PanelLeftClose,
   PanelLeft,
-  Newspaper,
-  Image as ImageIcon,
-  MessageCircle,
-  Contact,
-  FileCheck2,
-  CheckSquare,
 } from "lucide-react";
+// Identity icons use Phosphor's duotone weight: a filled shape under the stroke,
+// both drawn from currentColor. Utility icons (close, check, chevrons) stay on
+// lucide — plain line marks are the right register for those.
+import {
+  ChatCircle,
+  AddressBook,
+  SealCheck,
+  ListChecks,
+  Newspaper as NewspaperDuo,
+  ImageSquare,
+} from "@phosphor-icons/react";
 import { ContextMenu, type MenuItem } from "./context-menu";
 import { useDialogs } from "./dialogs";
 import type { GroupRecord, SessionRecord } from "@/lib/api";
@@ -55,6 +60,7 @@ export function SessionSidebar({
   onOpenNews,
   onOpenImage,
   messageUnread,
+  view,
 }: {
   sessions: SessionRecord[];
   groups: GroupRecord[];
@@ -78,6 +84,8 @@ export function SessionSidebar({
   onOpenNews: () => void;
   onOpenImage: () => void;
   messageUnread?: number;
+  /** Which workspace view is showing. Read-only, drives nav highlighting only. */
+  view?: string;
 }) {
   const { t } = useI18n();
   const { promptDialog, confirmDialog, host: dialogHost } = useDialogs();
@@ -85,6 +93,18 @@ export function SessionSidebar({
   const [menu, setMenu] = useState<MenuState>(null);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const running = useMemo(() => new Set(runningIds ?? []), [runningIds]);
+
+  // Idle icons carry each theme's own muted hue (warm taupe on Light, blue-grey
+  // on Dark, lavender on Aurora, sky-grey on Crystal) rather than a shared grey;
+  // the open view is the only one wearing full accent.
+  const navIcon = (v: string) =>
+    view === v ? "text-accent shrink-0" : "text-icon-idle shrink-0";
+  const navRow = (v: string) =>
+    `btn-ghost w-full justify-start px-2.5 py-2 text-sm font-medium${
+      view === v ? " nav-item-active" : ""
+    }`;
+  const navRail = (v: string) =>
+    `btn-ghost w-9 h-9${view === v ? " nav-item-active" : ""}`;
 
   const ungrouped = useMemo(
     () => sessions.filter((s) => !s.group_id),
@@ -119,54 +139,54 @@ export function SessionSidebar({
         </button>
         <button
           onClick={onOpenMessages}
-          className="btn-ghost w-9 h-9 relative"
+          className={`${navRail("messages")} relative`}
           aria-label={t.messages}
           title={t.messages}
         >
-          <MessageCircle size={16} className="text-feature-news" />
+          <ChatCircle size={17} weight="duotone" className={navIcon("messages")} />
           {messageUnread ? (
             <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-danger" aria-hidden />
           ) : null}
         </button>
         <button
           onClick={onOpenContacts}
-          className="btn-ghost w-9 h-9"
+          className={navRail("contacts")}
           aria-label={t.contacts}
           title={t.contacts}
         >
-          <Contact size={16} className="text-feature-image" />
+          <AddressBook size={17} weight="duotone" className={navIcon("contacts")} />
         </button>
         <button
           onClick={onOpenApprovals}
-          className="btn-ghost w-9 h-9"
+          className={navRail("approvals")}
           aria-label={t.approvals}
           title={t.approvals}
         >
-          <FileCheck2 size={16} className="text-feature-image" />
+          <SealCheck size={17} weight="duotone" className={navIcon("approvals")} />
         </button>
         <button
           onClick={onOpenTasks}
-          className="btn-ghost w-9 h-9"
+          className={navRail("tasks")}
           aria-label={t.tasks}
           title={t.tasks}
         >
-          <CheckSquare size={16} className="text-feature-image" />
+          <ListChecks size={17} weight="duotone" className={navIcon("tasks")} />
         </button>
         <button
           onClick={onOpenNews}
-          className="btn-ghost w-9 h-9"
+          className={navRail("news")}
           aria-label={t.industryNews}
           title={t.industryNews}
         >
-          <Newspaper size={16} className="text-feature-news" />
+          <NewspaperDuo size={17} weight="duotone" className={navIcon("news")} />
         </button>
         <button
           onClick={onOpenImage}
-          className="btn-ghost w-9 h-9"
+          className={navRail("image")}
           aria-label={t.marketingImage}
           title={t.marketingImage}
         >
-          <ImageIcon size={16} className="text-feature-image" />
+          <ImageSquare size={17} weight="duotone" className={navIcon("image")} />
         </button>
       </aside>
     );
@@ -312,49 +332,49 @@ export function SessionSidebar({
       <div className="px-1.5 pt-2 space-y-0.5">
         <button
           onClick={onOpenMessages}
-          className="btn-ghost w-full justify-start px-2.5 py-2 text-sm font-medium"
+          className={navRow("messages")}
         >
-          <MessageCircle size={15} className="text-feature-news shrink-0" />
+          <ChatCircle size={17} weight="duotone" className={navIcon("messages")} />
           <span className="truncate flex-1 text-left">{t.messages}</span>
           {messageUnread ? (
-            <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-danger text-white text-[10px] font-semibold flex items-center justify-center">
+            <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-danger text-accent-fg text-[10px] font-semibold flex items-center justify-center">
               {messageUnread > 99 ? "99+" : messageUnread}
             </span>
           ) : null}
         </button>
         <button
           onClick={onOpenContacts}
-          className="btn-ghost w-full justify-start px-2.5 py-2 text-sm font-medium"
+          className={navRow("contacts")}
         >
-          <Contact size={15} className="text-feature-image shrink-0" />
+          <AddressBook size={17} weight="duotone" className={navIcon("contacts")} />
           <span className="truncate">{t.contacts}</span>
         </button>
         <button
           onClick={onOpenApprovals}
-          className="btn-ghost w-full justify-start px-2.5 py-2 text-sm font-medium"
+          className={navRow("approvals")}
         >
-          <FileCheck2 size={15} className="text-feature-image shrink-0" />
+          <SealCheck size={17} weight="duotone" className={navIcon("approvals")} />
           <span className="truncate">{t.approvals}</span>
         </button>
         <button
           onClick={onOpenTasks}
-          className="btn-ghost w-full justify-start px-2.5 py-2 text-sm font-medium"
+          className={navRow("tasks")}
         >
-          <CheckSquare size={15} className="text-feature-image shrink-0" />
+          <ListChecks size={17} weight="duotone" className={navIcon("tasks")} />
           <span className="truncate">{t.tasks}</span>
         </button>
         <button
           onClick={onOpenNews}
-          className="btn-ghost w-full justify-start px-2.5 py-2 text-sm font-medium"
+          className={navRow("news")}
         >
-          <Newspaper size={15} className="text-feature-news shrink-0" />
+          <NewspaperDuo size={17} weight="duotone" className={navIcon("news")} />
           <span className="truncate">{t.industryNews}</span>
         </button>
         <button
           onClick={onOpenImage}
-          className="btn-ghost w-full justify-start px-2.5 py-2 text-sm font-medium"
+          className={navRow("image")}
         >
-          <ImageIcon size={15} className="text-feature-image shrink-0" />
+          <ImageSquare size={17} weight="duotone" className={navIcon("image")} />
           <span className="truncate">{t.marketingImage}</span>
         </button>
       </div>

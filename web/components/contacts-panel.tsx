@@ -253,7 +253,7 @@ export function ContactsPanel({
               <Icon size={15} className={`shrink-0 ${category === key ? "text-accent" : "opacity-70"}`} />
               <span className="truncate flex-1">{label}</span>
               {key === "new" && requests.incoming.length > 0 ? (
-                <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-danger text-white text-[10px] font-semibold flex items-center justify-center">
+                <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-danger text-accent-fg text-[10px] font-semibold flex items-center justify-center">
                   {requests.incoming.length}
                 </span>
               ) : null}
@@ -624,7 +624,7 @@ function AddMemberDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
           <input
             value={account}
             onChange={(e) => setAccount(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent"
+            className="field mt-1 w-full rounded-lg px-3 py-2 text-sm text-fg"
           />
         </label>
         {error ? <p className="text-[11px] text-danger">{error}</p> : null}
@@ -694,7 +694,7 @@ function AddContactDialog({
           <input
             value={account}
             onChange={(e) => setAccount(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent"
+            className="field mt-1 w-full rounded-lg px-3 py-2 text-sm text-fg"
           />
         </label>
         {!accountOnly ? (
@@ -705,7 +705,7 @@ function AddContactDialog({
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent"
+                className="field mt-1 w-full rounded-lg px-3 py-2 text-sm text-fg"
               />
             </label>
             <div className="grid grid-cols-2 gap-2">
@@ -714,7 +714,7 @@ function AddContactDialog({
                 <input
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent"
+                  className="field mt-1 w-full rounded-lg px-3 py-2 text-sm text-fg"
                 />
               </label>
               <label className="block text-xs font-medium text-fg-muted">
@@ -722,7 +722,7 @@ function AddContactDialog({
                 <input
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent"
+                  className="field mt-1 w-full rounded-lg px-3 py-2 text-sm text-fg"
                 />
               </label>
             </div>
@@ -952,7 +952,7 @@ function CreateGroupDialog({
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent"
+            className="field mt-1 w-full rounded-lg px-3 py-2 text-sm text-fg"
           />
         </label>
         <div className="text-xs font-medium text-fg-muted">{t.groupChatMembers}</div>
@@ -1134,7 +1134,7 @@ function ManageOrgDialog({
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 placeholder={t.inviteCode}
-                className="flex-1 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent"
+                className="field flex-1 rounded-lg px-3 py-2 text-sm text-fg"
               />
               <button onClick={() => void run(() => joinOrg(code.trim()))} disabled={busy || !code.trim()} className="btn-accent px-3 py-2 text-xs">
                 {t.joinOrg}
@@ -1150,7 +1150,7 @@ function ManageOrgDialog({
               <input
                 value={newOrgName}
                 onChange={(e) => setNewOrgName(e.target.value)}
-                className="flex-1 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent"
+                className="field flex-1 rounded-lg px-3 py-2 text-sm text-fg"
               />
               <button onClick={() => void run(() => createOrg(newOrgName.trim()))} disabled={busy || !newOrgName.trim()} className="btn-ghost px-3 py-2 text-xs border border-border">
                 {t.createOrg}

@@ -80,7 +80,7 @@ export function MessageBubble({
             }
           }}
           rows={Math.min(8, Math.max(2, draft.split("\n").length))}
-          className="w-full max-w-[78%] resize-none rounded-2xl border border-accent/40 bg-bg-elevated px-4 py-3 text-sm leading-relaxed outline-none focus:border-accent"
+          className="field field-accent w-full max-w-[78%] resize-none rounded-2xl px-4 py-3 text-sm leading-relaxed"
         />
         <div className="flex items-center gap-2">
           <button

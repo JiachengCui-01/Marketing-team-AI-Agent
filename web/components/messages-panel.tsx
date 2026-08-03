@@ -145,7 +145,7 @@ export function MessagesPanel({
                   <span className="block truncate text-xs text-fg-subtle">{lastPreview(c, t)}</span>
                 </span>
                 {c.unread > 0 ? (
-                  <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-danger text-white text-[10px] font-semibold flex items-center justify-center shrink-0">
+                  <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-danger text-accent-fg text-[10px] font-semibold flex items-center justify-center shrink-0">
                     {c.unread > 99 ? "99+" : c.unread}
                   </span>
                 ) : null}
@@ -245,7 +245,7 @@ function FileBubble({
     >
       <span
         className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-          mine ? "bg-white/20" : "bg-bg-subtle"
+          mine ? "bg-accent-fg/20" : "bg-bg-subtle"
         }`}
       >
         {uploading ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
@@ -389,7 +389,7 @@ function Thread({
             }}
             rows={1}
             placeholder={t.messageInputPlaceholder}
-            className="flex-1 resize-none rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none placeholder:text-fg-subtle focus:border-accent max-h-32"
+            className="field flex-1 resize-none rounded-lg px-3 py-2 text-sm text-fg placeholder:text-fg-subtle max-h-32"
           />
           <button
             onClick={submit}
@@ -460,7 +460,7 @@ function NewGroupDialog({
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent"
+            className="field mt-1 w-full rounded-lg px-3 py-2 text-sm text-fg"
           />
         </label>
 

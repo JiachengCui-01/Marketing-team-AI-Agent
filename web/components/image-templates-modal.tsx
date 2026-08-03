@@ -275,7 +275,7 @@ export function ImageTemplatesModal({
               <select
                 value={platform}
                 onChange={(e) => setPlatform(e.target.value)}
-                className="mt-1 block rounded-lg border border-border bg-bg px-2 py-1.5 text-sm focus:border-accent focus:outline-none"
+                className="field mt-1 block rounded-lg px-2 py-1.5 text-sm"
               >
                 {platformOptions.map((p) => (
                   <option key={p} value={p}>
@@ -289,7 +289,7 @@ export function ImageTemplatesModal({
               <select
                 value={style}
                 onChange={(e) => setStyle(e.target.value)}
-                className="mt-1 block rounded-lg border border-border bg-bg px-2 py-1.5 text-sm focus:border-accent focus:outline-none"
+                className="field mt-1 block rounded-lg px-2 py-1.5 text-sm"
               >
                 {styleOptions.map((s) => (
                   <option key={s} value={s}>
@@ -442,7 +442,7 @@ export function ImageTemplatesModal({
                             onChange={(e) =>
                               setTexts((arr) => arr.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))
                             }
-                            className="flex-1 rounded-lg border border-border bg-bg px-2 py-1.5 text-sm focus:border-accent focus:outline-none"
+                            className="field flex-1 rounded-lg px-2 py-1.5 text-sm"
                           />
                           <input
                             type="color"

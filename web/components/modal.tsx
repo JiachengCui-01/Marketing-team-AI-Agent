@@ -87,7 +87,9 @@ export function Modal({
         if (e.target === e.currentTarget) close();
       }}
       style={{
-        backgroundColor: "rgb(0 0 0 / 0.4)",
+        // Theme-tinted scrim rather than flat black, so it sits under each
+        // theme's palette instead of greying it out.
+        backgroundColor: "rgb(var(--shadow) / 0.42)",
         backdropFilter: "blur(2px)",
         opacity: reduce ? 1 : shown ? 1 : 0,
         transition: reduce ? undefined : "opacity 200ms ease-out",

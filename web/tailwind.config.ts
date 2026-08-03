@@ -24,7 +24,19 @@ const config: Config = {
         accent: {
           DEFAULT: "rgb(var(--accent) / <alpha-value>)",
           fg: "rgb(var(--accent-fg) / <alpha-value>)",
+          2: "rgb(var(--accent-2) / <alpha-value>)",
         },
+        // Form-field surfaces. These CSS vars have always existed per theme but
+        // were only reachable from raw CSS until now.
+        field: {
+          DEFAULT: "rgb(var(--field-bg) / <alpha-value>)",
+          soft: "rgb(var(--field-bg-soft) / <alpha-value>)",
+        },
+        glow: "rgb(var(--glow) / <alpha-value>)",
+        sheen: "rgb(var(--sheen) / <alpha-value>)",
+        // Resting tint for identity icons — leans into each theme's hue instead
+        // of a shared neutral grey.
+        "icon-idle": "rgb(var(--icon-idle) / <alpha-value>)",
         success: "rgb(var(--success) / <alpha-value>)",
         warn: "rgb(var(--warn) / <alpha-value>)",
         danger: "rgb(var(--danger) / <alpha-value>)",
