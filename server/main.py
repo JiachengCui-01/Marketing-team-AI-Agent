@@ -85,8 +85,32 @@ def _expire_cancelled_configs() -> None:
             logger.info("Reverted cancelled news task for user %s", config.get("user_id"))
 
 
+def _warn_on_missing_config() -> None:
+    """Surface missing credentials in the deploy logs.
+
+    A fresh host passes the health check with nothing configured, so without
+    this the first symptom is a 500 in front of a user rather than a line in
+    the logs an operator can act on.
+    """
+    if not os.environ.get("DEEPSEEK_API_KEY", "").strip():
+        logger.warning(
+            "DEEPSEEK_API_KEY is not set — the service will start and pass health "
+            "checks, but every chat request will fail with HTTP 500. Set it in the "
+            "host's environment."
+        )
+    if not os.environ.get("GEMINI_API_KEY", "").strip():
+        from marketing_agent.tools import web_search
+
+        detail = "product-image generation is disabled"
+        if web_search.active_provider() is None:
+            detail += ", and no web-search provider is configured so the research "
+            detail += "agent and the daily briefing will report themselves unavailable"
+        logger.warning("GEMINI_API_KEY is not set — %s.", detail)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _warn_on_missing_config()
     task = asyncio.create_task(_news_scheduler())
     try:
         yield

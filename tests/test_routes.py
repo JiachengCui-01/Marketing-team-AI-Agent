@@ -89,7 +89,7 @@ class RouteTests(unittest.TestCase):
     def test_health(self) -> None:
         response = self.client.get("/api/health")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"status": "ok"})
+        self.assertEqual(response.json()["status"], "ok")
 
     def test_auth_me_and_duplicate_registration(self) -> None:
         duplicate = self.client.post(
@@ -517,6 +517,31 @@ class RouteTests(unittest.TestCase):
     def test_image_endpoints_require_auth(self) -> None:
         self.assertEqual(self.client.get("/api/image/history").status_code, 401)
         self.assertEqual(self.client.get("/api/image/skills").status_code, 401)
+
+    def test_health_reports_configuration(self) -> None:
+        """A fresh host passes the health check with nothing configured, so the
+        body has to say which capabilities are actually wired — otherwise a
+        broken deploy looks green."""
+        body = self.client.get("/api/health").json()
+        self.assertEqual(body["status"], "ok")
+        cfg = body["config"]
+        # setUp sets DEEPSEEK_API_KEY, so the model API reads as configured.
+        self.assertTrue(cfg["model_api"])
+        self.assertIn("image_generation", cfg)
+        self.assertIn("web_search", cfg)
+        self.assertIn("local_code_execution", cfg)
+
+    def test_health_flags_missing_model_key(self) -> None:
+        saved = os.environ.get("DEEPSEEK_API_KEY", "")
+        os.environ["DEEPSEEK_API_KEY"] = ""
+        try:
+            cfg = self.client.get("/api/health").json()
+            # Still 200: a non-200 would make the host roll the deploy back and
+            # hide the very reason it failed.
+            self.assertEqual(cfg["status"], "ok")
+            self.assertFalse(cfg["config"]["model_api"])
+        finally:
+            os.environ["DEEPSEEK_API_KEY"] = saved
 
     def test_image_skills_and_templates(self) -> None:
         skills = self.client.get("/api/image/skills", headers=self.headers).json()["skills"]

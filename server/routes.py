@@ -5,6 +5,7 @@ import asyncio
 import functools
 import json
 import logging
+import os
 import time
 from datetime import datetime
 from typing import AsyncIterator
@@ -63,7 +64,25 @@ def _schedule_memory_update(user_id: str, prompt: str) -> None:
 
 @router.get("/health")
 def health() -> dict:
-    return {"status": "ok"}
+    """Liveness plus a configuration readout.
+
+    Always 200 so a misconfigured deploy still comes up and stays reachable —
+    a rolled-back deploy would hide the reason it failed. ``config`` reports
+    booleans only, never key material, so this stays safe to expose.
+    """
+    from marketing_agent.tools import code_exec, web_search
+
+    search = web_search.active_provider()
+    return {
+        "status": "ok",
+        "config": {
+            # Without this the workspace answers nothing: every model call 500s.
+            "model_api": bool(os.environ.get("DEEPSEEK_API_KEY", "").strip()),
+            "image_generation": bool(os.environ.get("GEMINI_API_KEY", "").strip()),
+            "web_search": search[0] if search else None,
+            "local_code_execution": code_exec.enabled(),
+        },
+    }
 
 
 # ---------- auth ----------

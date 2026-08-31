@@ -1,13 +1,24 @@
 services:
   - type: web
-    name: marketing-agent-api
+    # Distinct from the older `marketing-agent-api` service: a Blueprint matches
+    # existing services by name, so reusing the old name would try to adopt that
+    # service instead of creating a fresh one.
+    name: furniture-dtc-agent-api
     runtime: python
+    # `standard` (2 GB) is sized for background removal: rembg loads onnxruntime
+    # plus the ~170 MB u2net model on first cutout. The import is lazy, so
+    # everything else fits comfortably in `starter` (512 MB) — drop to starter if
+    # you can live without one-click cutout, or set MARKETING_AGENT_LOCAL_CODE_EXEC
+    # and the cutout feature aside entirely. The free plan has no persistent disk,
+    # so SQLite would be wiped on every restart; fine for a demo, not for real use.
     plan: standard
     buildCommand: pip install -e .
     startCommand: uvicorn server.main:app --host 0.0.0.0 --port $PORT
+    # Returns 200 even when unconfigured, and its body reports which capabilities
+    # are wired — curl it after deploying to confirm the keys landed.
     healthCheckPath: /api/health
     disk:
-      name: marketing-agent-data
+      name: furniture-dtc-agent-data
       mountPath: /var/data
       sizeGB: 3
     envVars:
@@ -15,20 +26,25 @@ services:
         value: 3.11.9
       - key: MARKETING_AGENT_DB_PATH
         value: /var/data/marketing_agent.db
+      # REQUIRED. Without it the service still starts and passes the health
+      # check, but every chat request fails with HTTP 500.
       - key: DEEPSEEK_API_KEY
         sync: false
-      # Gemini does double duty: product-image generation, and web search for the
-      # research agent via Google Search grounding (DeepSeek has no built-in
-      # search). A dedicated search vendor key, if set, takes priority — see
-      # tools/web_search.py.
-      - key: TAVILY_API_KEY
-        sync: false
+      # Does double duty: product-image generation, and web search for the
+      # research agent and daily briefing via Google Search grounding (DeepSeek
+      # has no built-in search).
       - key: GEMINI_API_KEY
+        sync: false
+      # Optional. A dedicated search vendor takes priority over Gemini grounding
+      # because it returns publication dates. See tools/web_search.py.
+      - key: TAVILY_API_KEY
         sync: false
       # Cache the rembg u2net weights (~170MB) on the persistent disk so they
       # survive restarts instead of re-downloading to ephemeral storage.
       - key: U2NET_HOME
         value: /var/data/rembg
+      # Comma-separated exact origins for the frontend. The regex below already
+      # covers *.vercel.app preview and production URLs.
       - key: CORS_ORIGINS
         sync: false
       - key: CORS_ORIGIN_REGEX
