@@ -1659,6 +1659,29 @@ async def create_calendar_event(request: Request, payload: dict = Body(...)) -> 
     if end_at is not None and end_at < start_at:
         raise HTTPException(400, "结束时间不能早于开始时间。")
     attendees = payload.get("attendees")
+    target_event = None
+    event_id = str(payload.get("event_id") or "").strip()
+    if event_id:
+        candidate = db.get_event(event_id)
+        if candidate is None or candidate["owner_id"] != user["id"]:
+            raise HTTPException(404, "原日程不存在或无权修改。")
+        target_event = candidate
+    else:
+        target_event = db.find_matching_event(user["id"], title, start_at)
+
+    if target_event is not None:
+        fields: dict = {"title": title, "start_at": start_at}
+        if "end" in payload or "end_at" in payload:
+            fields["end_at"] = end_at
+        if "location" in payload:
+            fields["location"] = str(payload.get("location") or "").strip() or None
+        if "description" in payload:
+            fields["description"] = str(payload.get("description") or "").strip() or None
+        if "attendees" in payload:
+            fields["attendees"] = [str(a) for a in attendees] if isinstance(attendees, list) else []
+        updated = db.update_event(target_event["id"], user["id"], fields)
+        return {"event": _event_view(updated), "operation": "updated"}
+
     org = db.get_or_create_default_org(user["id"], user.get("username") or "")
     event = db.create_event(
         owner_id=user["id"],
@@ -1670,7 +1693,7 @@ async def create_calendar_event(request: Request, payload: dict = Body(...)) -> 
         org_id=org.get("id"),
         description=(str(payload.get("description") or "").strip() or None),
     )
-    return {"event": _event_view(event)}
+    return {"event": _event_view(event), "operation": "created"}
 
 
 @router.patch("/calendar/{event_id}")
@@ -1695,6 +1718,9 @@ async def update_calendar_event(request: Request, event_id: str, payload: dict =
         fields["location"] = str(payload.get("location") or "").strip() or None
     if "description" in payload:
         fields["description"] = str(payload.get("description") or "").strip() or None
+    if "attendees" in payload:
+        attendees = payload.get("attendees")
+        fields["attendees"] = [str(a) for a in attendees] if isinstance(attendees, list) else []
     if "status" in payload:
         status = str(payload.get("status") or "").strip()
         if status not in ("active", "done"):

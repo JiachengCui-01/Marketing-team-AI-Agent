@@ -1367,6 +1367,18 @@ export async function createEvent(payload: {
   attendees?: string[];
   description?: string;
 }): Promise<CalendarEvent> {
+  return (await saveCalendarEvent(payload)).event;
+}
+
+export async function saveCalendarEvent(payload: {
+  event_id?: string;
+  title: string;
+  start: string;
+  end?: string;
+  location?: string;
+  attendees?: string[];
+  description?: string;
+}): Promise<{ event: CalendarEvent; operation: "created" | "updated" }> {
   const res = await fetch(`${API_BASE}/api/calendar`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
@@ -1377,7 +1389,7 @@ export async function createEvent(payload: {
     }),
   });
   if (!res.ok) throw new Error(await parseJsonError(res));
-  return (await res.json()).event;
+  return res.json();
 }
 
 export async function updateEvent(
@@ -1387,6 +1399,7 @@ export async function updateEvent(
     start?: string;
     end?: string;
     location?: string;
+    attendees?: string[];
     description?: string;
     status?: "active" | "done";
   },

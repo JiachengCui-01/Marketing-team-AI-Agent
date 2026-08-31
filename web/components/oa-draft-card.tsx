@@ -4,7 +4,7 @@ import { useState } from "react";
 import { FileCheck2, Loader2, CheckCircle2, XCircle } from "lucide-react";
 import {
   createApproval,
-  createEvent,
+  saveCalendarEvent,
   createTask,
   type OaDraft,
 } from "@/lib/api";
@@ -77,6 +77,7 @@ export function OaDraftCard({ draft }: { draft: OaDraft }) {
   const badge =
     draft.kind === "approval" ? APPROVAL_TYPE_LABEL[String(draft.type)] ?? String(draft.type) : null;
   const confirmLabel = draft.kind === "approval" ? "确认提交" : "确认创建";
+  const actionLabel = draft.kind === "calendar" && draft.event_id ? "确认更新" : confirmLabel;
   const rows = draftRows(draft);
 
   async function confirm() {
@@ -94,15 +95,24 @@ export function OaDraftCard({ draft }: { draft: OaDraft }) {
           ? `已创建，指派给 ${task.assignee_name}`
           : "已创建任务";
       } else if (draft.kind === "calendar") {
-        const ev = await createEvent({
+        const { event: ev, operation } = await saveCalendarEvent({
+          event_id: draft.event_id ? String(draft.event_id) : undefined,
           title: String(draft.title),
           start: String(draft.start ?? ""),
-          end: draft.end ? String(draft.end) : undefined,
-          location: draft.location ? String(draft.location) : undefined,
-          attendees: Array.isArray(draft.attendees) ? (draft.attendees as string[]) : undefined,
+          end: Object.prototype.hasOwnProperty.call(draft, "end")
+            ? String(draft.end ?? "")
+            : undefined,
+          location: Object.prototype.hasOwnProperty.call(draft, "location")
+            ? String(draft.location ?? "")
+            : undefined,
+          attendees: Object.prototype.hasOwnProperty.call(draft, "attendees")
+            ? (Array.isArray(draft.attendees) ? (draft.attendees as string[]) : [])
+            : undefined,
         });
         if (typeof window !== "undefined") window.dispatchEvent(new Event("oa-calendar-changed"));
-        note = `已创建日程：${new Date(ev.start_at * 1000).toLocaleString()}`;
+        note = `${operation === "updated" ? "已更新" : "已创建"}日程：${new Date(
+          ev.start_at * 1000,
+        ).toLocaleString()}`;
       } else {
         const appr = await createApproval({
           type: String(draft.type ?? "general"),
@@ -160,7 +170,7 @@ export function OaDraftCard({ draft }: { draft: OaDraft }) {
             className="btn-accent h-8 px-3 text-sm disabled:opacity-50"
           >
             {status === "submitting" ? <Loader2 size={14} className="animate-spin" /> : null}
-            {confirmLabel}
+            {actionLabel}
           </button>
           <button
             onClick={() => commit({ status: "cancelled", note: "" })}

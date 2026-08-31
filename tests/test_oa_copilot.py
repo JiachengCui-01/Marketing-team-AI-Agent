@@ -84,6 +84,34 @@ class OaHandlerTests(unittest.TestCase):
         self.assertIn("没有", handlers["query_tasks"]({}))
         self.assertIn("没有", handlers["query_calendar"]({}))
 
+    def test_calendar_update_draft_carries_existing_event_id(self) -> None:
+        created = self.client.post(
+            "/api/calendar",
+            headers=self.alice,
+            json={"title": "新品选品会议", "start": "2099-01-02T08:00"},
+        ).json()["event"]
+        events: list[tuple[str, dict]] = []
+        handlers = build_oa_handlers(
+            on_event=lambda event, payload: events.append((event, payload)),
+            user_id=self.alice_id,
+        )
+
+        listed = handlers["query_calendar"]({})
+        self.assertIn(created["id"], listed)
+        result = handlers["draft_event"](
+            {
+                "event_id": created["id"],
+                "title": "新品选品会议",
+                "start": "2099-01-02T08:00",
+                "location": "会议室 701",
+            }
+        )
+        draft = next(payload for event, payload in events if event == "oa_draft")
+        self.assertEqual(draft["event_id"], created["id"])
+        self.assertEqual(draft["location"], "会议室 701")
+        self.assertNotIn("attendees", draft)
+        self.assertIn("确认更新", result)
+
     def test_oa_stream_requires_auth_and_prompt(self) -> None:
         self.assertEqual(self.client.get("/api/oa/stream?prompt=hi").status_code, 401)
         self.assertEqual(

@@ -2052,14 +2052,32 @@ def get_event(event_id: str) -> dict | None:
         return _event_row(row) if row else None
 
 
+def find_matching_event(owner_id: str, title: str, start_at: float) -> dict | None:
+    """Return the active event with the same owner, title and start instant."""
+    normalized_title = title.strip().casefold()
+    for event in list_events(owner_id):
+        if event.get("status", "active") != "active":
+            continue
+        if str(event.get("title") or "").strip().casefold() != normalized_title:
+            continue
+        if abs(float(event["start_at"]) - start_at) <= 1:
+            return event
+    return None
+
+
 def update_event(event_id: str, owner_id: str, fields: dict) -> dict | None:
     """Update an event's editable fields and/or status. Only the owner may edit."""
     _ensure()
-    allowed = ("title", "start_at", "end_at", "location", "description", "status")
+    required_fields = ("title", "start_at", "status")
+    nullable_fields = ("end_at", "location", "description")
     sets = []
     args: list = []
-    for key in allowed:
+    for key in required_fields:
         if key in fields and fields[key] is not None:
+            sets.append(f"{key} = ?")
+            args.append(fields[key])
+    for key in nullable_fields:
+        if key in fields:
             sets.append(f"{key} = ?")
             args.append(fields[key])
     if "attendees" in fields and fields["attendees"] is not None:

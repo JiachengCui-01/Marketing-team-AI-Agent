@@ -74,13 +74,18 @@ OA_TOOLS: list[dict] = [
     {
         "name": "draft_event",
         "description": (
-            "Draft a calendar event / meeting. Does NOT save — prepares a draft the user confirms. "
-            "Use for '约张三周四下午2点开会'. Compute absolute ISO datetimes from the current time "
-            "given in the system prompt."
+            "Draft a calendar event / meeting to create or update. Does NOT save — prepares a draft "
+            "the user confirms. For an update, first call query_calendar and pass the existing event_id. "
+            "For a different/new event, omit event_id. Compute absolute ISO datetimes from the current "
+            "time given in the system prompt."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
+                "event_id": {
+                    "type": "string",
+                    "description": "Existing calendar event ID when modifying that event; omit for a new event.",
+                },
                 "title": {"type": "string"},
                 "start": {"type": "string", "description": "ISO 8601 start datetime, e.g. 2026-07-30T14:00."},
                 "end": {"type": "string", "description": "ISO 8601 end datetime (optional)."},
@@ -189,12 +194,19 @@ def build_oa_handlers(
             "kind": "calendar",
             "title": (str(inp.get("title") or "会议").strip() or "会议"),
             "start": str(inp.get("start") or ""),
-            "end": str(inp.get("end") or ""),
-            "location": str(inp.get("location") or ""),
-            "attendees": [str(a) for a in attendees] if isinstance(attendees, list) else [],
         }
+        event_id = str(inp.get("event_id") or "").strip()
+        if event_id:
+            draft["event_id"] = event_id
+        if "end" in inp:
+            draft["end"] = str(inp.get("end") or "")
+        if "location" in inp:
+            draft["location"] = str(inp.get("location") or "")
+        if "attendees" in inp:
+            draft["attendees"] = [str(a) for a in attendees] if isinstance(attendees, list) else []
         _emit_draft(draft)
-        return "已生成日程草稿并展示给用户确认。请一句话提醒用户核对时间后点击“确认创建”。"
+        action = "更新" if event_id else "创建"
+        return f"已生成日程{action}草稿并展示给用户确认。请一句话提醒用户核对后点击“确认{action}”。"
 
     def query_calendar(_inp: dict) -> str:
         if not user_id:
@@ -206,10 +218,11 @@ def build_oa_handlers(
         rows = db.list_events(user_id, since=_t.time())
         if not rows:
             return "你近期没有日程安排。"
-        lines = [f"你有 {len(rows)} 个即将到来的日程："]
+        lines = [f"你有 {len(rows)} 个即将到来的日程（修改时把对应 ID 传给 draft_event.event_id）："]
         for r in rows[:10]:
             when = _t.strftime("%m-%d %H:%M", _t.localtime(r["start_at"]))
-            lines.append(f"- {when} {r['title']}")
+            location = f"，地点：{r['location']}" if r.get("location") else ""
+            lines.append(f"- ID={r['id']}；{when} {r['title']}{location}")
         return "\n".join(lines)
 
     def search_knowledge_base(inp: dict) -> str:

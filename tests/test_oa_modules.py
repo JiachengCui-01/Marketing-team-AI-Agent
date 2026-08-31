@@ -125,6 +125,60 @@ class OaModulesTests(unittest.TestCase):
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["title"], "周会")
 
+    def test_calendar_same_event_is_replaced_but_different_event_is_added(self) -> None:
+        first = self.client.post(
+            "/api/calendar",
+            headers=self.alice,
+            json={
+                "title": "新品选品会议",
+                "start": "2099-01-02T08:00",
+                "end": "2099-01-02T09:00",
+                "location": "公司线下会议室",
+                "attendees": ["Bob"],
+            },
+        ).json()
+        replaced = self.client.post(
+            "/api/calendar",
+            headers=self.alice,
+            json={
+                "title": "新品选品会议",
+                "start": "2099-01-02T08:00",
+                "end": "2099-01-02T09:00",
+                "location": "公司线下会议室 701",
+                "attendees": ["Bob", "Alice"],
+            },
+        ).json()
+
+        self.assertEqual(first["operation"], "created")
+        self.assertEqual(replaced["operation"], "updated")
+        self.assertEqual(replaced["event"]["id"], first["event"]["id"])
+        self.assertEqual(replaced["event"]["location"], "公司线下会议室 701")
+        self.assertEqual(replaced["event"]["attendees"], ["Bob", "Alice"])
+        self.assertEqual(len(self.client.get("/api/calendar", headers=self.alice).json()["events"]), 1)
+
+        rescheduled = self.client.post(
+            "/api/calendar",
+            headers=self.alice,
+            json={
+                "event_id": first["event"]["id"],
+                "title": "新品选品会议",
+                "start": "2099-01-02T11:00",
+                "end": "2099-01-02T12:00",
+            },
+        ).json()
+        self.assertEqual(rescheduled["operation"], "updated")
+        self.assertEqual(rescheduled["event"]["id"], first["event"]["id"])
+        self.assertEqual(len(self.client.get("/api/calendar", headers=self.alice).json()["events"]), 1)
+
+        added = self.client.post(
+            "/api/calendar",
+            headers=self.alice,
+            json={"title": "另一个会议", "start": "2099-01-02T10:00"},
+        ).json()
+        self.assertEqual(added["operation"], "created")
+        self.assertNotEqual(added["event"]["id"], first["event"]["id"])
+        self.assertEqual(len(self.client.get("/api/calendar", headers=self.alice).json()["events"]), 2)
+
     def test_calendar_bad_start(self) -> None:
         r = self.client.post(
             "/api/calendar", headers=self.alice, json={"title": "会", "start": "not-a-date"}
@@ -147,10 +201,13 @@ class OaModulesTests(unittest.TestCase):
 
         # edit title
         edited = self.client.patch(
-            f"/api/calendar/{ev['id']}", headers=self.alice, json={"title": "季度周会"}
+            f"/api/calendar/{ev['id']}",
+            headers=self.alice,
+            json={"title": "季度周会", "attendees": ["Bob"]},
         )
         self.assertEqual(edited.status_code, 200, edited.text)
         self.assertEqual(edited.json()["event"]["title"], "季度周会")
+        self.assertEqual(edited.json()["event"]["attendees"], ["Bob"])
 
         # mark complete
         done = self.client.patch(
