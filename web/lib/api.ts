@@ -90,7 +90,6 @@ export type ProfilePayload = {
   password?: string;
   username: string;
   real_name?: string;
-  id_card?: string;
   avatar?: string | null;
   phone?: string | null;
   email?: string | null;
