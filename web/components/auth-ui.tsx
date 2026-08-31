@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Modal } from "@/components/modal";
 import { KbManager } from "@/components/kb-manager";
 import {
@@ -316,7 +316,6 @@ function RegisterPanel({
     password: "",
     username: "",
     real_name: "",
-    id_card: "",
     avatar: null,
     company: "",
     title: "",
@@ -324,18 +323,12 @@ function RegisterPanel({
   });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const idCardValid = useMemo(() => !form.id_card || isValidChinaId(form.id_card), [form.id_card]);
-
   function set<K extends keyof ProfilePayload>(key: K, value: ProfilePayload[K]) {
     setForm((old) => ({ ...old, [key]: value }));
   }
 
   async function submit() {
     setError(null);
-    if (!idCardValid) {
-      setError(t.idCardError);
-      return;
-    }
     setBusy(true);
     try {
       const res = await registerUser({
@@ -374,7 +367,6 @@ function RegisterPanel({
           <TextInput label={t.passwordRequired} type="password" value={form.password ?? ""} onChange={(v) => set("password", v)} placeholder={t.passwordHint} />
           <TextInput label={t.usernameRequired} value={form.username} onChange={(v) => set("username", v)} placeholder={t.usernameHint} />
           <TextInput label={t.realNameRequired} value={form.real_name ?? ""} onChange={(v) => set("real_name", v)} placeholder={t.realNameHint} />
-          <TextInput label={t.idCardRequired} value={form.id_card ?? ""} onChange={(v) => set("id_card", v.toUpperCase())} placeholder={t.idCardHint} error={form.id_card && !idCardValid ? t.idCardError : undefined} />
           <TextInput label={t.company} value={form.company ?? ""} onChange={(v) => set("company", v)} placeholder={t.companyHint} />
           <TextInput label={t.title} value={form.title ?? ""} onChange={(v) => set("title", v)} placeholder={t.titleHint} />
           <label className="md:col-span-2 text-xs font-medium text-fg-muted">
@@ -1253,7 +1245,7 @@ function ProfileDialog({
         <div className="min-w-0">
           <p className="text-sm text-fg-muted">{t.loginAccount}: {user.account}</p>
           <p className="text-sm text-fg-muted">{t.realName}: {user.real_name}</p>
-          <p className="text-sm text-fg-muted">{t.idCard}: {user.id_card_masked}</p>
+          {user.id_card_masked ? <p className="text-sm text-fg-muted">{t.idCard}: {user.id_card_masked}</p> : null}
         </div>
         <AvatarPicker avatar={form.avatar ?? null} onChange={(avatar) => set("avatar", avatar)} />
       </div>
@@ -1452,19 +1444,4 @@ function ConfirmDialog({
       </div>
     </Modal>
   );
-}
-
-function isValidChinaId(id: string): boolean {
-  const value = id.trim().toUpperCase();
-  if (!/^\d{17}[\dX]$/.test(value)) return false;
-  const birth = value.slice(6, 14);
-  const year = Number(birth.slice(0, 4));
-  const month = Number(birth.slice(4, 6));
-  const day = Number(birth.slice(6, 8));
-  const date = new Date(year, month - 1, day);
-  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return false;
-  const weights = [7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2];
-  const checks = "10X98765432";
-  const total = weights.reduce((sum, weight, index) => sum + Number(value[index]) * weight, 0);
-  return checks[total % 11] === value[17];
 }
