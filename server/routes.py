@@ -98,7 +98,14 @@ def register(payload: dict = Body(...)) -> dict:
         "password_hash": auth.hash_password(str(payload.get("password") or "")),
         "username": auth.validate_required_text(payload.get("username"), "用户名"),
         "real_name": auth.validate_required_text(payload.get("real_name"), "真实姓名"),
-        "id_card": auth.validate_china_id_card(payload.get("id_card")),
+        # ID cards are no longer collected during registration. Keep accepting
+        # a supplied value for older clients, while preserving compatibility
+        # with existing databases whose id_card column is NOT NULL.
+        "id_card": (
+            auth.validate_china_id_card(payload.get("id_card"))
+            if str(payload.get("id_card") or "").strip()
+            else ""
+        ),
         "avatar": auth.validate_avatar(payload.get("avatar")),
         **auth.validate_contact_fields(payload),
     }
