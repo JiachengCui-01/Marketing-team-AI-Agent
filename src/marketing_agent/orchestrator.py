@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from typing import Callable
 
-import anthropic
-
+from . import llm_client
 from .agents import analytics_agent, content_agent, research_agent
+from .domain import BRAND, business_context_block
 from .config import (
     MAX_TOOL_ROUNDS,
     MODEL_ID,
@@ -20,36 +20,48 @@ from .conversation import Conversation
 from .source_scoring import annotate_markdown_with_source_tiers
 from .tools.delegation_tools import DELEGATION_TOOLS
 
-SYSTEM = """You are the chief of staff for an enterprise marketing team. Your job is to
-understand the user's request, decompose it into specialist tasks, dispatch those tasks
-to the right specialists, and synthesize their output into a single clean deliverable.
+SYSTEM = f"""You are the head of marketing at {BRAND}. Your job is to understand the
+request, decompose it into specialist tasks, dispatch those tasks to the right
+specialists, and synthesize their output into a single clean deliverable.
+
+{business_context_block()}
 
 You have three specialists, accessible only via the delegate_* tools:
 
-- delegate_to_content_agent — for any copywriting (social, blog, email, ads). The
-  content agent can also produce PDF deliverables when the user asks for one.
-- delegate_to_analytics_agent — for any CSV/data/KPI/performance analysis
-- delegate_to_research_agent — for any external/market/competitor/trend research
+- delegate_to_content_agent — for any customer-facing copy: marketplace listings
+  (Amazon, Wayfair), our own product pages, social posts and video scripts, email,
+  ads, blog guides. It can also produce PDF deliverables such as a spec sheet,
+  category catalog page, or competitor comparison.
+- delegate_to_analytics_agent — for any sales/advertising/returns data analysis:
+  ACOS, conversion rate, AOV, return rate, margin after landed cost, inventory turns.
+- delegate_to_research_agent — for any external information: US furniture demand and
+  category trends, competitor listings and pricing, marketplace policy, tariffs and
+  duties, product-safety rules.
 
 Hard rules:
 
-1. NEVER write marketing copy yourself. Always delegate to the content agent.
-2. NEVER compute metrics or interpret CSVs yourself. Always delegate to analytics.
+1. NEVER write customer-facing copy yourself. Always delegate to the content agent.
+2. NEVER compute metrics or interpret data files yourself. Always delegate to analytics.
 3. NEVER claim external facts without delegating to research.
-4. When multiple specialists are needed, prefer parallel dispatch (multiple tool_use
+4. NEVER state a specific dimension, material, weight capacity, assembly time,
+   delivery window, or certification that did not come from the user, an attached
+   file, or a cited source. Pass along what you were given; where a figure is
+   missing, keep the specialist's [confirm ...] placeholder in the final answer
+   rather than filling it in.
+5. When multiple specialists are needed, prefer parallel dispatch (multiple tool_use
    blocks in one response) when tasks are independent.
-5. After all specialists return, write a final synthesized response in well-formatted
+6. After all specialists return, write a final synthesized response in well-formatted
    markdown.
-6. If a request clearly fits one specialist, just delegate to that one.
-7. If a specialist returns an unavailable/error result, do not retry it.
-8. When the user asks to generate/create/make a PDF or other file deliverable,
+7. If a request clearly fits one specialist, just delegate to that one.
+8. If a specialist returns an unavailable/error result, do not retry it.
+9. When the user asks to generate/create/make a PDF or other file deliverable,
    delegate to the content agent immediately. If product, audience, or tone details
    are missing, make reasonable assumptions in the specialist task instead of asking
-   a clarification question first.
-9. If your previous assistant message asked a clarification question and the latest
-   user message answers it, merge that answer into the original task and execute the
-   task. Do not ask the same clarification again.
-10. When synthesizing research specialist output, preserve inline citation links at
+   a clarification question first — but never assume a physical spec.
+10. If your previous assistant message asked a clarification question and the latest
+    user message answers it, merge that answer into the original task and execute the
+    task. Do not ask the same clarification again.
+11. When synthesizing research specialist output, preserve inline citation links at
     the end of factual sentences or bullets. Do not drop the specialist's source
     URLs or Source Credibility notes; the UI depends on those URLs to render source
     capsules and source-tier risk labels.
@@ -58,14 +70,16 @@ Be decisive. Don't ask clarifying questions unless the request is genuinely ambi
 """
 
 
-def _dispatch(client: anthropic.Anthropic, name: str, payload: dict, on_event=None) -> str:
-    specialist_client = anthropic.Anthropic()
+def _dispatch(client: llm_client.DeepSeek, name: str, payload: dict, on_event=None) -> str:
+    # Specialists reuse the orchestrator's client: it is stateless per call and its
+    # underlying HTTP connection pool is thread-safe, so per-dispatch clients would
+    # only add TLS handshakes.
     if name == "delegate_to_content_agent":
-        return content_agent.run(specialist_client, on_event=on_event, **payload)
+        return content_agent.run(client, on_event=on_event, **payload)
     if name == "delegate_to_analytics_agent":
-        return analytics_agent.run(specialist_client, **payload)
+        return analytics_agent.run(client, **payload)
     if name == "delegate_to_research_agent":
-        return research_agent.run(specialist_client, **payload)
+        return research_agent.run(client, **payload)
     return f"Error: unknown specialist '{name}'."
 
 
@@ -78,16 +92,25 @@ def _task_text(payload: dict) -> str:
 
 def _specialist_method(name: str) -> str:
     if name == "delegate_to_content_agent":
-        return "Use the content SOP to turn the request into polished marketing copy or a shareable deliverable."
+        return (
+            "Apply the channel SOP to turn the brief into publish-ready copy — listing, "
+            "product page, social, email, or a shareable deliverable."
+        )
     if name == "delegate_to_analytics_agent":
-        return "Inspect the supplied data, calculate the requested metrics, and summarize decision-useful findings."
+        return (
+            "Run pandas over the supplied data, compute the sales/ad/returns metrics "
+            "requested, and summarize decision-useful findings."
+        )
     if name == "delegate_to_research_agent":
-        return "Gather market or competitor evidence, check source quality, and preserve citations for synthesis."
+        return (
+            "Gather evidence on the US furniture market, competing listings, or policy "
+            "changes; check source quality and preserve citations for synthesis."
+        )
     return "Complete the assigned specialist task and return concise findings."
 
 
 def run_orchestrator(
-    client: anthropic.Anthropic,
+    client: llm_client.DeepSeek,
     conversation: Conversation,
     user_message,
     on_event: Callable[[str, dict], None] | None = None,

@@ -738,36 +738,46 @@ function looksAmbiguous(text: string, memory?: Partial<MarketingMemoryProfile> |
   );
 }
 
+// Slot-detection vocabulary for the clarification engine. One definition, used by
+// isUnderSpecifiedMarketingTask, missingMarketingSlots, and analyzeMarketingPrompt —
+// these three used to carry three drifting copies of the same regexes.
+const SLOT_PATTERNS = {
+  // Does the request even look like a content-generation ask?
+  intent:
+    /listing|文案|商详|详情页|落地页|社媒|推广|宣传|广告|海报|邮件|edm|脚本|短视频|博客|post|copy|caption|script|ad\b|social|blog|bullet|五点/,
+  verb: /写|生成|编写|创作|出一|做|produce|write|generate|create|draft/,
+  channel:
+    /平台|渠道|亚马逊|amazon|asin|wayfair|overstock|独立站|自有站|官网|shopify|instagram|ins\b|meta|facebook|pinterest|tiktok|抖音|短视频|邮件|email|edm|newsletter|谷歌|google|博客|blog|listing|商详|详情页/,
+  audience:
+    /受众|人群|用户|客户|消费者|买家|房主|业主|租客|新房|搬家|首次|装修|设计师|美国|北美|audience|customer|homeowner|renter|buyer|persona|segment|apartment/,
+  tone: /语气|语调|风格|调性|口吻|专业|温馨|亲切|真实|高级|精致|极简|中古|北欧|正式|tone|voice|style|premium|minimal|warm|professional|cozy/,
+  format:
+    /字数|标题|正文|五点|bullet|cta|行动号召|格式|篇幅|长度|条|篇|版本|hashtag|话题|caption|headline|body|length|format|规格单|尺寸表|spec sheet/,
+  // Furniture-specific product detail: the physical attributes that decide the copy.
+  product:
+    /卖点|亮点|材质|实木|橡木|胡桃|松木|板式|布艺|绒|皮|金属|尺寸|规格|承重|组装|安装|配送|物流|颜色|饰面|款式|系列|品牌|产品|新品|沙发|沙发床|床架|床头|餐桌|餐椅|茶几|边柜|斗柜|书桌|衣柜|储物柜|柜子|sofa|couch|sectional|loveseat|bed\b|headboard|dining|table|chair|desk|cabinet|dresser|sideboard|nightstand|material|oak|walnut|dimension|assembly|benefit|product/,
+  // Furniture nouns alone, for category detection.
+  furniture:
+    /沙发|床架|床头|餐桌|餐椅|茶几|边柜|斗柜|书桌|衣柜|储物柜|柜子|家具|sofa|couch|sectional|loveseat|bed frame|headboard|dining table|dining chair|coffee table|side table|desk|cabinet|dresser|sideboard|nightstand|furniture/,
+} as const;
+
 function isUnderSpecifiedMarketingTask(text: string, memory?: Partial<MarketingMemoryProfile> | null): boolean {
   const compact = text.replace(/\s+/g, "").toLowerCase();
   const normalized = text.toLowerCase();
-  const isMarketingGeneration =
-    /营销|文案|种草|推广|宣传|广告|海报|社媒|小红书|公众号|朋友圈|短视频|邮件|linkedin|post|copy|campaign|ad|social/.test(compact) &&
-    /写|生成|编写|创作|出一|做|produce|write|generate|create|draft/.test(compact);
+  const isMarketingGeneration = SLOT_PATTERNS.intent.test(compact) && SLOT_PATTERNS.verb.test(compact);
   if (!isMarketingGeneration) return false;
 
-  const hasPlatform =
-    /平台|渠道|小红书|抖音|公众号|朋友圈|视频号|微博|知乎|b站|邮件|官网|社群|私域|linkedin|twitter|xhs|instagram|facebook|tiktok|youtube|newsletter|email/.test(compact);
-  const hasAudience =
-    /受众|人群|用户|客户|消费者|女生|男性|女性|学生|白领|宝妈|决策者|企业|b2b|b2c|audience|customer|user|buyer|persona|segment/.test(compact);
-  const hasTone =
-    /语气|语调|风格|调性|口吻|专业|亲切|活泼|高级|年轻|正式|幽默|tone|voice|style|professional|friendly|formal|playful/.test(compact);
-  const hasFormat =
-    /字数|标题|正文|cta|行动号召|格式|篇幅|长度|条|篇|版本|hashtag|话题|caption|headline|body|length|format/.test(compact);
-  const hasProductDetail =
-    /卖点|亮点|功能|价格|材质|颜色|尺码|款式|系列|品牌|产品|服务|新品|新推出|手机|ai|feature|benefit|price|material|brand|product/.test(compact);
-
   const remembered = memorySlots(memory);
-  const effectivePlatform = hasPlatform || remembered.hasPlatform;
-  const effectiveAudience = hasAudience || remembered.hasAudience;
-  const effectiveTone = hasTone || remembered.hasTone;
-  const effectiveFormat = hasFormat || remembered.hasFormat;
-  const effectiveProduct = hasProductDetail || remembered.hasProduct;
+  const effectivePlatform = SLOT_PATTERNS.channel.test(compact) || remembered.hasPlatform;
+  const effectiveAudience = SLOT_PATTERNS.audience.test(compact) || remembered.hasAudience;
+  const effectiveTone = SLOT_PATTERNS.tone.test(compact) || remembered.hasTone;
+  const effectiveFormat = SLOT_PATTERNS.format.test(compact) || remembered.hasFormat;
+  const effectiveProduct = SLOT_PATTERNS.product.test(compact) || remembered.hasProduct;
   const filledSlots = [effectivePlatform, effectiveAudience, effectiveTone, effectiveFormat, effectiveProduct].filter(Boolean).length;
   if (filledSlots < 3) return true;
 
   return (
-    /文案|copy|post|caption/.test(normalized) &&
+    /文案|listing|copy|post|caption/.test(normalized) &&
     !effectivePlatform &&
     (!effectiveAudience || !effectiveTone || !effectiveFormat)
   );
@@ -786,34 +796,27 @@ function buildClarificationReply(text: string, locale: "zh" | "en", memory?: Par
 function missingMarketingSlots(text: string, locale: "zh" | "en", memory?: Partial<MarketingMemoryProfile> | null): string[] {
   const compact = text.replace(/\s+/g, "").toLowerCase();
   const zh = locale === "zh";
-  const hasPlatform =
-    /平台|渠道|小红书|抖音|公众号|朋友圈|视频号|微博|知乎|b站|邮件|官网|社群|私域|linkedin|twitter|xhs|instagram|facebook|tiktok|youtube|newsletter|email/.test(compact);
-  const hasAudience =
-    /受众|人群|用户|客户|消费者|女生|男性|女性|学生|白领|宝妈|决策者|企业|b2b|b2c|audience|customer|user|buyer|persona|segment/.test(compact);
-  const hasTone =
-    /语气|语调|风格|调性|口吻|专业|亲切|活泼|高级|年轻|正式|幽默|tone|voice|style|professional|friendly|formal|playful/.test(compact);
-  const hasFormat =
-    /字数|标题|正文|cta|行动号召|格式|篇幅|长度|条|篇|版本|hashtag|话题|caption|headline|body|length|format/.test(compact);
-  const hasProductDetail =
-    /卖点|亮点|功能|价格|材质|颜色|尺码|款式|系列|品牌|产品|服务|新品|新推出|手机|ai|feature|benefit|price|material|brand|product/.test(compact);
-
   const remembered = memorySlots(memory);
   const out: string[] = [];
-  if (!(hasPlatform || remembered.hasPlatform)) out.push(zh ? "平台/渠道" : "platform/channel");
-  if (!(hasProductDetail || remembered.hasProduct)) out.push(zh ? "产品/核心卖点" : "product/core benefit");
-  if (!(hasAudience || remembered.hasAudience)) out.push(zh ? "目标受众" : "target audience");
-  if (!(hasTone || remembered.hasTone)) out.push(zh ? "语气/风格" : "tone/style");
-  if (!(hasFormat || remembered.hasFormat)) out.push(zh ? "字数/格式/CTA" : "length/format/CTA");
+  if (!(SLOT_PATTERNS.channel.test(compact) || remembered.hasPlatform)) out.push(zh ? "渠道/平台" : "channel");
+  if (!(SLOT_PATTERNS.product.test(compact) || remembered.hasProduct)) out.push(zh ? "产品/核心卖点" : "product/core benefit");
+  if (!(SLOT_PATTERNS.audience.test(compact) || remembered.hasAudience)) out.push(zh ? "目标客户" : "target customer");
+  if (!(SLOT_PATTERNS.tone.test(compact) || remembered.hasTone)) out.push(zh ? "语气/风格" : "tone/style");
+  if (!(SLOT_PATTERNS.format.test(compact) || remembered.hasFormat)) out.push(zh ? "篇幅/格式/CTA" : "length/format/CTA");
   return out;
 }
 
-function detectMarketingPlatform(compact: string): "xhs" | "linkedin" | "email" | "short-video" | "owned" | "other-social" | null {
-  if (/知乎|微博|b站|bilibili|instagram|facebook|twitter|threads/.test(compact)) return "other-social";
-  if (/小红书|xhs|littleredbook/.test(compact)) return "xhs";
-  if (/linkedin|领英/.test(compact)) return "linkedin";
-  if (/邮件|email|newsletter/.test(compact)) return "email";
-  if (/抖音|短视频|视频号|tiktok|youtube/.test(compact)) return "short-video";
-  if (/朋友圈|社群|私域/.test(compact)) return "owned";
+type MarketingChannel = "amazon" | "wayfair" | "dtc" | "instagram" | "pinterest" | "tiktok" | "email" | "other-social";
+
+function detectMarketingPlatform(compact: string): MarketingChannel | null {
+  if (/亚马逊|amazon|asin|fba/.test(compact)) return "amazon";
+  if (/wayfair|overstock/.test(compact)) return "wayfair";
+  if (/独立站|自有站|官网|shopify|商详|详情页|落地页|product page/.test(compact)) return "dtc";
+  if (/pinterest|pin\b/.test(compact)) return "pinterest";
+  if (/tiktok|抖音|短视频|视频号|reels/.test(compact)) return "tiktok";
+  if (/instagram|ins\b|meta|facebook/.test(compact)) return "instagram";
+  if (/邮件|email|newsletter|edm/.test(compact)) return "email";
+  if (/知乎|微博|twitter|threads|youtube/.test(compact)) return "other-social";
   return null;
 }
 
@@ -844,50 +847,39 @@ function memorySlots(memory?: Partial<MarketingMemoryProfile> | null) {
 
 function analyzeMarketingPrompt(text: string, memory?: Partial<MarketingMemoryProfile> | null) {
   const compact = text.replace(/\s+/g, "").toLowerCase();
-  const isMarketingGeneration =
-    /营销|文案|种草|推广|宣传|广告|海报|社媒|小红书|公众号|朋友圈|短视频|邮件|linkedin|post|copy|campaign|ad|social/.test(compact) &&
-    /写|生成|编写|创作|出一|做|produce|write|generate|create|draft/.test(compact);
-  const hasPlatform =
-    /平台|渠道|小红书|抖音|公众号|朋友圈|视频号|微博|知乎|b站|邮件|官网|社群|私域|linkedin|twitter|xhs|instagram|facebook|tiktok|youtube|newsletter|email/.test(compact);
-  const hasAudience =
-    /受众|人群|用户|客户|消费者|女生|男性|女性|学生|白领|宝妈|决策者|企业|b2b|b2c|audience|customer|user|buyer|persona|segment/.test(compact);
-  const hasTone =
-    /语气|语调|风格|调性|口吻|专业|亲切|活泼|高级|年轻|正式|幽默|tone|voice|style|professional|friendly|formal|playful/.test(compact);
-  const hasFormat =
-    /字数|标题|正文|cta|行动号召|格式|篇幅|长度|条|篇|版本|hashtag|话题|caption|headline|body|length|format/.test(compact);
-  const hasProductDetail =
-    /卖点|亮点|功能|价格|材质|面料|颜色|尺码|版型|显瘦|舒适|透气|百搭|系列|品牌|产品|服务|新品|新推出|手机|ai|feature|benefit|price|material|brand|product/.test(compact);
+  const isMarketingGeneration = SLOT_PATTERNS.intent.test(compact) && SLOT_PATTERNS.verb.test(compact);
 
   const remembered = memorySlots(memory);
   const platform = detectMarketingPlatform(compact) ?? remembered.platform;
 
-  const category =
-    /服装|衣服|女装|男装|穿搭|裙|裤|外套|衬衫|t恤|鞋|包|apparel|fashion|outfit/.test(compact)
-      ? "apparel"
-      : /saas|b2b|企业|客户|系统|平台|软件|工具|解决方案|crm/.test(compact)
-        ? "b2b"
-        : "general";
+  // The company sells one category, so there is one product tree rather than the
+  // apparel / B2B split the generic version carried.
+  const category = SLOT_PATTERNS.furniture.test(compact) ? "furniture" : "general";
 
-  let productLabel = "这个产品/服务";
-  if (category === "apparel") productLabel = "这款服装新品";
-  else if (category === "b2b") productLabel = "这个企业产品";
-
+  let productLabel = category === "furniture" ? "这件家具" : "这个产品";
   const productMatch =
     text.match(/(?:为|给|围绕|推广|宣传)([^，。,.!?！？\n]{2,24}?)(?:写|生成|编写|创作|做|的)/) ||
-    text.match(/([^，。,.!?！？\n]{2,20}?)(?:营销文案|推广文案|种草文案|宣传文案|广告文案)/);
+    text.match(/([^，。,.!?！？\n]{2,20}?)(?:listing|商详|详情页|营销文案|推广文案|宣传文案|广告文案)/i);
   if (productMatch?.[1]) {
-    productLabel = productMatch[1].replace(/^(公司|我们|新推出的|推出的)/, "").trim() || productLabel;
+    // Strip the request wrapper the capture group inevitably drags along:
+    // "帮我写个沙发的推广文案" would otherwise yield the label "帮我写个沙发的".
+    const cleaned = productMatch[1]
+      .replace(/^(帮我|帮忙|请|麻烦|我想|我要|我们)?\s*(写|做|生成|编写|创作|出|来|搞)?\s*(一下|一个|一份|一条|个|份|条)?/, "")
+      .replace(/^(公司|新推出的|推出的|这款|这张|这件|那款)/, "")
+      .replace(/的$/, "")
+      .trim();
+    if (cleaned.length >= 2) productLabel = cleaned;
   }
 
   return {
     isMarketingGeneration,
     category,
     productLabel,
-    hasPlatform: hasPlatform || remembered.hasPlatform,
-    hasAudience: hasAudience || remembered.hasAudience,
-    hasTone: hasTone || remembered.hasTone,
-    hasFormat: hasFormat || remembered.hasFormat,
-    hasProductDetail: hasProductDetail || remembered.hasProduct,
+    hasPlatform: SLOT_PATTERNS.channel.test(compact) || remembered.hasPlatform,
+    hasAudience: SLOT_PATTERNS.audience.test(compact) || remembered.hasAudience,
+    hasTone: SLOT_PATTERNS.tone.test(compact) || remembered.hasTone,
+    hasFormat: SLOT_PATTERNS.format.test(compact) || remembered.hasFormat,
+    hasProductDetail: SLOT_PATTERNS.product.test(compact) || remembered.hasProduct,
     platform,
   };
 }
@@ -904,7 +896,7 @@ function getClarifySuggestions(text: string, locale: "zh" | "en", memory?: Parti
   const compact = text.replace(/\s+/g, "").toLowerCase();
   const isZh = locale === "zh";
   const isAnalysis = /分析|总结|复盘|analy[sz]e|summari[sz]e|review/.test(compact);
-  const isPlan = /策划|计划|规划|方案|plan|campaign|strategy/.test(compact);
+  const isPlan = /策划|计划|规划|方案|上架|plan|campaign|strategy|launch/.test(compact);
 
   const dynamicQuestion = getInitialClarifyStep(text, locale, memory);
   if (dynamicQuestion) return dynamicQuestion.suggestions;
@@ -912,139 +904,85 @@ function getClarifySuggestions(text: string, locale: "zh" | "en", memory?: Parti
   const dynamicMarketing = buildDynamicMarketingEntrySuggestions(text, locale, memory);
   if (dynamicMarketing) return dynamicMarketing;
 
-  const other: ClarifySuggestion = isZh
-    ? {
-        id: "other",
-        title: "其它",
-        description: "自己补充目标、对象、格式或限制条件",
-        detail: "",
-        custom: true,
-      }
-    : {
-        id: "other",
-        title: "Other",
-        description: "Add your own goal, audience, format, or constraints",
-        detail: "",
-        custom: true,
-      };
+  const other = makeOtherSuggestion(locale);
 
   if (isAnalysis) {
     return [
-      isZh
-        ? {
-            id: "competitor",
-            title: "竞品分析",
-            description: "对比对象、差异点、机会与可执行建议",
-            detail: "请按竞品分析 SOP 完成：明确分析对象与竞品范围，输出竞争格局、核心卖点对比、渠道/内容表现、差异化机会、风险判断和下一步行动建议。",
-          }
-        : {
-            id: "competitor",
-            title: "Competitive analysis",
-            description: "Compare players, gaps, opportunities, and actions",
-            detail: "Use a competitive analysis SOP: define the target and competitors, then cover positioning, feature/message comparison, channel/content signals, differentiation opportunities, risks, and next actions.",
-          },
-      isZh
-        ? {
-            id: "data",
-            title: "数据分析",
-            description: "基于上传数据找表现、原因和建议",
-            detail: "请按数据分析方式完成：先确认可用数据与口径，再输出关键指标、异常变化、可能原因、细分发现、结论和建议。",
-          }
-        : {
-            id: "data",
-            title: "Data analysis",
-            description: "Find performance, drivers, and recommendations from data",
-            detail: "Handle this as a data analysis task: confirm available data and definitions, then report key metrics, anomalies, likely drivers, segment findings, conclusions, and recommendations.",
-          },
-      isZh
-        ? {
-            id: "market",
-            title: "市场调研",
-            description: "梳理趋势、用户需求、机会和证据来源",
-            detail: "请按市场调研方式完成：梳理趋势背景、目标用户需求、竞品或替代方案、机会判断、证据来源和可落地建议。",
-          }
-        : {
-            id: "market",
-            title: "Market research",
-            description: "Map trends, needs, opportunities, and evidence",
-            detail: "Handle this as market research: cover trend context, user needs, competitors or alternatives, opportunity assessment, evidence sources, and practical recommendations.",
-          },
+      makeSuggestion(
+        "competitor",
+        isZh ? "竞品 Listing 对比" : "Competitor listing analysis",
+        isZh ? "价格带、尺寸材质、评分与图文质量对比" : "Compare price band, specs, ratings, and listing quality",
+        isZh
+          ? "请按竞品分析 SOP 完成：明确对比的竞品与平台，输出价格带、尺寸与材质、配送方式、评分与评论量、listing 图文质量、退货政策的逐项对比，并给出我们的差异化机会、风险判断和下一步行动。"
+          : "Use a competitive analysis SOP: define the competing brands or sellers and the marketplace, then compare price band, dimensions and materials, delivery method, rating and review volume, listing content quality, and return policy. Close with our differentiation opportunities, risks, and next actions.",
+      ),
+      makeSuggestion(
+        "data",
+        isZh ? "销售与广告数据分析" : "Sales and ad data analysis",
+        isZh ? "ACOS、转化率、客单价、退货率与净贡献" : "ACOS, conversion, AOV, return rate, and net contribution",
+        isZh
+          ? "请按数据分析方式完成：先确认可用数据与口径，再输出分渠道/SKU 的 ACOS、转化率、客单价、退货率和扣除退货后的净 ROAS，指出异常变化与可能原因，最后给出预算与 listing 的调整建议。"
+          : "Handle this as a data analysis task: confirm the available data and definitions, then report ACOS, conversion rate, AOV, return rate, and net ROAS after returns by channel or SKU. Call out anomalies and likely drivers, and close with budget and listing recommendations.",
+      ),
+      makeSuggestion(
+        "market",
+        isZh ? "美国市场与品类调研" : "US market and category research",
+        isZh ? "需求趋势、风格走向、平台政策与关税" : "Demand trends, style shifts, marketplace policy, tariffs",
+        isZh
+          ? "请按市场调研方式完成：梳理美国家具与家居的需求趋势、品类与风格走向、主要竞争格局，以及可能影响我们的平台政策、关税或产品安全规定，标注来源并给出对选品和内容的启示。"
+          : "Handle this as market research: cover US furniture and home-furnishings demand, category and style shifts, the competitive set, and any marketplace policy, tariff, or product-safety changes that could affect us. Cite sources and close with implications for assortment and content.",
+      ),
       other,
     ];
   }
 
   if (isPlan) {
     return [
-      isZh
-        ? {
-            id: "launch",
-            title: "营销活动方案",
-            description: "目标、受众、渠道、节奏、内容与 KPI",
-            detail: "请按营销活动方案完成：明确目标、目标受众、核心信息、渠道组合、执行节奏、内容清单、预算/资源假设和 KPI。",
-          }
-        : {
-            id: "launch",
-            title: "Campaign plan",
-            description: "Goal, audience, channels, timeline, content, and KPIs",
-            detail: "Handle this as a campaign plan: define goal, audience, key message, channel mix, timeline, content list, budget/resource assumptions, and KPIs.",
-          },
-      isZh
-        ? {
-            id: "content-calendar",
-            title: "内容排期",
-            description: "主题、平台、频率、形式和交付清单",
-            detail: "请按内容排期完成：输出主题方向、平台选择、发布频率、内容形式、每条内容要点和交付清单。",
-          }
-        : {
-            id: "content-calendar",
-            title: "Content calendar",
-            description: "Themes, platforms, cadence, formats, and deliverables",
-            detail: "Handle this as a content calendar: include themes, platform choices, cadence, content formats, per-post angles, and deliverables.",
-          },
+      makeSuggestion(
+        "launch",
+        isZh ? "新品上架战役" : "New product launch plan",
+        isZh ? "打样到上架、冷启动、评论积累与广告放量" : "Sampling to listing, cold start, reviews, then scaling ads",
+        isZh
+          ? "请按新品上架战役完成：明确产品与目标市场，给出打样确认、首批到仓、listing 上架与冷启动、评论积累、广告放量的阶段计划，每阶段列出内容与素材需求、负责人假设和衡量指标。"
+          : "Handle this as a launch plan: define the product and target market, then lay out phases from sample sign-off, first container landed, listing go-live and cold start, review accumulation, to scaling ads. For each phase give content and asset needs, owner assumptions, and measurement.",
+      ),
+      makeSuggestion(
+        "content-calendar",
+        isZh ? "内容排期" : "Content calendar",
+        isZh ? "主题、渠道、频率、形式和交付清单" : "Themes, channels, cadence, formats, deliverables",
+        isZh
+          ? "请按内容排期完成：输出主题方向（房间场景、尺寸指南、材质工艺、组装与配送）、渠道选择、发布频率、内容形式、每条内容要点和交付清单。"
+          : "Handle this as a content calendar: include themes (room scenes, sizing guides, materials and craft, assembly and delivery), channel choices, cadence, formats, per-piece angles, and deliverables.",
+      ),
       other,
     ];
   }
 
   return [
-    isZh
-      ? {
-          id: "social-copy",
-          title: "社媒文案",
-          description: "指定平台、受众、语气和字数后生成",
-          detail: "请按社媒文案任务完成：默认面向企业营销场景，补齐平台、目标受众、核心卖点、语气、字数和 CTA 后生成。",
-        }
-      : {
-          id: "social-copy",
-          title: "Social copy",
-          description: "Generate with platform, audience, tone, and length",
-          detail: "Handle this as a social copy task: assume a business marketing context and include platform, audience, value proposition, tone, length, and CTA.",
-        },
-    isZh
-      ? {
-          id: "brief",
-          title: "营销简报",
-          description: "整理背景、目标、策略、交付物和下一步",
-          detail: "请按营销简报完成：输出背景、目标、受众、核心策略、关键信息、交付物、时间线和下一步。",
-        }
-      : {
-          id: "brief",
-          title: "Marketing brief",
-          description: "Frame context, goal, strategy, deliverables, and next steps",
-          detail: "Handle this as a marketing brief: include context, goal, audience, core strategy, key message, deliverables, timeline, and next steps.",
-        },
-    isZh
-      ? {
-          id: "report",
-          title: "报告/文档",
-          description: "输出结构化正文，可继续生成附件",
-          detail: "请按报告或文档任务完成：先给出清晰结构，再输出完整正文、重点结论、可复用小标题和后续可生成的交付物建议。",
-        }
-      : {
-          id: "report",
-          title: "Report/document",
-          description: "Produce structured content and possible artifacts",
-          detail: "Handle this as a report or document task: provide a clear structure, full draft, key conclusions, reusable headings, and suggested deliverables.",
-        },
+    makeSuggestion(
+      "listing-copy",
+      isZh ? "平台 Listing 文案" : "Marketplace listing copy",
+      isZh ? "标题、五点描述、A+ 与后台关键词" : "Title, bullets, A+ content, and backend keywords",
+      isZh
+        ? "请按平台 listing 任务完成：补齐产品、平台（Amazon / Wayfair）、已确认的尺寸与材质后，输出标题、五点描述、简介和后台关键词；缺失的实物参数用 [待确认 xxx] 标出，不要编造。"
+        : "Handle this as a marketplace listing task: once product, marketplace (Amazon / Wayfair), and confirmed specs are known, produce title, bullets, description, and backend keywords. Mark any missing physical spec as [confirm ...] rather than inventing it.",
+    ),
+    makeSuggestion(
+      "social-copy",
+      isZh ? "社媒与房间场景内容" : "Social and room-scene content",
+      isZh ? "指定渠道、客户、语气和篇幅后生成" : "Generate with channel, customer, tone, and length",
+      isZh
+        ? "请按社媒内容任务完成：面向美国终端消费者，补齐渠道、目标客户、房间场景、语气、篇幅和 CTA 后生成。"
+        : "Handle this as a social content task: write for the US end consumer, and include channel, target customer, room scenario, tone, length, and CTA.",
+    ),
+    makeSuggestion(
+      "report",
+      isZh ? "规格单 / 报告文档" : "Spec sheet or report",
+      isZh ? "输出结构化正文，可继续生成 PDF" : "Produce structured content, PDF optional",
+      isZh
+        ? "请按文档任务完成：先给出清晰结构，再输出完整正文（规格表、材质与工艺、配送与组装说明）、重点结论和后续可生成的交付物建议。"
+        : "Handle this as a document task: provide a clear structure, then the full draft (spec table, materials and construction, delivery and assembly notes), key conclusions, and suggested follow-up deliverables.",
+    ),
     other,
   ];
 }
@@ -1060,91 +998,123 @@ function buildDynamicMarketingEntrySuggestions(
   const isZh = locale === "zh";
   const product = profile.productLabel;
 
-  if (profile.platform === "xhs") {
+  if (profile.platform === "amazon" || profile.platform === "wayfair") {
+    const isAmazon = profile.platform === "amazon";
+    const channelZh = isAmazon ? "Amazon" : "Wayfair";
     return [
       makeSuggestion(
-        "xhs-publish-copy",
-        isZh ? "小红书营销文案" : "Little Red Book marketing copy",
-        isZh ? `围绕${product}生成可直接发布的小红书内容` : `Create publish-ready Little Red Book content for ${product}`,
+        "listing-full",
+        isZh ? `${channelZh} Listing 全套` : `Full ${channelZh} listing`,
+        isZh ? `围绕${product}输出标题、五点和关键词` : `Title, bullets, and keywords for ${product}`,
         isZh
-          ? `方向：小红书营销文案。平台：小红书。围绕${product}输出标题、正文、CTA 和话题标签，后续只补齐受众、语气和交付格式。`
-          : `Direction: Little Red Book marketing copy. Platform: Little Red Book. Produce title, body, CTA, and tags for ${product}; only clarify audience, tone, and output shape next.`,
+          ? `方向：${channelZh} listing 全套。围绕${product}输出标题、五点描述、简介和后台关键词，其中一条专讲尺寸、一条专讲组装与配送；缺失的实物参数用 [待确认 xxx] 标出。`
+          : `Direction: full ${channelZh} listing for ${product} — title, bullets, description, and backend keywords, with one bullet on dimensions and one on assembly and delivery. Mark missing specs as [confirm ...].`,
       ),
       makeSuggestion(
-        "xhs-seeding",
-        isZh ? "小红书种草角度" : "Little Red Book seeding angle",
-        isZh ? "更偏体验感、场景感和真实推荐" : "More experiential, scenario-led, and recommendation-like",
+        "listing-bullets",
+        isZh ? "只优化五点描述" : "Rewrite the bullets only",
+        isZh ? "针对转化重写卖点顺序和表达" : "Reorder and sharpen the benefits for conversion",
         isZh
-          ? `方向：小红书种草角度。平台：小红书。围绕${product}强化使用场景、体验感、真实推荐和评论互动引导。`
-          : `Direction: Little Red Book seeding angle. Platform: Little Red Book. Emphasize usage scenarios, experience, authentic recommendation, and comment engagement.`,
+          ? `方向：只重写五点描述。围绕${product}按"收益先说、参数背书"的顺序重排卖点，保留尺寸与组装信息。`
+          : `Direction: rewrite the bullets only. Reorder ${product}'s benefits as outcome-then-proof, keeping the dimension and assembly bullets.`,
       ),
       makeSuggestion(
-        "xhs-conversion-copy",
-        isZh ? "小红书转化文案" : "Little Red Book conversion copy",
-        isZh ? "更强调卖点、信任感和行动引导" : "Emphasizes benefits, trust, and action",
+        "listing-aplus",
+        isZh ? "A+ / 图文详情文案" : "A+ / enhanced content",
+        isZh ? "分模块讲材质、工艺、场景和尺寸" : "Modules for material, craft, room scene, and sizing",
         isZh
-          ? `方向：小红书转化文案。平台：小红书。围绕${product}突出核心卖点、信任理由、行动引导和可收藏信息。`
-          : `Direction: Little Red Book conversion copy. Platform: Little Red Book. Highlight benefits, trust reasons, CTA, and save-worthy information.`,
+          ? `方向：A+ 图文详情。围绕${product}分模块输出材质与工艺、房间场景、尺寸与适配、配送与售后的文案，并标注每个模块建议配的图型。`
+          : `Direction: A+ enhanced content for ${product} — modules for material and craft, room scene, sizing and fit, delivery and after-sales, each with the image type it should pair with.`,
       ),
       other,
     ];
   }
 
-  if (profile.category === "apparel") {
+  if (profile.platform === "pinterest" || profile.platform === "instagram" || profile.platform === "tiktok") {
     return [
       makeSuggestion(
-        "xhs-seeding",
-        isZh ? "小红书种草文案" : "Little Red Book seeding copy",
-        isZh ? `适合把${product}写成生活方式种草` : `Frame ${product} as lifestyle seeding content`,
+        "roomscene-social",
+        isZh ? "房间场景内容" : "Room-scene content",
+        isZh ? `把${product}放进真实房间里讲` : `Show ${product} as part of a real room`,
         isZh
-          ? `方向：小红书种草文案。平台：小红书。围绕${product}做生活方式种草，后续补齐受众、穿搭场景、语气和 CTA。`
-          : `Direction: Little Red Book seeding copy. Platform: Little Red Book. Build lifestyle content around ${product}, then clarify audience, usage scene, tone, and CTA.`,
+          ? `方向：房间场景社媒内容。围绕${product}输出场景化开头、房间搭配描述、一句尺寸提示和 CTA。`
+          : `Direction: room-scene social content for ${product} — scene-led opening, styling description, one sizing line, and a CTA.`,
       ),
       makeSuggestion(
-        "short-video-script",
-        isZh ? "短视频口播脚本" : "Short video script",
-        isZh ? `适合把${product}做成口播/镜头脚本` : `Turn ${product} into a spoken or shot-by-shot script`,
+        "sizing-angle",
+        isZh ? "尺寸/空间适配角度" : "Fit and small-space angle",
+        isZh ? "小空间、量尺寸、能不能放得下" : "Small spaces, measuring, and whether it fits",
         isZh
-          ? `方向：短视频口播脚本。围绕${product}输出开场钩子、镜头/口播、卖点节奏和 CTA。`
-          : `Direction: short video script. Produce hook, voiceover or shots, benefit pacing, and CTA for ${product}.`,
+          ? `方向：尺寸与空间适配角度。围绕${product}讲清适合的房间尺寸、如何量、常见误判，转化到"确认能放得下"。`
+          : `Direction: fit and space angle for ${product} — what room size it suits, how to measure, common mistakes, converting on "it will fit".`,
       ),
       makeSuggestion(
-        "private-conversion",
-        isZh ? "私域转化文案" : "Owned-channel conversion copy",
-        isZh ? `适合社群/朋友圈推动咨询或下单` : `Use owned channels to drive inquiries or purchase`,
+        "unboxing-assembly",
+        isZh ? "开箱 / 组装角度" : "Unboxing and assembly angle",
+        isZh ? "真实到货、拆箱、组装体验" : "Real delivery, unboxing, and assembly",
         isZh
-          ? `方向：私域转化文案。围绕${product}输出适合朋友圈/社群的转化型表达、利益点和行动引导。`
-          : `Direction: owned-channel conversion copy. Write conversion-focused copy, benefits, and CTA for ${product}.`,
+          ? `方向：开箱与组装角度。围绕${product}呈现到货形态、拆箱、组装步骤与耗时，用真实感建立信任。`
+          : `Direction: unboxing and assembly angle for ${product} — how it arrives, unboxing, assembly steps and time, building trust through honesty.`,
       ),
       other,
     ];
   }
 
-  if (profile.category === "b2b") {
+  if (profile.platform === "email") {
     return [
       makeSuggestion(
-        "linkedin-b2b",
-        isZh ? "LinkedIn 专业帖" : "LinkedIn B2B post",
-        isZh ? `适合面向企业客户介绍${product}` : `Introduce ${product} to business buyers`,
+        "email-launch",
+        isZh ? "上新通知邮件" : "New arrival email",
+        isZh ? `告诉订阅者${product}上线了` : `Announce ${product} to subscribers`,
         isZh
-          ? `方向：LinkedIn 专业帖。围绕${product}输出面向企业客户的痛点、价值主张、可信表达和 CTA。`
-          : `Direction: LinkedIn B2B post. Cover pain points, value proposition, credible proof, and CTA for ${product}.`,
+          ? `方向：上新通知邮件。围绕${product}输出主题行、预览文本、正文和单一 CTA，正文突出房间场景与一条尺寸信息。`
+          : `Direction: new arrival email for ${product} — subject, preheader, body, and one CTA, leading with the room scene plus one sizing fact.`,
       ),
       makeSuggestion(
-        "sales-email",
-        isZh ? "销售/培育邮件" : "Sales or nurture email",
-        isZh ? `适合转化线索或唤醒客户` : `Convert leads or re-engage prospects`,
+        "email-cart",
+        isZh ? "弃购挽回邮件" : "Cart recovery email",
+        isZh ? "用消除顾虑代替打折" : "Remove doubt instead of discounting",
         isZh
-          ? `方向：销售/培育邮件。围绕${product}输出邮件主题、正文结构、价值点和下一步行动。`
-          : `Direction: sales or nurture email. Produce subject, body structure, value points, and next action for ${product}.`,
+          ? `方向：弃购挽回邮件。围绕${product}针对"尺寸放不下、配送不确定、退货麻烦"三个顾虑各写一段，不以折扣为主。`
+          : `Direction: cart recovery email for ${product} — one short block each for fit, delivery, and returns doubt. Do not lead with a discount.`,
       ),
       makeSuggestion(
-        "solution-brief",
-        isZh ? "解决方案简版介绍" : "Solution brief",
-        isZh ? `适合官网/销售材料的简明介绍` : `A concise website or sales-material description`,
+        "email-review",
+        isZh ? "售后评论邀请" : "Post-delivery review request",
+        isZh ? "到货后请评价，并提供组装帮助" : "Ask for a review and offer assembly help",
         isZh
-          ? `方向：解决方案简版介绍。围绕${product}输出适合官网或销售材料的结构化介绍。`
-          : `Direction: solution brief. Produce a structured website or sales-material description for ${product}.`,
+          ? `方向：售后评论邀请邮件。围绕${product}在到货后邀请评价，同时提供组装帮助和售后入口。`
+          : `Direction: post-delivery review request for ${product} — ask for a review while offering assembly help and a support path.`,
+      ),
+      other,
+    ];
+  }
+
+  if (profile.platform === "dtc") {
+    return [
+      makeSuggestion(
+        "product-page",
+        isZh ? "独立站商详页" : "Own-store product page",
+        isZh ? "场景 + 材质 + 尺寸表 + FAQ" : "Scene, materials, dimensions table, FAQ",
+        isZh
+          ? `方向：独立站商详页。围绕${product}输出 H1、场景化开头、4-6 个卖点分段、尺寸表、材质与保养、以及覆盖适配/配送/组装/退货的 FAQ。`
+          : `Direction: own-store product page for ${product} — H1, scene-led hero, 4-6 benefit sections, dimensions table, materials and care, and FAQs covering fit, delivery, assembly, and returns.`,
+      ),
+      makeSuggestion(
+        "landing-page",
+        isZh ? "系列落地页" : "Collection landing page",
+        isZh ? "讲清系列定位和选购路径" : "Frame the collection and how to choose",
+        isZh
+          ? `方向：系列落地页。围绕${product}所在系列输出定位、风格说明、按房间/尺寸的选购路径和 CTA。`
+          : `Direction: collection landing page for ${product}'s line — positioning, style story, a choose-by-room or by-size path, and CTA.`,
+      ),
+      makeSuggestion(
+        "buying-guide",
+        isZh ? "选购指南（SEO）" : "Buying guide (SEO)",
+        isZh ? "回答一个具体的选购问题" : "Answer one concrete buying question",
+        isZh
+          ? `方向：选购指南博客。围绕${product}回答一个具体选购问题（怎么量尺寸、多大够坐几人、实木与板式怎么选），含一张对比表。`
+          : `Direction: SEO buying guide answering one concrete question about ${product} (how to measure, what size seats how many, solid vs engineered wood), including a comparison table.`,
       ),
       other,
     ];
@@ -1152,28 +1122,28 @@ function buildDynamicMarketingEntrySuggestions(
 
   return [
     makeSuggestion(
-      "social-copy",
-      isZh ? "社媒发布文案" : "Social publishing copy",
-      isZh ? `为${product}生成可直接发布的内容` : `Create publishable content for ${product}`,
+      "listing-copy",
+      isZh ? "平台 Listing 文案" : "Marketplace listing copy",
+      isZh ? `为${product}写 Amazon / Wayfair listing` : `Write an Amazon / Wayfair listing for ${product}`,
       isZh
-        ? `方向：社媒发布文案。围绕${product}补齐平台、受众、语气、篇幅和 CTA 后生成。`
-        : `Direction: social publishing copy. Clarify platform, audience, tone, length, and CTA for ${product}.`,
+        ? `方向：平台 listing 文案。围绕${product}补齐平台、已确认的尺寸与材质后，输出标题、五点描述和关键词。`
+        : `Direction: marketplace listing copy. Once the marketplace and confirmed specs for ${product} are known, produce title, bullets, and keywords.`,
     ),
     makeSuggestion(
-      "campaign-angle",
-      isZh ? "营销切入角度" : "Campaign angle",
-      isZh ? `先确定传播角度再生成内容` : `Choose the communication angle before drafting`,
+      "roomscene-social",
+      isZh ? "房间场景内容" : "Room-scene content",
+      isZh ? `把${product}放进真实房间里讲` : `Show ${product} as part of a real room`,
       isZh
-        ? `方向：营销切入角度。先为${product}确定传播角度，再输出对应内容。`
-        : `Direction: campaign angle. Define the communication angle for ${product}, then draft the content.`,
+        ? `方向：房间场景内容。围绕${product}补齐渠道、目标客户、语气和篇幅后生成。`
+        : `Direction: room-scene content for ${product}. Clarify channel, customer, tone, and length first.`,
     ),
     makeSuggestion(
       "conversion-copy",
       isZh ? "转化型文案" : "Conversion copy",
-      isZh ? `突出卖点和行动引导` : `Emphasize benefits and next action`,
+      isZh ? "突出尺寸适配、材质可信和配送确定性" : "Lead with fit, credible materials, and delivery certainty",
       isZh
-        ? `方向：转化型文案。围绕${product}突出卖点、信任感和行动引导。`
-        : `Direction: conversion copy. Emphasize benefits, trust, and next action for ${product}.`,
+        ? `方向：转化型文案。围绕${product}突出尺寸适配、材质与做工的可信理由、配送与退货的确定性。`
+        : `Direction: conversion copy for ${product} — emphasize fit, credible material and construction proof, and delivery/returns certainty.`,
     ),
     other,
   ];
@@ -1181,13 +1151,18 @@ function buildDynamicMarketingEntrySuggestions(
 
 function answeredSlots(primaryId: string): Set<ClarifySlot> {
   const out = new Set<ClarifySlot>();
-  if (primaryId.startsWith("platform-") || primaryId.includes("xhs") || primaryId.includes("linkedin") || primaryId.includes("email")) {
+  if (
+    primaryId.startsWith("platform-") ||
+    primaryId.startsWith("listing-") ||
+    primaryId.startsWith("email-") ||
+    ["product-page", "landing-page", "buying-guide", "roomscene-social"].includes(primaryId)
+  ) {
     out.add("platform");
   }
-  if (primaryId.startsWith("audience-") || ["b2b", "operators", "consumers"].includes(primaryId)) out.add("audience");
+  if (primaryId.startsWith("audience-") || ["homeowner", "renter", "designer"].includes(primaryId)) out.add("audience");
   if (primaryId.startsWith("tone-")) out.add("tone");
   if (primaryId.startsWith("format-") || ["copy", "outline", "doc"].includes(primaryId)) out.add("format");
-  if (primaryId.startsWith("product-") || ["fit", "comfort", "style"].includes(primaryId)) out.add("product");
+  if (primaryId.startsWith("product-") || ["fit", "material", "delivery", "value"].includes(primaryId)) out.add("product");
   return out;
 }
 
@@ -1204,96 +1179,139 @@ function buildDynamicMarketingFollowupSteps(
   const other = makeOtherSuggestion(locale);
   const steps: ClarifyStep[] = [];
   const answered = answeredSlots(primaryId);
-  const primaryAddsPlatform = [
-    "xhs-publish-copy",
-    "xhs-seeding",
-    "xhs-conversion-copy",
-    "short-video-script",
-    "private-conversion",
-    "linkedin-b2b",
-    "sales-email",
-    "solution-brief",
-  ].includes(primaryId);
+  const primaryAddsPlatform = answered.has("platform");
 
-  if (!profile.hasProductDetail && profile.category !== "apparel" && !answered.has("product")) {
+  if (!profile.hasProductDetail && !answered.has("product")) {
     steps.push({
       id: "dynamic-product",
-      title: isZh ? "这次要推广的产品或核心卖点是什么？" : "What product or core benefit should this promote?",
-      body: isZh ? "先确认产品和卖点，后面的受众、语气和 CTA 才能贴合任务。" : "Product and benefit come first, then audience, tone, and CTA can fit the task.",
+      title: isZh ? "这次要推的是哪件产品？" : "Which product is this for?",
+      body: isZh
+        ? "先确认品类和阶段，后面的客户、语气和 CTA 才能贴合。尺寸和材质如果已确认，也一起告诉我。"
+        : "Category and stage first, then customer, tone, and CTA can fit. If dimensions and materials are confirmed, include them.",
       suggestions: [
-        makeSuggestion("product-new", isZh ? "新品发布" : "New product launch", isZh ? "突出新功能、新价值和尝鲜理由" : "Highlight new features, value, and reasons to try", isZh ? "产品信息：新品发布，突出新功能、新价值和尝鲜理由。" : "Product context: new product launch; highlight new features, value, and reasons to try."),
-        makeSuggestion("product-solution", isZh ? "解决方案/服务" : "Solution or service", isZh ? "突出痛点、方案和结果" : "Highlight pain point, solution, and outcome", isZh ? "产品信息：解决方案/服务，突出用户痛点、解决方式和结果收益。" : "Product context: solution or service; highlight pain point, approach, and outcome."),
-        makeSuggestion("product-offer", isZh ? "活动/优惠" : "Campaign offer", isZh ? "突出限时权益和行动理由" : "Highlight limited-time value and reason to act", isZh ? "产品信息：活动/优惠，突出限时权益和行动理由。" : "Product context: campaign offer; highlight limited-time value and reason to act."),
+        makeSuggestion(
+          "product-new",
+          isZh ? "新品首发" : "New product launch",
+          isZh ? "第一批到仓，需要冷启动" : "First container landed, needs a cold start",
+          isZh ? "产品信息：新品首发，需要冷启动，突出设计与首发理由。" : "Product context: new launch needing a cold start; lead with design and reason to be first.",
+        ),
+        makeSuggestion(
+          "product-core",
+          isZh ? "在售主力款" : "Existing best-seller",
+          isZh ? "已有评论和数据，重在提转化" : "Has reviews and data; optimize conversion",
+          isZh ? "产品信息：在售主力款，已有评论与数据，重点提升转化。" : "Product context: existing best-seller with reviews and data; focus on lifting conversion.",
+        ),
+        makeSuggestion(
+          "product-line",
+          isZh ? "整个系列" : "A whole collection",
+          isZh ? "多个 SKU 一起讲风格和搭配" : "Several SKUs, sold as a style story",
+          isZh ? "产品信息：整个系列，多个 SKU 一起讲风格定位与搭配。" : "Product context: a whole collection of SKUs sold as a style and pairing story.",
+        ),
         other,
       ],
     });
   }
 
   if (!profile.hasAudience && !answered.has("audience")) {
-    const apparelOptions = [
-      makeSuggestion(
-        "audience-commuter",
-        isZh ? "通勤白领/职场女性" : "Commuting professionals",
-        isZh ? "强调舒适、显瘦、好搭配" : "Emphasize comfort, flattering fit, and easy styling",
-        isZh ? "目标受众：通勤白领/职场女性，强调舒适、显瘦和好搭配。" : "Audience: commuting professionals; emphasize comfort, flattering fit, and easy styling.",
-      ),
-      makeSuggestion(
-        "audience-young",
-        isZh ? "年轻学生/初入职场" : "Students or early-career buyers",
-        isZh ? "强调性价比、出片、日常百搭" : "Emphasize value, photogenic looks, and daily versatility",
-        isZh ? "目标受众：年轻学生/初入职场人群，强调性价比、出片和日常百搭。" : "Audience: students or early-career buyers; emphasize value, photogenic looks, and everyday versatility.",
-      ),
-      makeSuggestion(
-        "audience-light-mature",
-        isZh ? "轻熟精致女性" : "Polished modern women",
-        isZh ? "强调质感、版型、场合适配" : "Emphasize texture, fit, and occasion fit",
-        isZh ? "目标受众：轻熟精致女性，强调质感、版型和场合适配。" : "Audience: polished modern women; emphasize texture, fit, and occasion fit.",
-      ),
-      other,
-    ];
-    const b2bOptions = [
-      makeSuggestion("audience-founder", isZh ? "创始人/管理层" : "Founders or executives", isZh ? "强调增长、效率和确定性" : "Emphasize growth, efficiency, and certainty", isZh ? "目标受众：创始人/管理层，强调增长、效率和确定性。" : "Audience: founders or executives; emphasize growth, efficiency, and certainty."),
-      makeSuggestion("audience-marketing", isZh ? "市场/运营负责人" : "Marketing or ops leaders", isZh ? "强调执行效率和可衡量结果" : "Emphasize execution efficiency and measurable outcomes", isZh ? "目标受众：市场/运营负责人，强调执行效率和可衡量结果。" : "Audience: marketing or operations leaders; emphasize execution efficiency and measurable outcomes."),
-      makeSuggestion("audience-sales", isZh ? "销售团队/BD" : "Sales or BD teams", isZh ? "强调线索、话术和转化" : "Emphasize leads, talking points, and conversion", isZh ? "目标受众：销售团队/BD，强调线索、话术和转化。" : "Audience: sales or BD teams; emphasize leads, talking points, and conversion."),
-      other,
-    ];
-    const generalOptions = [
-      makeSuggestion("audience-tech", isZh ? "科技尝鲜人群" : "Tech early adopters", isZh ? "强调新功能、体验升级和新鲜感" : "Emphasize new features, upgraded experience, and novelty", isZh ? `目标受众：科技尝鲜人群，围绕${product}突出新功能、体验升级和新鲜感。` : `Audience: tech early adopters; highlight new features, upgraded experience, and novelty for ${product}.`),
-      makeSuggestion("audience-productivity", isZh ? "高效办公/学习人群" : "Productivity-focused users", isZh ? "强调效率、续航、AI 辅助和稳定体验" : "Emphasize efficiency, battery life, AI assistance, and reliability", isZh ? `目标受众：高效办公/学习人群，围绕${product}强调效率、续航、AI 辅助和稳定体验。` : `Audience: productivity-focused users; emphasize efficiency, battery life, AI assistance, and reliability for ${product}.`),
-      makeSuggestion("audience-lifestyle", isZh ? "年轻生活方式用户" : "Young lifestyle users", isZh ? "强调拍照、外观、社交表达和日常场景" : "Emphasize camera, design, social expression, and daily scenarios", isZh ? `目标受众：年轻生活方式用户，围绕${product}强调拍照、外观、社交表达和日常场景。` : `Audience: young lifestyle users; emphasize camera, design, social expression, and daily scenarios for ${product}.`),
-      other,
-    ];
     steps.push({
       id: "dynamic-audience",
-      title: isZh ? `${product}主要想打动谁？` : `Who should ${product} speak to?`,
-      body: isZh ? "我会根据受众调整卖点顺序、措辞和 CTA。" : "I will adapt the benefit order, wording, and CTA to the audience.",
-      suggestions: profile.category === "b2b" ? b2bOptions : profile.category === "apparel" ? apparelOptions : generalOptions,
+      title: isZh ? `${product}主要卖给谁？` : `Who is ${product} for?`,
+      body: isZh ? "我会按客户情境调整卖点顺序、措辞和 CTA。" : "I will adapt the benefit order, wording, and CTA to the buying situation.",
+      suggestions: [
+        makeSuggestion(
+          "homeowner",
+          isZh ? "美国房主 · 换新升级" : "US homeowners upgrading",
+          isZh ? "在意品质、耐用和整体搭配" : "Care about quality, durability, and how it fits the room",
+          isZh ? "目标客户：美国房主，换掉旧家具做升级，在意品质、耐用度和整体搭配。" : "Customer: US homeowners replacing older furniture; they care about quality, durability, and how it fits the room.",
+        ),
+        makeSuggestion(
+          "renter",
+          isZh ? "租客 · 小空间" : "Renters in small spaces",
+          isZh ? "在意尺寸、搬运和不留痕" : "Care about size, moving it, and not damaging the place",
+          isZh ? "目标客户：美国租客，房间偏小，在意尺寸适配、搬运方便和易组装拆卸。" : "Customer: US renters with limited space; they care about fit, ease of moving, and simple assembly.",
+        ),
+        makeSuggestion(
+          "firsthome",
+          isZh ? "首次置业 · 新居入住" : "First-time buyers furnishing",
+          isZh ? "一次要买多件，在意性价比和成套感" : "Buying several pieces at once; value and coherence matter",
+          isZh ? "目标客户：首次置业或刚入住新居，一次采购多件，在意性价比和成套搭配。" : "Customer: first-time buyers furnishing a new place; buying several pieces, so value and a coherent look matter.",
+        ),
+        makeSuggestion(
+          "designer",
+          isZh ? "设计爱好者" : "Design-minded shoppers",
+          isZh ? "看风格、材质和细节工艺" : "Judge style, material, and construction detail",
+          isZh ? "目标客户：设计爱好者，关注风格准确性、材质真实性和细节工艺。" : "Customer: design-minded shoppers who judge style accuracy, honest materials, and construction detail.",
+        ),
+        other,
+      ],
     });
   }
 
   if (!profile.hasPlatform && !primaryAddsPlatform && !answered.has("platform")) {
     steps.push({
       id: "dynamic-platform",
-      title: isZh ? "这条内容优先发布在哪里？" : "Where will this be published first?",
-      body: isZh ? "不同平台会影响开头钩子、篇幅和表达密度。" : "The platform changes hook, length, and density.",
+      title: isZh ? "这条内容发在哪里？" : "Where will this be published?",
+      body: isZh ? "渠道决定开头钩子、篇幅、合规限制和信息密度。" : "The channel drives the hook, length, policy limits, and information density.",
       suggestions: [
-        makeSuggestion("platform-xhs", isZh ? "小红书" : "Little Red Book", isZh ? "种草感、生活方式、标签更重要" : "Lifestyle seeding, relatability, and tags matter", isZh ? "发布平台：小红书，使用种草感、生活方式表达和标签。" : "Platform: Little Red Book; use lifestyle seeding, relatability, and tags."),
-        makeSuggestion("platform-short-video", isZh ? "短视频平台" : "Short video", isZh ? "需要钩子、口播和镜头节奏" : "Needs hook, voiceover, and shot pacing", isZh ? "发布平台：短视频平台，输出钩子、口播和镜头节奏。" : "Platform: short video; include hook, voiceover, and shot pacing."),
-        makeSuggestion("platform-owned", isZh ? "朋友圈/社群" : "Owned channels", isZh ? "更偏信任、转化和行动引导" : "Trust, conversion, and action matter more", isZh ? "发布平台：朋友圈/社群，偏信任转化和行动引导。" : "Platform: owned channels; emphasize trust, conversion, and action."),
+        makeSuggestion(
+          "platform-amazon",
+          "Amazon",
+          isZh ? "搜索驱动，合规限制严，尺寸要写清" : "Search-driven, strict policy, dimensions must be explicit",
+          isZh ? "发布渠道：Amazon listing，按搜索意图组织，遵守平台文案规范，必须写清尺寸与组装。" : "Channel: Amazon listing — organize around search intent, follow marketplace copy policy, and state dimensions and assembly explicitly.",
+        ),
+        makeSuggestion(
+          "platform-wayfair",
+          "Wayfair",
+          isZh ? "属性表要齐全，风格标签要对" : "Attribute grid must be complete; style tags matter",
+          isZh ? "发布渠道：Wayfair listing，属性表齐全，风格标签贴合平台筛选项，写清配送方式与箱数。" : "Channel: Wayfair listing — complete the attribute grid, match the site's style filters, and state delivery method and carton count.",
+        ),
+        makeSuggestion(
+          "platform-social",
+          isZh ? "Instagram / Pinterest" : "Instagram / Pinterest",
+          isZh ? "卖房间氛围，尺寸只点一句" : "Sell the room; mention size once",
+          isZh ? "发布渠道：Instagram / Pinterest，以房间实景和风格为主，尺寸信息点一句即可。" : "Channel: Instagram / Pinterest — lead with the room set and style, with a single sizing line.",
+        ),
+        makeSuggestion(
+          "platform-dtc",
+          isZh ? "独立站" : "Own store",
+          isZh ? "可以更长，要覆盖 FAQ 和退换" : "Can run longer; must cover FAQs and returns",
+          isZh ? "发布渠道：自有独立站，可写更长，覆盖尺寸表、材质保养和适配/配送/组装/退货 FAQ。" : "Channel: own store — longer copy is fine; cover the dimensions table, materials and care, and fit/delivery/assembly/returns FAQs.",
+        ),
         other,
       ],
     });
   }
 
-  if (profile.category === "apparel" && !profile.hasProductDetail && !answered.has("product")) {
+  if (!profile.hasProductDetail && !answered.has("product") && steps.length < 3) {
     steps.push({
       id: "dynamic-selling-point",
-      title: isZh ? "这款服装最该突出哪个卖点？" : "Which apparel benefit matters most?",
-      body: isZh ? "卖点会决定文案的主钩子和正文展开顺序。" : "The benefit will determine the main hook and body structure.",
+      title: isZh ? "最该突出哪个卖点？" : "Which benefit should lead?",
+      body: isZh ? "卖点决定主钩子和正文展开顺序。" : "The lead benefit determines the hook and body order.",
       suggestions: [
-        makeSuggestion("fit", isZh ? "版型显瘦/修饰身材" : "Flattering fit", isZh ? "突出视觉效果和穿着自信" : "Highlight look and confidence", isZh ? "核心卖点：版型显瘦/修饰身材，突出视觉效果和穿着自信。" : "Core benefit: flattering fit; emphasize visual effect and confidence."),
-        makeSuggestion("comfort", isZh ? "舒适透气/适合日常" : "Comfort and daily wear", isZh ? "突出长时间穿着体验" : "Highlight all-day wearability", isZh ? "核心卖点：舒适透气/适合日常，突出长时间穿着体验。" : "Core benefit: comfort and daily wearability."),
-        makeSuggestion("style", isZh ? "百搭出片/场景多" : "Versatile and photogenic", isZh ? "突出通勤、约会、周末等场景" : "Highlight work, dates, weekends, and styling", isZh ? "核心卖点：百搭出片/场景多，突出通勤、约会、周末等穿搭场景。" : "Core benefit: versatile and photogenic; highlight work, dates, weekend styling."),
+        makeSuggestion(
+          "fit",
+          isZh ? "尺寸与空间适配" : "Fit and footprint",
+          isZh ? "小空间也放得下，附量法" : "Works in tight rooms; include how to measure",
+          isZh ? "核心卖点：尺寸与空间适配，说明适合的房间尺寸并给出量法。" : "Lead benefit: fit and footprint — what room size it suits and how to measure.",
+        ),
+        makeSuggestion(
+          "material",
+          isZh ? "材质与做工" : "Material and construction",
+          isZh ? "实木、面料、结构与耐用度" : "Solid wood, fabric, joinery, and durability",
+          isZh ? "核心卖点：材质与做工，突出用料、结构工艺和耐用度证据。" : "Lead benefit: material and construction — the materials, joinery, and evidence of durability.",
+        ),
+        makeSuggestion(
+          "delivery",
+          isZh ? "配送与组装" : "Delivery and assembly",
+          isZh ? "怎么送到、几箱、多久装好" : "How it ships, carton count, assembly time",
+          isZh ? "核心卖点：配送与组装，写清配送方式、箱数和组装耗时。" : "Lead benefit: delivery and assembly — shipping method, carton count, and assembly time.",
+        ),
+        makeSuggestion(
+          "value",
+          isZh ? "价格与价值感" : "Price and value",
+          isZh ? "同价位里为什么更值" : "Why it beats others in the same price band",
+          isZh ? "核心卖点：价格与价值感，说明同价位区间内为什么更值得买。" : "Lead benefit: price and value — why it wins inside its price band.",
+        ),
         other,
       ],
     });
@@ -1303,11 +1321,26 @@ function buildDynamicMarketingFollowupSteps(
     steps.push({
       id: "dynamic-tone",
       title: isZh ? "想要什么语气和风格？" : "What tone should it use?",
-      body: isZh ? "语气会影响标题钩子、情绪浓度和销售感强弱。" : "Tone changes the hook, emotional intensity, and sales feel.",
+      body: isZh ? "语气影响标题钩子、情绪浓度和销售感强弱。" : "Tone changes the hook, emotional intensity, and how salesy it feels.",
       suggestions: [
-        makeSuggestion("tone-seeding", isZh ? "真实种草感" : "Authentic recommendation", isZh ? "像亲身体验后的自然分享" : "Feels like a real personal recommendation", isZh ? "语气风格：真实种草感，像亲身体验后的自然分享。" : "Tone: authentic recommendation, like a real personal experience."),
-        makeSuggestion("tone-refined", isZh ? "精致高级感" : "Refined and premium", isZh ? "更克制，突出质感和审美" : "More restrained, focused on quality and taste", isZh ? "语气风格：精致高级感，更克制，突出质感和审美。" : "Tone: refined and premium, restrained and quality-focused."),
-        makeSuggestion("tone-conversion", isZh ? "强转化/促单" : "Conversion-focused", isZh ? "卖点明确，行动引导更强" : "Clear benefits and stronger CTA", isZh ? "语气风格：强转化/促单，卖点明确，行动引导更强。" : "Tone: conversion-focused with clear benefits and stronger CTA."),
+        makeSuggestion(
+          "tone-warm",
+          isZh ? "温暖真实" : "Warm and honest",
+          isZh ? "像懂行的朋友在讲，不夸大" : "Like a knowledgeable friend, no overclaiming",
+          isZh ? "语气风格：温暖真实，像懂行的朋友在讲，不夸大。" : "Tone: warm and honest, like a knowledgeable friend, without overclaiming.",
+        ),
+        makeSuggestion(
+          "tone-refined",
+          isZh ? "克制精致" : "Refined and restrained",
+          isZh ? "少形容词，突出材质与工艺" : "Fewer adjectives, more material and craft",
+          isZh ? "语气风格：克制精致，少用形容词，突出材质与工艺细节。" : "Tone: refined and restrained — fewer adjectives, more material and craft detail.",
+        ),
+        makeSuggestion(
+          "tone-practical",
+          isZh ? "务实清晰" : "Practical and clear",
+          isZh ? "直接给参数和结论，便于比较" : "Lead with specs and conclusions for easy comparison",
+          isZh ? "语气风格：务实清晰，直接给参数和结论，方便买家比较。" : "Tone: practical and clear — specs and conclusions up front so buyers can compare.",
+        ),
         other,
       ],
     });
@@ -1319,9 +1352,24 @@ function buildDynamicMarketingFollowupSteps(
       title: isZh ? "最终要输出成什么形态？" : "What final shape should it take?",
       body: isZh ? "我会按这个形态控制长度、结构和 CTA。" : "I will use this to control length, structure, and CTA.",
       suggestions: [
-        makeSuggestion("format-one", isZh ? "1 条可直接发布" : "One publish-ready piece", isZh ? "标题 + 正文 + CTA + 话题" : "Title, body, CTA, and tags", isZh ? "交付形式：1 条可直接发布内容，包含标题、正文、CTA 和话题标签。" : "Deliverable: one publish-ready piece with title, body, CTA, and tags."),
-        makeSuggestion("format-three", isZh ? "3 个不同角度版本" : "Three angle variants", isZh ? "便于 A/B 测试或挑选" : "Useful for A/B testing or selection", isZh ? "交付形式：3 个不同角度版本，便于 A/B 测试或挑选。" : "Deliverable: three angle variants for A/B testing or selection."),
-        makeSuggestion("format-script", isZh ? "短视频脚本" : "Short video script", isZh ? "钩子 + 镜头/口播 + CTA" : "Hook, shots/voiceover, CTA", isZh ? "交付形式：短视频脚本，包含钩子、镜头/口播和 CTA。" : "Deliverable: short video script with hook, shots/voiceover, and CTA."),
+        makeSuggestion(
+          "format-one",
+          isZh ? "1 份可直接用" : "One ready-to-use piece",
+          isZh ? "直接贴到平台或站点上" : "Paste straight into the marketplace or site",
+          isZh ? "交付形式：1 份可直接使用的成稿。" : "Deliverable: one ready-to-use draft.",
+        ),
+        makeSuggestion(
+          "format-three",
+          isZh ? "3 个不同角度版本" : "Three angle variants",
+          isZh ? "便于 A/B 测试标题或钩子" : "For A/B testing titles or hooks",
+          isZh ? "交付形式：3 个不同角度版本，便于 A/B 测试。" : "Deliverable: three angle variants for A/B testing.",
+        ),
+        makeSuggestion(
+          "format-doc",
+          isZh ? "规格单 / PDF" : "Spec sheet / PDF",
+          isZh ? "含尺寸表和材质说明的文档" : "A document with a dimensions table and materials",
+          isZh ? "交付形式：规格单或 PDF 文档，含尺寸表与材质说明。" : "Deliverable: a spec sheet or PDF with a dimensions table and materials.",
+        ),
         other,
       ],
     });
@@ -1391,40 +1439,23 @@ function getClarifyFollowupSteps(
     return [
       {
         id: "competitor-scope",
-        title: isZh ? "先确定竞品范围" : "Define the competitor set",
-        body: isZh
-          ? "你希望我围绕哪类竞品展开？选择一个最贴近的范围。"
-          : "Which competitor scope should I use? Pick the closest option.",
+        title: isZh ? "先确定对比范围" : "Define the comparison set",
+        body: isZh ? "你希望我围绕哪类竞品展开？选择一个最贴近的范围。" : "Which competitor scope should I use? Pick the closest option.",
         suggestions: [
-          makeSuggestion("direct", isZh ? "直接竞品" : "Direct competitors", isZh ? "同类产品/服务逐项对比" : "Compare similar products or services", isZh ? "竞品范围：直接竞品，重点比较同类产品/服务。" : "Competitor scope: direct competitors; focus on comparable products or services."),
-          makeSuggestion("alternatives", isZh ? "替代方案" : "Alternatives", isZh ? "用户可能选择的替代路径" : "Other ways customers solve the problem", isZh ? "竞品范围：替代方案，重点分析用户可能选择的其它解决路径。" : "Competitor scope: alternatives; analyze other ways customers solve the problem."),
-          makeSuggestion("benchmark", isZh ? "行业标杆" : "Market leaders", isZh ? "选择头部品牌做标杆参考" : "Benchmark against category leaders", isZh ? "竞品范围：行业标杆，重点参考头部品牌做法。" : "Competitor scope: market leaders; benchmark against category leaders."),
+          makeSuggestion("direct", isZh ? "同品类同价位" : "Same category, same price band", isZh ? "逐项对比同类家具" : "Compare comparable pieces item by item", isZh ? "对比范围：同品类同价位的竞品，逐项比较尺寸、材质、价格和评价。" : "Scope: same category and price band; compare dimensions, materials, price, and ratings item by item."),
+          makeSuggestion("marketplace", isZh ? "平台头部卖家" : "Top marketplace sellers", isZh ? "Amazon / Wayfair 上的畅销 listing" : "Best-selling listings on Amazon or Wayfair", isZh ? "对比范围：Amazon / Wayfair 上同品类的头部 listing，关注图文结构与评论。" : "Scope: top same-category listings on Amazon or Wayfair, focusing on listing structure and reviews."),
+          makeSuggestion("dtcbrand", isZh ? "DTC 品牌" : "DTC brands", isZh ? "Article、Castlery 这类独立站品牌" : "Own-store brands like Article or Castlery", isZh ? "对比范围：面向美国市场的家具 DTC 品牌，关注品牌叙事、定价与配送承诺。" : "Scope: US-facing furniture DTC brands; focus on brand story, pricing, and delivery promises."),
           other,
         ],
       },
       {
         id: "competitor-output",
         title: isZh ? "你更需要哪种产出？" : "What output do you need?",
-        body: isZh
-          ? "不同产出会影响分析颗粒度和表达方式。"
-          : "The deliverable changes the depth and wording of the analysis.",
+        body: isZh ? "不同产出会影响分析颗粒度和表达方式。" : "The deliverable changes the depth and wording of the analysis.",
         suggestions: [
-          makeSuggestion("battlecard", isZh ? "销售 Battlecard" : "Sales battlecard", isZh ? "便于销售应对客户比较" : "Help sales handle customer comparisons", isZh ? "交付形式：销售 battlecard，强调对比话术、反驳点和销售建议。" : "Output: sales battlecard with comparison talking points, rebuttals, and sales guidance."),
-          makeSuggestion("brief", isZh ? "策略简报" : "Strategy brief", isZh ? "用于内部判断和方向选择" : "For internal decisions and prioritization", isZh ? "交付形式：策略简报，强调竞争格局、机会判断和行动建议。" : "Output: strategy brief focused on landscape, opportunities, and actions."),
-          makeSuggestion("content", isZh ? "营销内容素材" : "Marketing content", isZh ? "转化成可发布内容方向" : "Turn analysis into content angles", isZh ? "交付形式：营销内容素材，强调可发布选题、卖点表达和内容角度。" : "Output: marketing content angles, value propositions, and publishable topics."),
-          other,
-        ],
-      },
-      {
-        id: "competitor-depth",
-        title: isZh ? "分析深度要到哪里？" : "How deep should it go?",
-        body: isZh
-          ? "选择分析深度，我会据此控制篇幅和证据要求。"
-          : "Choose depth so I can tune length and evidence requirements.",
-        suggestions: [
-          makeSuggestion("quick", isZh ? "快速判断" : "Quick read", isZh ? "短结论和关键建议优先" : "Short conclusions and key actions", isZh ? "分析深度：快速判断，优先输出短结论和关键建议。" : "Depth: quick read; prioritize concise conclusions and key actions."),
-          makeSuggestion("standard", isZh ? "标准分析" : "Standard analysis", isZh ? "完整结构和清晰依据" : "Full structure with clear rationale", isZh ? "分析深度：标准分析，输出完整结构、依据和建议。" : "Depth: standard analysis with structure, rationale, and recommendations."),
-          makeSuggestion("deep", isZh ? "深度报告" : "Deep report", isZh ? "适合沉淀成报告或 PDF" : "Suitable for a report or PDF", isZh ? "分析深度：深度报告，适合沉淀成正式报告或 PDF。" : "Depth: deep report suitable for a formal report or PDF."),
+          makeSuggestion("listing-gap", isZh ? "Listing 差距清单" : "Listing gap list", isZh ? "我们的 listing 缺什么、该补什么" : "What our listing is missing and what to add", isZh ? "交付形式：listing 差距清单，逐项指出我们的标题、五点、图片和属性缺什么。" : "Output: a listing gap list naming what our title, bullets, images, and attributes are missing."),
+          makeSuggestion("brief", isZh ? "定位简报" : "Positioning brief", isZh ? "用于内部判断选品和定价" : "For internal assortment and pricing decisions", isZh ? "交付形式：定位简报，强调竞争格局、价格带机会和差异化方向。" : "Output: positioning brief covering the landscape, price-band opportunities, and differentiation."),
+          makeSuggestion("content", isZh ? "内容角度素材" : "Content angles", isZh ? "转化成可发布的选题" : "Turn the analysis into publishable topics", isZh ? "交付形式：内容角度素材，输出可发布的选题和卖点表达。" : "Output: content angles and publishable topics drawn from the analysis."),
           other,
         ],
       },
@@ -1439,8 +1470,8 @@ function getClarifyFollowupSteps(
         body: isZh ? "如果已有文件，可以先说明数据类型或直接上传。" : "If you have a file, describe the data type or attach it.",
         suggestions: [
           makeSuggestion("uploaded", isZh ? "已上传/工作区数据" : "Uploaded/workspace data", isZh ? "基于现有文件分析" : "Analyze available files", isZh ? "数据来源：基于已上传或工作区文件分析。" : "Data source: use uploaded or workspace files."),
-          makeSuggestion("campaign", isZh ? "投放/活动数据" : "Campaign data", isZh ? "关注投放表现和转化" : "Focus on performance and conversion", isZh ? "数据来源：投放或活动数据，重点关注表现和转化。" : "Data source: campaign data; focus on performance and conversion."),
-          makeSuggestion("manual", isZh ? "文字描述数据" : "Described data", isZh ? "用户会用文字提供口径" : "Use user-provided definitions", isZh ? "数据来源：用户文字描述的数据和口径。" : "Data source: user-described data and definitions."),
+          makeSuggestion("ads", isZh ? "广告与销售数据" : "Ad and sales data", isZh ? "关注 ACOS、转化和客单价" : "Focus on ACOS, conversion, and AOV", isZh ? "数据来源：广告与销售数据，重点关注 ACOS、转化率和客单价。" : "Data source: ad and sales data; focus on ACOS, conversion rate, and AOV."),
+          makeSuggestion("returns", isZh ? "退货与评论数据" : "Returns and review data", isZh ? "关注退货率、原因和评分" : "Focus on return rate, reasons, and ratings", isZh ? "数据来源：退货与评论数据，重点关注退货率、退货原因和评分变化。" : "Data source: returns and review data; focus on return rate, reasons, and rating shifts."),
           other,
         ],
       },
@@ -1450,7 +1481,7 @@ function getClarifyFollowupSteps(
         body: isZh ? "选一个分析目标，我会据此组织指标和结论。" : "Pick an analysis goal so I can structure metrics and findings.",
         suggestions: [
           makeSuggestion("why", isZh ? "为什么变化" : "Why it changed", isZh ? "寻找涨跌原因和影响因素" : "Find drivers of movement", isZh ? "分析目标：解释指标变化原因和影响因素。" : "Analysis goal: explain metric movement and drivers."),
-          makeSuggestion("performance", isZh ? "表现评估" : "Performance readout", isZh ? "判断好坏和优先级" : "Assess performance and priorities", isZh ? "分析目标：评估表现好坏并给出优先级。" : "Analysis goal: evaluate performance and priorities."),
+          makeSuggestion("profitable", isZh ? "哪个渠道真赚钱" : "Which channel actually earns", isZh ? "扣掉退货和运费后再排序" : "Rank after returns and freight", isZh ? "分析目标：扣除退货和运费后，比较各渠道/SKU 的真实贡献并排序。" : "Analysis goal: compare true contribution by channel or SKU after returns and freight, then rank."),
           makeSuggestion("next", isZh ? "下一步建议" : "Next actions", isZh ? "直接产出行动建议" : "Produce practical recommendations", isZh ? "分析目标：产出下一步行动建议。" : "Analysis goal: produce practical next actions."),
           other,
         ],
@@ -1463,11 +1494,11 @@ function getClarifyFollowupSteps(
       {
         id: "plan-goal",
         title: isZh ? "这次方案的核心目标是什么？" : "What is the core goal?",
-        body: isZh ? "先定目标，后续渠道、内容和 KPI 才能对齐。" : "Goal first, then channels, content, and KPIs can align.",
+        body: isZh ? "先定目标，后续渠道、内容和指标才能对齐。" : "Goal first, then channels, content, and metrics can align.",
         suggestions: [
-          makeSuggestion("awareness", isZh ? "提升认知" : "Awareness", isZh ? "让更多目标用户知道" : "Reach more target users", isZh ? "核心目标：提升认知，扩大目标用户触达。" : "Core goal: awareness and reach."),
-          makeSuggestion("leads", isZh ? "获客转化" : "Lead generation", isZh ? "收集线索或促进咨询" : "Collect leads or inquiries", isZh ? "核心目标：获客转化，收集线索或促进咨询。" : "Core goal: lead generation and inquiries."),
-          makeSuggestion("activation", isZh ? "用户激活" : "Activation", isZh ? "推动试用、购买或复购" : "Drive trials, purchases, or repeat use", isZh ? "核心目标：用户激活，推动试用、购买或复购。" : "Core goal: activation, trials, purchases, or repeat use."),
+          makeSuggestion("coldstart", isZh ? "新品冷启动" : "Cold-start a new SKU", isZh ? "拿到前几十个订单和首批评论" : "Get the first orders and first reviews", isZh ? "核心目标：新品冷启动，拿到首批订单和评论。" : "Core goal: cold-start a new SKU — first orders and first reviews."),
+          makeSuggestion("scale", isZh ? "放量增长" : "Scale volume", isZh ? "在可接受 ACOS 下扩大销量" : "Grow orders at an acceptable ACOS", isZh ? "核心目标：放量增长，在可接受的 ACOS 下扩大销量。" : "Core goal: scale volume while holding ACOS acceptable."),
+          makeSuggestion("margin", isZh ? "改善利润" : "Improve margin", isZh ? "降退货、提客单价、减广告依赖" : "Cut returns, lift AOV, reduce ad dependence", isZh ? "核心目标：改善利润，降低退货率、提升客单价、减少对广告的依赖。" : "Core goal: improve margin — cut returns, lift AOV, reduce ad dependence."),
           other,
         ],
       },
@@ -1476,9 +1507,10 @@ function getClarifyFollowupSteps(
         title: isZh ? "优先面向哪个渠道？" : "Which channel is primary?",
         body: isZh ? "选择主渠道后，我会匹配内容形式和节奏。" : "With a primary channel, I can match formats and cadence.",
         suggestions: [
-          makeSuggestion("social", isZh ? "社媒平台" : "Social channels", isZh ? "小红书/LinkedIn/公众号等" : "LinkedIn, newsletters, social posts", isZh ? "主渠道：社媒平台，按平台内容形式组织。" : "Primary channel: social platforms; structure by content format."),
-          makeSuggestion("private", isZh ? "私域/社群" : "Owned/community", isZh ? "社群、邮件、企微等" : "Email, community, owned channels", isZh ? "主渠道：私域或社群，强调转化链路和持续触达。" : "Primary channel: owned/community; emphasize conversion path and repeated touchpoints."),
-          makeSuggestion("multi", isZh ? "多渠道整合" : "Integrated channels", isZh ? "线上线下组合推进" : "Coordinate multiple channels", isZh ? "主渠道：多渠道整合，按阶段组合线上线下触点。" : "Primary channel: integrated channels across stages."),
+          makeSuggestion("marketplace", isZh ? "平台（Amazon / Wayfair）" : "Marketplaces (Amazon / Wayfair)", isZh ? "listing、广告和评论为主" : "Listings, ads, and reviews", isZh ? "主渠道：Amazon / Wayfair，围绕 listing 优化、广告结构和评论积累组织。" : "Primary channel: Amazon / Wayfair — organize around listing optimization, ad structure, and review accumulation."),
+          makeSuggestion("owned", isZh ? "独立站 + 邮件" : "Own store + email", isZh ? "商详、落地页和生命周期邮件" : "Product pages, landing pages, lifecycle email", isZh ? "主渠道：自有独立站与邮件，围绕商详、落地页和生命周期邮件组织。" : "Primary channel: own store and email — product pages, landing pages, and lifecycle email."),
+          makeSuggestion("social", isZh ? "社媒（IG / Pinterest / TikTok）" : "Social (IG / Pinterest / TikTok)", isZh ? "房间实景内容拉新" : "Room-scene content for discovery", isZh ? "主渠道：Instagram / Pinterest / TikTok，围绕房间实景内容拉新。" : "Primary channel: Instagram / Pinterest / TikTok — room-scene content for discovery."),
+          makeSuggestion("multi", isZh ? "多渠道整合" : "Integrated channels", isZh ? "分阶段组合平台与自有渠道" : "Sequence marketplace and owned channels", isZh ? "主渠道：多渠道整合，按阶段组合平台与自有渠道。" : "Primary channel: integrated — sequence marketplace and owned channels by phase."),
           other,
         ],
       },
@@ -1488,12 +1520,12 @@ function getClarifyFollowupSteps(
   return [
     {
       id: "generic-target",
-      title: isZh ? "目标受众是谁？" : "Who is the audience?",
-      body: isZh ? "先确定对象，生成内容才会更贴近真实场景。" : "Define the audience so the output fits the actual use case.",
+      title: isZh ? "目标客户是谁？" : "Who is the customer?",
+      body: isZh ? "先确定对象，生成内容才会更贴近真实场景。" : "Define the customer so the output fits the actual situation.",
       suggestions: [
-        makeSuggestion("b2b", isZh ? "B2B 决策者" : "B2B decision-makers", isZh ? "面向企业客户和采购决策" : "Enterprise buyers and decision-makers", isZh ? "目标受众：B2B 决策者或企业客户。" : "Audience: B2B decision-makers or enterprise buyers."),
-        makeSuggestion("operators", isZh ? "运营/市场团队" : "Marketing/operators", isZh ? "面向内部执行团队" : "Internal execution teams", isZh ? "目标受众：运营、市场或内部执行团队。" : "Audience: marketing, operations, or internal execution teams."),
-        makeSuggestion("consumers", isZh ? "普通消费者" : "Consumers", isZh ? "面向 C 端用户" : "Consumer-facing audience", isZh ? "目标受众：普通消费者或 C 端用户。" : "Audience: consumers or end users."),
+        makeSuggestion("homeowner", isZh ? "美国房主" : "US homeowners", isZh ? "换新升级，在意品质和搭配" : "Upgrading; quality and coherence matter", isZh ? "目标客户：美国房主，换新升级，在意品质和整体搭配。" : "Customer: US homeowners upgrading; quality and a coherent look matter."),
+        makeSuggestion("renter", isZh ? "租客 / 小空间" : "Renters / small spaces", isZh ? "在意尺寸、搬运和组装" : "Size, moving, and assembly matter", isZh ? "目标客户：租客或小空间用户，在意尺寸适配、搬运和组装。" : "Customer: renters or small-space buyers; fit, moving, and assembly matter."),
+        makeSuggestion("firsthome", isZh ? "首次置业" : "First-time buyers", isZh ? "一次买多件，在意性价比" : "Buying several pieces; value matters", isZh ? "目标客户：首次置业人群，一次采购多件，在意性价比和成套感。" : "Customer: first-time buyers purchasing several pieces; value and coherence matter."),
         other,
       ],
     },
@@ -1502,9 +1534,9 @@ function getClarifyFollowupSteps(
       title: isZh ? "希望最终是什么形式？" : "What final format do you want?",
       body: isZh ? "选择交付形式后，我会按对应结构输出。" : "Choose the deliverable so I can use the right structure.",
       suggestions: [
-        makeSuggestion("copy", isZh ? "可直接发布的文案" : "Publishable copy", isZh ? "短内容、标题、正文和 CTA" : "Short copy, title, body, CTA", isZh ? "交付形式：可直接发布的文案，包含标题、正文和 CTA。" : "Format: publishable copy with title, body, and CTA."),
+        makeSuggestion("copy", isZh ? "可直接用的文案" : "Ready-to-use copy", isZh ? "listing、商详或社媒成稿" : "A listing, product page, or social draft", isZh ? "交付形式：可直接使用的文案成稿。" : "Format: ready-to-use copy."),
         makeSuggestion("outline", isZh ? "结构化方案" : "Structured plan", isZh ? "分模块给出策略和步骤" : "Modular strategy and steps", isZh ? "交付形式：结构化方案，分模块给出策略和步骤。" : "Format: structured plan with modules and steps."),
-        makeSuggestion("doc", isZh ? "完整文档" : "Full document", isZh ? "适合沉淀成报告或附件" : "Suitable for report or artifact", isZh ? "交付形式：完整文档，适合沉淀成报告或附件。" : "Format: full document suitable for a report or artifact."),
+        makeSuggestion("doc", isZh ? "完整文档 / PDF" : "Full document / PDF", isZh ? "规格单、目录或对比报告" : "Spec sheet, catalog page, or comparison report", isZh ? "交付形式：完整文档，可沉淀成规格单、目录或对比报告。" : "Format: a full document — spec sheet, catalog page, or comparison report."),
         other,
       ],
     },
@@ -1545,7 +1577,7 @@ function looksLikeTask(text: string): boolean {
   const compact = text.replace(/\s+/g, "");
   if (compact.length < 4) return false;
   const taskVerb = /写|做|生成|编写|创作|出一|制作|分析|总结|复盘|策划|规划|方案|优化|设计|撰写|起草|润色|改写|produce|write|generate|create|draft|analyz|analys|summar|plan|optimi|design|review|rewrite/i;
-  const taskNoun = /营销|文案|种草|推广|宣传|广告|海报|社媒|小红书|公众号|朋友圈|短视频|邮件|活动|报告|方案|brief|linkedin|post|copy|campaign|report|email|social/i;
+  const taskNoun = /listing|文案|商详|详情页|落地页|营销|推广|宣传|广告|社媒|短视频|邮件|上架|活动|报告|方案|规格|尺寸|材质|退货|竞品|brief|post|copy|campaign|report|email|social|amazon|wayfair|pinterest/i;
   return taskVerb.test(text) || taskNoun.test(text);
 }
 
@@ -1653,8 +1685,8 @@ function SkillPickerPopover({
         </div>
         <p className="mt-1 text-[11px] leading-snug text-fg-subtle">
           {locale === "zh"
-            ? "选择一个营销 SOP，生成内容时会按对应流程执行。"
-            : "Pick a marketing SOP to guide the response workflow."}
+            ? "选择一个业务 SOP，生成内容时会按对应流程执行。"
+            : "Pick a business SOP to guide the response workflow."}
         </p>
       </div>
       <div className="max-h-[calc(44vh-4.75rem)] space-y-2 overflow-y-auto p-2">
@@ -1697,12 +1729,12 @@ function localizedSkill(skill: WorkflowSkill, locale: "zh" | "en") {
 
   const zh: Record<string, { name: string; description: string }> = {
     "competitive-positioning-brief": {
-      name: "竞争定位简报",
-      description: "用于竞品对比、差异化叙事、销售 battlecard 或定位备忘录，帮助梳理竞争格局、证据强度、差异化支柱和营销话术。",
+      name: "竞品 Listing 对比简报",
+      description: "用于对比同品类竞品或平台头部 listing：价格带、尺寸与材质、配送方式、评分与评论、图文质量、退货政策，输出差异化机会与 PDF 简报。",
     },
     "product-launch-campaign": {
-      name: "产品上市 campaign",
-      description: "用于新产品、新功能或服务发布，按目标、受众、渠道、时间线和 KPI 拆解完整上市计划与内容交付清单。",
+      name: "新品上架战役",
+      description: "用于新品从打样确认到上架放量：分阶段拆解首批到仓、listing 冷启动、评论积累、广告放量，并给出各阶段素材需求与衡量指标。",
     },
   };
 

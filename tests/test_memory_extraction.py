@@ -53,7 +53,7 @@ class MemoryExtractionTests(unittest.TestCase):
         client = _FakeClient(response)
         with mock.patch("server.memory_extraction.llm.get_client", return_value=client):
             observations = memory_extraction.extract_observations(
-                ["我们的产品是牙科诊所预约系统"], use_llm=True
+                ["我们的产品是实木餐桌，主要在亚马逊卖"], use_llm=True
             )
 
         self.assertIn(Observation("products", "牙科诊所预约系统", True), observations)
@@ -86,19 +86,19 @@ class MemoryExtractionTests(unittest.TestCase):
     def test_falls_back_to_heuristic_without_client(self) -> None:
         with mock.patch("server.memory_extraction.llm.get_client", return_value=None):
             observations = memory_extraction.extract_observations(
-                ["写一篇小红书文案"], use_llm=True
+                ["写一篇亚马逊 listing"], use_llm=True
             )
         # Heuristic keyword path recognizes the channel (incidental → not explicit).
-        self.assertIn(Observation("channels", "Little Red Book", False), observations)
+        self.assertIn(Observation("channels", "Amazon", False), observations)
 
     def test_llm_failure_degrades_to_heuristic(self) -> None:
         client = _FakeClient(None)
         client.messages.create = mock.Mock(side_effect=RuntimeError("boom"))
         with mock.patch("server.memory_extraction.llm.get_client", return_value=client):
             observations = memory_extraction.extract_observations(
-                ["写一篇小红书文案"], use_llm=True
+                ["写一篇亚马逊 listing"], use_llm=True
             )
-        self.assertIn(Observation("channels", "Little Red Book", False), observations)
+        self.assertIn(Observation("channels", "Amazon", False), observations)
 
 
 if __name__ == "__main__":

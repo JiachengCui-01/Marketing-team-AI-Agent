@@ -1,3 +1,4 @@
 # Assets
 
-Place reusable battlecard templates, evidence matrices, or messaging examples here.
+Place reusable comparison tables, competitor listing screenshots, or spec
+comparison matrices here.

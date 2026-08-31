@@ -74,7 +74,7 @@ class ClarifyTests(unittest.TestCase):
     def test_needs_true_but_no_valid_questions_becomes_false(self) -> None:
         client = _client_with({"needs_clarification": True, "questions": []})
         with mock.patch("server.clarify.llm.get_client", return_value=client):
-            plan = clarify.plan_clarification("u1", "写一篇小红书文案", "zh")
+            plan = clarify.plan_clarification("u1", "写一篇亚马逊 listing", "zh")
         self.assertFalse(plan["needs_clarification"])
         self.assertEqual(plan["questions"], [])
 

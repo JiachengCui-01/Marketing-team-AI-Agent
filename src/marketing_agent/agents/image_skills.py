@@ -1,9 +1,13 @@
-"""Platform-specific image styles for the marketing image generator.
+"""Channel-specific image styles for the marketing image generator.
 
 Mirrors ``content_skills.py``: a frozen dataclass registry keyed by ``key`` with a
 selector that resolves an explicit style key, task text, or a default. Each style
 turns into prompt guidance (``prompt_prefix``) injected into the Gemini call so a
-product photo is re-composed in the right platform aesthetic.
+product photo is re-composed in the right channel aesthetic.
+
+The channel set matches where a US DTC furniture brand actually publishes. Note
+that furniture is bulky: hand-held and flat-lay compositions are physically
+impossible here, so every style is either a studio hero shot or a room set.
 """
 from __future__ import annotations
 
@@ -45,61 +49,78 @@ class ImageSkill:
 
 
 IMAGE_SKILLS: dict[str, ImageSkill] = {
-    "xiaohongshu": ImageSkill(
-        key="xiaohongshu",
-        label="Xiaohongshu / Little Red Book",
-        aliases=("xiaohongshu", "little red book", "小红书", "xhs", "rednote"),
-        aspect_ratio="3:4",
-        style_rules=(
-            "Warm, aspirational lifestyle scene with the product as the hero.",
-            "Soft natural lighting, cozy props, and an inviting real-life context.",
-            "Leave clean space at the top for a caption sticker.",
-        ),
-        background_guidance="a tasteful lifestyle setting (desk, cafe, vanity) that fits the product",
-        negative_hints=("no heavy text overlay", "no watermark", "no cluttered composition"),
-        description="生活化种草风：暖光、real-life 场景、竖版 3:4，突出商品氛围感。",
-    ),
-    "taobao": ImageSkill(
-        key="taobao",
-        label="Taobao / Tmall Main Image",
-        aliases=("taobao", "tmall", "淘宝", "天猫", "主图", "电商"),
-        aspect_ratio="1:1",
-        style_rules=(
-            "Clean e-commerce main image with the product perfectly centered and sharp.",
-            "Bright, even studio lighting with crisp detail and true-to-life color.",
-            "Product fills most of the frame.",
-        ),
-        background_guidance="a pure white or very light seamless studio background",
-        negative_hints=("no text", "no logos", "no props that obscure the product", "no busy background"),
-        description="电商主图风：纯白背景、居中、影棚打光、方图 1:1，突出商品本体。",
-    ),
     "amazon": ImageSkill(
         key="amazon",
         label="Amazon Listing Main Image",
-        aliases=("amazon", "亚马逊", "亚马逊主图", "listing"),
+        aliases=("amazon", "亚马逊", "亚马逊主图", "listing", "白底", "主图"),
         aspect_ratio="1:1",
         style_rules=(
-            "Compliant marketplace main image: product only, straight-on hero angle.",
-            "Neutral, professional studio lighting with accurate color.",
-            "Product occupies roughly 85% of the frame.",
+            "Compliant marketplace main image: the furniture piece alone, shot at a "
+            "three-quarter hero angle that reveals both depth and profile.",
+            "Neutral, even studio lighting with accurate wood tone and fabric color.",
+            "Piece occupies roughly 85% of the frame and sits flat, not floating.",
         ),
         background_guidance="a pure white (RGB 255,255,255) background as required by marketplace rules",
-        negative_hints=("no text", "no badges", "no borders", "no additional props"),
-        description="亚马逊 listing 主图：纯白合规、仅商品、方图 1:1、专业布光。",
+        negative_hints=("no text", "no badges", "no borders", "no props", "no room context"),
+        description="亚马逊 listing 主图：纯白合规、仅家具本体、四分之三角度、方图 1:1。",
+    ),
+    "wayfair": ImageSkill(
+        key="wayfair",
+        label="Wayfair Listing Image",
+        aliases=("wayfair", "overstock", "属性图"),
+        aspect_ratio="1:1",
+        style_rules=(
+            "Catalog-style shot that reads clearly at thumbnail size in a browse grid.",
+            "Show the piece styled minimally in a lightly furnished room so scale is legible.",
+            "Even daylight, true-to-life finish color, full silhouette visible.",
+        ),
+        background_guidance="a clean, softly furnished interior with a light neutral wall and floor",
+        negative_hints=("no text overlay", "no watermark", "no clutter competing with the piece"),
+        description="Wayfair 列表图：浅色简约室内、缩略图下轮廓清晰、方图 1:1。",
+    ),
+    "dtc_site": ImageSkill(
+        key="dtc_site",
+        label="DTC Site Hero",
+        aliases=("dtc", "dtc_site", "shopify", "独立站", "官网", "hero", "banner", "横幅"),
+        aspect_ratio="16:9",
+        style_rules=(
+            "Wide editorial hero for a storefront banner, with the piece placed off-center.",
+            "Full room context and natural window light, styled but livable.",
+            "Leave clear negative space on one side for a headline and button.",
+        ),
+        background_guidance="a real, well-composed interior that suits the piece's style",
+        negative_hints=("no text overlay", "no watermark", "no harsh flash lighting"),
+        description="独立站 hero 图：宽幅 16:9、完整房间场景、一侧留白放标题按钮。",
     ),
     "instagram": ImageSkill(
         key="instagram",
         label="Instagram",
-        aliases=("instagram", "ins", "照片墙", "ig"),
+        aliases=("instagram", "ins", "ig", "meta", "facebook", "照片墙"),
         aspect_ratio="4:5",
         style_rules=(
-            "Editorial, on-trend feed aesthetic with confident styling.",
-            "Cohesive color palette, shallow depth of field, and a strong focal point.",
+            "Editorial, on-trend room set where the piece anchors the composition.",
+            "Cohesive color palette, soft directional daylight, styled with plants, "
+            "textiles, and ceramics rather than product props.",
             "Vertical 4:5 framing optimized for the feed.",
         ),
-        background_guidance="a stylish, color-coordinated backdrop that complements the product",
-        negative_hints=("no watermark", "no low-resolution artifacts"),
-        description="Ins 风：杂志感、统一色调、浅景深、竖版 4:5，适合信息流。",
+        background_guidance="a styled real interior with a coordinated palette that complements the finish",
+        negative_hints=("no watermark", "no low-resolution artifacts", "no text overlay"),
+        description="Instagram 风：杂志感房间实景、统一色调、竖版 4:5，适合信息流。",
+    ),
+    "pinterest": ImageSkill(
+        key="pinterest",
+        label="Pinterest",
+        aliases=("pinterest", "pin", "灵感", "灵感图"),
+        aspect_ratio="3:4",
+        style_rules=(
+            "Tall room-inspiration image that reads as a save-worthy interior idea.",
+            "Show the full room story — the piece in context with the wall, floor, and "
+            "styling that make the look reproducible.",
+            "Bright, airy, high-contrast enough to stand out in a dense grid.",
+        ),
+        background_guidance="an aspirational but achievable interior in a clearly identifiable style",
+        negative_hints=("no watermark", "no cropped-off furniture", "no text overlay"),
+        description="Pinterest 灵感图：竖版 3:4、完整房间搭配、明亮通透、可复刻的风格感。",
     ),
     "generic": ImageSkill(
         key="generic",
@@ -107,10 +128,10 @@ IMAGE_SKILLS: dict[str, ImageSkill] = {
         aliases=("generic", "通用", "图片", "default"),
         aspect_ratio="1:1",
         style_rules=(
-            "Clean, versatile marketing composition with the product as the clear subject.",
+            "Clean, versatile composition with the furniture piece as the clear subject.",
             "Balanced lighting and a professional, uncluttered look.",
         ),
-        background_guidance="a simple, neutral background that keeps focus on the product",
+        background_guidance="a simple, neutral background that keeps focus on the piece",
         negative_hints=("no watermark",),
         description="通用营销图：干净中性背景、专业布光、方图 1:1。",
     ),
@@ -118,10 +139,12 @@ IMAGE_SKILLS: dict[str, ImageSkill] = {
 
 
 IMAGE_FORMAT_DEFAULTS = {
-    "product": "taobao",
-    "lifestyle": "xiaohongshu",
+    "product": "amazon",
     "listing": "amazon",
+    "lifestyle": "instagram",
     "social": "instagram",
+    "room": "dtc_site",
+    "inspiration": "pinterest",
 }
 
 

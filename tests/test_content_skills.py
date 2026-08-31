@@ -9,24 +9,27 @@ from server import marketing_skills
 
 
 class ContentSkillTests(unittest.TestCase):
-    def test_selects_xiaohongshu_from_task(self) -> None:
-        skill = select_content_skill(
-            "social_post",
-            "\u4e3a\u5c0f\u7ea2\u4e66\u751f\u6210\u4e00\u7bc7\u65b0\u54c1\u79cd\u8349\u6587\u6848",
-        )
-        self.assertEqual(skill.key, "xiaohongshu")
+    def test_selects_amazon_listing_from_task(self) -> None:
+        skill = select_content_skill("listing", "\u7ed9\u8fd9\u5f20\u9910\u684c\u5199\u4e00\u4efd\u4e9a\u9a6c\u900a listing")
+        self.assertEqual(skill.key, "amazon_listing")
 
-    def test_social_post_defaults_to_linkedin(self) -> None:
-        skill = select_content_skill("social_post", "Announce our new feature")
-        self.assertEqual(skill.key, "linkedin")
+    def test_social_post_defaults_to_instagram(self) -> None:
+        # The generic build defaulted social_post to LinkedIn; this business is
+        # consumer-facing, so the default has to be a visual consumer channel.
+        skill = select_content_skill("social_post", "Announce our new collection")
+        self.assertEqual(skill.key, "instagram")
+
+    def test_listing_format_defaults_to_amazon(self) -> None:
+        skill = select_content_skill("listing", "Announce our new collection")
+        self.assertEqual(skill.key, "amazon_listing")
 
     def test_explicit_platform_overrides_format_default(self) -> None:
         skill = select_content_skill(
             "social_post",
-            "Announce our new feature",
-            platform="twitter",
+            "Announce our new collection",
+            platform="pinterest",
         )
-        self.assertEqual(skill.key, "twitter")
+        self.assertEqual(skill.key, "pinterest")
 
     def test_content_agent_injects_selected_skill(self) -> None:
         captured: dict[str, str] = {}
@@ -39,15 +42,16 @@ class ContentSkillTests(unittest.TestCase):
         with mock.patch.object(content_agent, "run_agent", side_effect=fake_run_agent):
             result = content_agent.run(
                 client=mock.Mock(),
-                task="\u4e3a\u5c0f\u7ea2\u4e66\u751f\u6210\u65b0\u54c1\u79cd\u8349\u6587\u6848",
-                format="social_post",
+                task="\u7ed9\u8fd9\u6b3e\u5b9e\u6728\u9910\u684c\u5199\u4e9a\u9a6c\u900a listing",
+                format="listing",
             )
 
         self.assertEqual(result, "ok")
-        self.assertIn("Platform skill: Xiaohongshu", captured["user_message"])
-        self.assertIn("Selected platform skill: xiaohongshu", captured["user_message"])
+        self.assertIn("Platform skill: Amazon Listing", captured["user_message"])
+        self.assertIn("Selected platform skill: amazon_listing", captured["user_message"])
         self.assertIn("Output language: Simplified Chinese", captured["user_message"])
-        self.assertNotIn("Twitter/X", captured["system"])
+        # The system prompt must forbid inventing physical specs.
+        self.assertIn("[confirm", captured["system"])
 
     def test_content_agent_respects_explicit_english_request(self) -> None:
         captured: dict[str, str] = {}

@@ -10,7 +10,6 @@ import time
 from datetime import datetime, time as dtime, timedelta
 from zoneinfo import ZoneInfo
 
-import anthropic
 
 from marketing_agent.agents import research_agent
 from marketing_agent.source_scoring import (
@@ -20,7 +19,7 @@ from marketing_agent.source_scoring import (
     summarize_sources,
 )
 
-from . import db
+from . import db, llm
 
 WINDOW_HOURS = 24
 
@@ -119,9 +118,21 @@ def _needs_chinese_sources(industry: str, language: str) -> bool:
     return any(marker in lowered for marker in china_markers)
 
 
+# Trade press and regulators that actually cover the US furniture market. The
+# research agent's generic Tier 1/Tier 2 guidance skews toward general business
+# media, which under-serves a furniture importer.
+_US_FURNITURE_SOURCE_INSTRUCTION = (
+    "For US furniture and home-furnishings topics, actively try category trade press "
+    "and primary sources in addition to general business media: Furniture Today, Home "
+    "News Now, HFN, Business of Home, Furniture World, the AHFA, and the High Point "
+    "Market. For tariffs, anti-dumping duties, import rules, or product-safety topics, "
+    "prefer primary regulators: USITC, CBP, CPSC, and trade.gov."
+)
+
+
 def _localized_source_instruction(industry: str, language: str) -> str:
     if not _needs_chinese_sources(industry, language):
-        return ""
+        return _US_FURNITURE_SOURCE_INSTRUCTION
     return (
         "Because this is a Chinese-language or China-related digest, actively try "
         "Chinese and China-local sources in addition to international sources. "
@@ -161,12 +172,20 @@ def build_task(
     return task, window_start.timestamp(), window_end.timestamp()
 
 
-def generate_summary(config: dict, client: anthropic.Anthropic | None = None) -> dict:
+def generate_summary(config: dict, client=None) -> dict:
     """Generate and persist a news summary for the given news config row.
+
+    ``client`` is optional so the background scheduler in ``main.py`` can call this
+    with just a config; it then reuses the shared process-level client rather than
+    building a new connection pool per run.
 
     Returns the persisted summary record.
     """
-    client = client or anthropic.Anthropic()
+    client = client or llm.get_client()
+    if client is None:
+        raise NewsGenerationError(
+            "DEEPSEEK_API_KEY 未配置，无法生成行业简报。"
+        )
     industry = config["industry"]
     tz = _config_tz(config)
     now = datetime.now(tz)

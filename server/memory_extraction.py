@@ -21,18 +21,24 @@ logger = logging.getLogger(__name__)
 _TOOL_NAME = "record_marketing_profile"
 
 _SYSTEM = (
-    "You extract durable enterprise marketing profile facts from a user's message "
-    "for a long-term memory system. Only record facts that are stated or strongly "
-    "implied and that stay true across future requests (role, industry, company/brand, "
-    "products, target customers, channels, tone, report format, KPI/metric definitions, "
-    "other standing preferences). Record each value in the user's own words and original "
-    "language; do not translate or invent. Leave a field empty when unknown — never guess. "
-    "Set explicit=true only for direct self-declarations (e.g. 'our product is X', "
-    "'we mainly post on LinkedIn', '我的职位是…'); set explicit=false for incidental mentions "
-    "inferred from a one-off task. Do not record one-off task instructions as profile facts.\n"
+    "You extract durable business profile facts from a user's message for the long-term "
+    "memory of a marketing workspace. The company designs large furniture, has it built by "
+    "contract suppliers, and sells it direct to consumers in the United States.\n"
+    "Only record facts that are stated or strongly implied and that stay true across future "
+    "requests (role, category/industry, company/brand, product line, target customers, "
+    "sales and marketing channels, tone, deliverable format, KPI/metric definitions, other "
+    "standing preferences). Record each value in the user's own words and original language; "
+    "do not translate or invent. Leave a field empty when unknown — never guess.\n"
+    "Do NOT record a one-off product spec (a specific sofa's seat depth, one SKU's carton "
+    "count) as a profile fact — those belong to a single task, not to the standing profile. "
+    "Do record durable ones, such as the fact that the line is all solid wood, or that "
+    "everything ships LTL.\n"
+    "Set explicit=true only for direct self-declarations (e.g. 'our main line is solid oak "
+    "dining tables', 'we sell mostly on Amazon and Wayfair', '我的职位是海外市场负责人'); "
+    "set explicit=false for incidental mentions inferred from a one-off task.\n"
     "You may be given already-known values for this user. When an extracted fact refers to the "
     "same thing as a known value for that field — even if paraphrased, abbreviated, or a longer/"
-    "shorter form (e.g. 'AI办公Agent系统' vs 'AI办公Agent') — output that known value VERBATIM so "
+    "shorter form (e.g. '实木餐桌系列' vs '实木餐桌') — output that known value VERBATIM so "
     "the counts merge. Only output a new value when it is genuinely a different thing."
 )
 
@@ -124,7 +130,7 @@ def _content(joined: str, known_values: dict[str, list[str]], fields: dict[str, 
 def _build_tool(fields: dict[str, str]) -> dict:
     return {
         "name": _TOOL_NAME,
-        "description": "Record durable enterprise marketing profile facts stated by the user.",
+        "description": "Record durable business profile facts stated by the user.",
         "input_schema": {
             "type": "object",
             "properties": {

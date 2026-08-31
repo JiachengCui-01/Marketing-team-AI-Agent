@@ -14,13 +14,13 @@ if sys.platform == "win32":
     except Exception:  # noqa: BLE001
         pass
 
-import anthropic
 import typer
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 
+from . import llm_client
 from .config import OUTPUTS_DIR
 from .conversation import Conversation
 from .orchestrator import run_orchestrator
@@ -28,17 +28,17 @@ from .orchestrator import run_orchestrator
 load_dotenv()
 
 app = typer.Typer(
-    help="Enterprise marketing team AI agent — content, analytics, research.",
+    help="Furniture DTC marketing agent — listings, content, analytics, research.",
     no_args_is_help=True,
 )
 console = Console()
 
 
-def _ensure_client() -> anthropic.Anthropic:
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        console.print("[red]ANTHROPIC_API_KEY not set. Copy .env.example to .env and add your key.[/red]")
+def _ensure_client() -> llm_client.DeepSeek:
+    if not os.environ.get("DEEPSEEK_API_KEY"):
+        console.print("[red]DEEPSEEK_API_KEY not set. Copy .env.example to .env and add your key.[/red]")
         raise typer.Exit(1)
-    return anthropic.Anthropic()
+    return llm_client.DeepSeek()
 
 
 def _save_output(text: str, prefix: str = "result") -> Path:
@@ -70,11 +70,11 @@ def _event_logger(event: str, payload: dict) -> None:
 
 @app.command()
 def run(
-    prompt: str = typer.Argument(..., help="The request for the marketing team."),
+    prompt: str = typer.Argument(..., help="The request for the marketing workspace."),
     csv: Path | None = typer.Option(
         None,
         "--csv",
-        help="Optional path to a campaign CSV; the orchestrator will surface this to the analytics agent.",
+        help="Optional path to a sales/ads/returns CSV; the orchestrator will surface this to the analytics agent.",
     ),
     save: bool = typer.Option(True, help="Save the synthesized result to outputs/."),
 ) -> None:
@@ -85,7 +85,7 @@ def run(
         if not csv.exists():
             console.print(f"[red]CSV not found: {csv}[/red]")
             raise typer.Exit(1)
-        full_prompt = f"{prompt}\n\n(Campaign CSV available at: {csv.resolve()})"
+        full_prompt = f"{prompt}\n\n(Performance data available at: {csv.resolve()})"
     else:
         full_prompt = prompt
 
@@ -94,7 +94,7 @@ def run(
 
     try:
         result = run_orchestrator(client, conversation, full_prompt, on_event=_event_logger)
-    except anthropic.APIError as exc:
+    except llm_client.APIError as exc:
         console.print(f"[red]API error:[/red] {exc}")
         raise typer.Exit(1)
 
@@ -133,7 +133,7 @@ def chat() -> None:
 
         try:
             result = run_orchestrator(client, conversation, user_input, on_event=_event_logger)
-        except anthropic.APIError as exc:
+        except llm_client.APIError as exc:
             console.print(f"[red]API error:[/red] {exc}")
             continue
         except KeyboardInterrupt:

@@ -1,17 +1,24 @@
-"""Market & competitor research agent — server-side web search with citations."""
+"""Market & competitor research agent — web search with citations.
+
+Search is a client-side tool (``tools/web_search.py``) because DeepSeek has no
+server-side search. The model still writes source URLs inline, so downstream
+source-tier scoring is unchanged.
+"""
 from __future__ import annotations
-
-from typing import Any
-
-import anthropic
 
 from marketing_agent.source_scoring import annotate_markdown_with_source_tiers
 
-from ..config import MODEL_ID, SUBAGENT_EFFORT
-from .base import unavailable_markdown
+from .. import llm_client
+from ..config import SUBAGENT_EFFORT, SUBAGENT_MAX_TOKENS
+from ..domain import BRAND
+from ..tools import web_search
+from .base import run_agent, unavailable_markdown
 
-SYSTEM = """You are a marketing research analyst. You investigate market trends, competitor
-moves, and industry signals using the web_search tool.
+SYSTEM = f"""You are the market research analyst for {BRAND}, a design-led
+large-furniture brand selling direct to consumers in the United States. You investigate
+US furniture and home-furnishings demand, competing brands and marketplace listings,
+category and style trends, marketplace policy changes, tariffs and duties, and
+product-safety rules — using the web_search tool.
 
 Rules:
 
@@ -25,9 +32,12 @@ Rules:
 - Use Tier 3/Tier 4 only as weak market-signal context. They must not be the sole
   basis for factual claims, and you must naturally state the uncertainty they add.
 - You may run up to two focused follow-up searches if the first result set is
-  malformed, empty, or lacks enough date-confirmed sources.
-- If the server reports a search/tool limit after you have any relevant sources,
-  stop searching and synthesize from the sources already gathered.
+  malformed, empty, or lacks enough date-confirmed sources. Never run more than
+  three searches in total.
+- If a search returns an error or no usable results, stop searching and synthesize
+  from whatever sources you already have.
+- Only cite URLs that appeared in a web_search result. Never invent a URL, a
+  headline, or a publication date.
 - Cite every claim with a URL and (where visible) publication date.
 - For each key fact, trend, or competitor move in the body, keep 1-3 citation
   links at the end of that sentence or bullet, similar to academic inline
@@ -35,6 +45,12 @@ Rules:
 - Distinguish observed facts from inferences — label inferences as such.
 - Prefer recent material (≤ 6 months) for "what's happening" questions; older sources are fine
   for background/context.
+- For this business, weight these source types highly when relevant: US furniture trade
+  press (Furniture Today, Home News Now, HFN, Business of Home), retail and housing
+  demand data, and primary regulators for duties and safety (USITC, CBP, CPSC,
+  trade.gov). A tariff or CPSC rule change is a material finding, not background.
+- When comparing competitors, cite the actual listing or brand page you read. Do not
+  state a competitor's price, dimension, or material from memory.
 - If sources disagree, surface the disagreement.
 - Do not add a final raw URL list. The system will extract inline citation URLs,
   score source tiers, and append the Source Credibility section.
@@ -52,17 +68,20 @@ Output format (markdown):
   like [source title, date](url)
 - ...
 
-## Implications for Marketing
-2-3 bullets on what this means for our team's positioning, messaging, or roadmap.
+## Implications for Us
+2-3 bullets on what this means for assortment and product selection, pricing and
+positioning, listing and content angles, or import/compliance risk.
 
 ## Source Notes
 Only include this section when needed to explain source disagreement, missing
 strong sources, or Tier 3/Tier 4 uncertainty. Do not list raw URLs here.
 """
 
-# The basic search tool is more predictable for time-windowed news retrieval than
-# dynamic filtering, and three searches is Anthropic's recommended low-latency cap.
-TOOLS = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}]
+TOOLS = [web_search.WEB_SEARCH_TOOL]
+
+# Three searches is a reasonable low-latency cap; the loop needs a couple of extra
+# rounds on top for the synthesis turn.
+MAX_SEARCH_ROUNDS = 6
 
 
 def _research_unavailable(exc: Exception) -> str:
@@ -71,17 +90,36 @@ def _research_unavailable(exc: Exception) -> str:
         title="## Research Unavailable",
         feature="web research",
         retry_noun="research request",
-        credits_for="web search",
+        credits_for="web research",
+    )
+
+
+def _search_unconfigured() -> str:
+    return "\n".join(
+        [
+            "## Research Unavailable",
+            "",
+            web_search.unavailable_reason(),
+            "",
+            "## What to do next",
+            "1. Obtain a key from one of the supported search providers "
+            "(Tavily, Serper, Brave, or 博查 Bocha).",
+            "2. Set the matching environment variable on the API server and restart it.",
+            "3. Retry the research request.",
+        ]
     )
 
 
 def run(
-    client: anthropic.Anthropic,
+    client: llm_client.DeepSeek,
     task: str,
     topics: list[str],
     competitors: list[str] | None = None,
     response_language: str | None = None,
 ) -> str:
+    if not web_search.is_available():
+        return _search_unconfigured()
+
     parts = [
         f"Task: {task}",
         f"Topics: {', '.join(topics)}",
@@ -103,48 +141,21 @@ def run(
         )
 
     try:
-        response = client.messages.create(
-            model=MODEL_ID,
-            max_tokens=4096,
+        text = run_agent(
+            client=client,
             system=system,
-            thinking={"type": "adaptive"},
-            output_config={"effort": SUBAGENT_EFFORT},
+            user_message="\n".join(parts),
             tools=TOOLS,
-            messages=[{"role": "user", "content": "\n".join(parts)}],
-        )
-        text = _extract_text(response.content)
-        if text:
-            return annotate_markdown_with_source_tiers(text, language=response_language)
-        return (
-            "## Research Unavailable\n\n"
-            f"The research call ended with stop_reason={response.stop_reason!r} "
-            "but returned no text."
-        )
-    except anthropic.APIError as exc:
+            client_tool_handlers={"web_search": web_search.handle_web_search},
+            effort=SUBAGENT_EFFORT,
+            max_tokens=SUBAGENT_MAX_TOKENS,
+        ).strip()
+    except llm_client.APIError as exc:
         return _research_unavailable(exc)
 
-
-def _extract_text(content: list[Any]) -> str:
-    parts: list[str] = []
-    for block in content:
-        if block.type != "text":
-            continue
-        text = block.text
-        citations = _block_citation_links(block)
-        if citations and not any(url in text for _, url in citations):
-            text = text.rstrip() + " " + " ".join(f"[{title}]({url})" for title, url in citations)
-        parts.append(text)
-    return "\n".join(parts).strip()
-
-
-def _block_citation_links(block: Any) -> list[tuple[str, str]]:
-    links: list[tuple[str, str]] = []
-    seen: set[str] = set()
-    for citation in getattr(block, "citations", None) or []:
-        url = str(getattr(citation, "url", "") or "").strip()
-        if not url or url in seen:
-            continue
-        title = str(getattr(citation, "title", "") or "").strip() or url
-        seen.add(url)
-        links.append((title, url))
-    return links
+    if text:
+        return annotate_markdown_with_source_tiers(text, language=response_language)
+    return (
+        "## Research Unavailable\n\n"
+        "The research call returned no text. Retry the research request."
+    )

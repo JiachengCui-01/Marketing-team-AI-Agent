@@ -4,8 +4,8 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { I18nProvider } from "@/lib/i18n";
 
 export const metadata: Metadata = {
-  title: "Marketing Agent",
-  description: "Multi-agent AI for enterprise marketing teams.",
+  title: "家居出海工作台",
+  description: "Multi-agent AI workspace for a US-facing furniture DTC brand.",
 };
 
 export default function RootLayout({
@@ -14,7 +14,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="zh-CN" suppressHydrationWarning>
       <body>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem themes={["light", "dark", "aurora", "crystal"]}>
           <I18nProvider>{children}</I18nProvider>

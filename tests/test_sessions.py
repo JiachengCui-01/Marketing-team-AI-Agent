@@ -93,7 +93,7 @@ class SessionStoreTests(unittest.TestCase):
         db.upsert_user_marketing_memory(
             user_id,
             {
-                "channels": ["Little Red Book"],
+                "channels": ["Wayfair / Overstock"],
                 "audiences": ["Consumer lifestyle audiences"],
                 "deliverables": ["Marketing copy"],
             },
@@ -102,12 +102,12 @@ class SessionStoreTests(unittest.TestCase):
         conv = sessions.prepare_for_turn(session_id, user_id)
         assert conv is not None
         self.assertIn("Long-term enterprise marketing profile", conv.messages[0]["content"])
-        self.assertIn("Little Red Book", conv.messages[0]["content"])
+        self.assertIn("Wayfair / Overstock", conv.messages[0]["content"])
 
     def test_long_term_memory_requires_repeated_evidence(self) -> None:
         user_id = self.create_user()
         session_id = sessions.create(user_id)
-        prompt = "write XHS marketing copy for a SaaS product"
+        prompt = "write an amazon listing for our solid wood dining table"
 
         memory.update_long_term_marketing_memory(user_id, prompt)
         memory.update_long_term_marketing_memory(user_id, prompt)
@@ -118,19 +118,19 @@ class SessionStoreTests(unittest.TestCase):
 
         memory.update_long_term_marketing_memory(user_id, prompt)
         learned = memory.derive_learned_profile(user_id)
-        self.assertIn("Little Red Book", learned["channels"])
+        self.assertIn("Amazon", learned["channels"])
         # Manual layer stays empty even after promotion.
         self.assertIsNone(db.get_user_marketing_memory(user_id))
 
         conv = sessions.prepare_for_turn(session_id, user_id)
         assert conv is not None
         self.assertIn("Long-term enterprise marketing profile", conv.messages[0]["content"])
-        self.assertIn("Little Red Book", conv.messages[0]["content"])
+        self.assertIn("Amazon", conv.messages[0]["content"])
 
     def test_long_term_memory_can_be_disabled(self) -> None:
         user_id = self.create_user()
         db.set_user_memory_enabled(user_id, False)
-        prompt = "write XHS marketing copy for a SaaS product"
+        prompt = "write an amazon listing for our solid wood dining table"
 
         for _ in range(memory.LONG_TERM_EVIDENCE_THRESHOLD + 1):
             memory.update_long_term_marketing_memory(user_id, prompt)
@@ -141,9 +141,9 @@ class SessionStoreTests(unittest.TestCase):
     def test_long_term_memory_extracts_structured_profile_fields(self) -> None:
         user_id = self.create_user()
         prompt = (
-            "我的职位是增长负责人。所属行业是消费电子。公司是星环科技。主要产品是AI手机。"
-            "目标客户是科技尝鲜人群。常用渠道是小红书。语气偏好是真实种草。"
-            "报告格式偏好是结论先行。KPI是曝光和转化率。其他偏好是少用夸张表达。"
+            "我的职位是海外市场负责人。所属行业是大件家具出口。公司是星辰家居。主要产品是实木餐桌。"
+            "目标客户是美国首次置业人群。常用渠道是亚马逊。语气偏好是温暖真实。"
+            "报告格式偏好是结论先行。KPI是ACOS和退货率。其他偏好是少用夸张表达。"
         )
 
         # Even explicit self-declarations must recur before entering long-term memory.
@@ -151,21 +151,21 @@ class SessionStoreTests(unittest.TestCase):
             memory.update_long_term_marketing_memory(user_id, prompt)
 
         profile = memory.derive_learned_profile(user_id)
-        self.assertIn("增长负责人", profile["role_title"])
-        self.assertIn("消费电子", profile["industry"])
-        self.assertIn("星环科技", profile["company_brand"])
-        self.assertIn("AI手机", profile["products"])
-        self.assertIn("科技尝鲜人群", profile["target_customers"])
-        self.assertIn("小红书", profile["channels"])
-        self.assertIn("真实种草", profile["tone_preferences"])
+        self.assertIn("海外市场负责人", profile["role_title"])
+        self.assertIn("大件家具出口", profile["industry"])
+        self.assertIn("星辰家居", profile["company_brand"])
+        self.assertIn("实木餐桌", profile["products"])
+        self.assertIn("美国首次置业人群", profile["target_customers"])
+        self.assertIn("亚马逊", profile["channels"])
+        self.assertIn("温暖真实", profile["tone_preferences"])
         self.assertIn("结论先行", profile["report_format_preferences"])
-        self.assertIn("曝光和转化率", profile["kpi_data_preferences"])
+        self.assertIn("ACOS和退货率", profile["kpi_data_preferences"])
         self.assertIn("少用夸张表达", profile["other_preferences"])
 
     def test_disabled_memory_not_injected(self) -> None:
         user_id = self.create_user()
         session_id = sessions.create(user_id)
-        db.upsert_user_marketing_memory(user_id, {"channels": ["Little Red Book"]})
+        db.upsert_user_marketing_memory(user_id, {"channels": ["Wayfair / Overstock"]})
 
         # Disabling should stop injecting the existing profile, not delete it.
         db.set_user_memory_enabled(user_id, False)
@@ -180,15 +180,15 @@ class SessionStoreTests(unittest.TestCase):
         conv = sessions.prepare_for_turn(session_id, user_id)
         assert conv is not None
         self.assertIn("Long-term enterprise marketing profile", conv.messages[0]["content"])
-        self.assertIn("Little Red Book", conv.messages[0]["content"])
+        self.assertIn("Wayfair / Overstock", conv.messages[0]["content"])
 
     def test_manual_clear_also_clears_evidence(self) -> None:
         user_id = self.create_user()
-        prompt = "write XHS marketing copy for a SaaS product"
+        prompt = "write an amazon listing for our solid wood dining table"
 
         for _ in range(memory.LONG_TERM_EVIDENCE_THRESHOLD):
             memory.update_long_term_marketing_memory(user_id, prompt)
-        self.assertIn("Little Red Book", memory.derive_learned_profile(user_id).get("channels", []))
+        self.assertIn("Amazon", memory.derive_learned_profile(user_id).get("channels", []))
         self.assertTrue(db.list_user_marketing_memory_evidence(user_id))
 
         db.delete_user_marketing_memory(user_id)
@@ -259,7 +259,7 @@ class SessionStoreTests(unittest.TestCase):
     def test_memory_block_keeps_current_request_priority(self) -> None:
         user_id = self.create_user()
         session_id = sessions.create(user_id)
-        db.upsert_user_marketing_memory(user_id, {"channels": ["Little Red Book"]})
+        db.upsert_user_marketing_memory(user_id, {"channels": ["Wayfair / Overstock"]})
 
         conv = sessions.prepare_for_turn(session_id, user_id)
         assert conv is not None

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime, timezone
 from unittest import mock
 
 from server import db, news
 from marketing_agent.agents import research_agent
+from marketing_agent.tools import web_search
 
 
 class NewsTests(unittest.TestCase):
@@ -28,72 +30,79 @@ class NewsTests(unittest.TestCase):
     def tearDown(self) -> None:
         db.reset_for_tests()
 
-    def test_research_uses_three_basic_searches(self) -> None:
-        self.assertEqual(research_agent.TOOLS[0]["type"], "web_search_20250305")
-        self.assertEqual(research_agent.TOOLS[0]["max_uses"], 3)
+    def test_research_exposes_the_client_side_search_tool(self) -> None:
+        # DeepSeek has no server-side search, so the agent carries its own tool.
+        self.assertEqual(research_agent.TOOLS[0]["name"], "web_search")
+        self.assertIn("query", research_agent.TOOLS[0]["input_schema"]["properties"])
+        self.assertIn("never run more than", research_agent.SYSTEM.lower())
+
+    def test_research_unavailable_without_a_search_provider(self) -> None:
+        with mock.patch.object(web_search, "is_available", return_value=False):
+            result = research_agent.run(
+                mock.Mock(), task="t", topics=["US furniture retail"], response_language="en"
+            )
+        self.assertIn("## Research Unavailable", result)
+        self.assertIn("TAVILY_API_KEY", result)
 
     def test_research_prompt_and_output_include_source_tiers(self) -> None:
-        from types import SimpleNamespace
-
         self.assertIn("Tier 1", research_agent.SYSTEM)
         self.assertIn("Do not move citations into a standalone Sources section", research_agent.SYSTEM)
         self.assertIn("Do not add a final raw URL list", research_agent.SYSTEM)
-        fake_response = SimpleNamespace(
-            content=[
-                SimpleNamespace(
-                    type="text",
-                    text=(
-                        "## Summary\nSignal.\n\n"
-                        "## Sources\n"
-                        "1. https://www.reuters.com/technology/\n"
-                        "2. https://www.reddit.com/r/marketing/comments/1"
-                    ),
-                )
-            ],
-            stop_reason="end_turn",
-        )
-        client = SimpleNamespace(messages=SimpleNamespace(create=mock.Mock(return_value=fake_response)))
 
-        result = research_agent.run(
-            client,  # type: ignore[arg-type]
-            task="Research AI marketing",
-            topics=["AI marketing"],
-            response_language="en",
+        answer = (
+            "## Summary\nSignal.\n\n"
+            "## Sources\n"
+            "1. https://www.reuters.com/business/\n"
+            "2. https://www.reddit.com/r/furniture/comments/1"
         )
+        with mock.patch.object(web_search, "is_available", return_value=True), \
+                mock.patch.object(research_agent, "run_agent", return_value=answer):
+            result = research_agent.run(
+                mock.Mock(),
+                task="Research US furniture demand",
+                topics=["US furniture retail"],
+                response_language="en",
+            )
 
         self.assertIn("## Source Credibility", result)
         self.assertNotIn("## Sources", result)
         self.assertLess(result.find("reuters.com"), result.find("reddit.com"))
         self.assertIn("Tier 4", result)
 
-    def test_research_extracts_tool_citation_metadata(self) -> None:
-        from types import SimpleNamespace
+    def test_research_wires_search_results_into_the_tool_handler(self) -> None:
+        captured: dict = {}
 
-        fake_response = SimpleNamespace(
-            content=[
-                SimpleNamespace(
-                    type="text",
-                    text="## Summary\nAI market activity is accelerating.",
-                    citations=[
-                        SimpleNamespace(
-                            title="Reuters AI",
-                            url="https://www.reuters.com/technology/ai/",
-                        )
-                    ],
-                )
-            ],
-            stop_reason="end_turn",
-        )
-        client = SimpleNamespace(messages=SimpleNamespace(create=mock.Mock(return_value=fake_response)))
+        def fake_run_agent(**kwargs):
+            captured.update(kwargs)
+            return "## Summary\nFinding [Furniture Today](https://www.furnituretoday.com/x)"
 
-        result = research_agent.run(
-            client,  # type: ignore[arg-type]
-            task="Research AI marketing",
-            topics=["AI marketing"],
-            response_language="en",
-        )
+        results = [
+            web_search.SearchResult(
+                title="Furniture Today",
+                url="https://www.furnituretoday.com/x",
+                snippet="US furniture demand steady.",
+                published="2026-08-01",
+            )
+        ]
+        with mock.patch.object(web_search, "is_available", return_value=True), \
+                mock.patch.object(research_agent, "run_agent", side_effect=fake_run_agent), \
+                mock.patch.object(web_search, "search", return_value=results):
+            result = research_agent.run(
+                mock.Mock(),
+                task="Research US furniture demand",
+                topics=["US furniture retail"],
+                response_language="en",
+            )
+            # The tool handler surfaces real search results to the model.
+            tool_output = captured["client_tool_handlers"]["web_search"](
+                {"query": "US furniture retail"}
+            )
 
-        self.assertIn("[Reuters AI](https://www.reuters.com/technology/ai/)", result)
+        self.assertIn("https://www.furnituretoday.com/x", tool_output)
+        self.assertIn("2026-08-01", tool_output)
+
+        # Inline citations the model wrote still get source-tier annotation.
+        self.assertIn("[Furniture Today](https://www.furnituretoday.com/x)", result)
         self.assertIn("## Source Credibility", result)
         self.assertIn("Tier 2", result)
 
@@ -299,6 +308,33 @@ class NewsTests(unittest.TestCase):
         db.delete_news_data(self.user["id"])
         self.assertIsNone(db.get_news_config(self.user["id"]))
         self.assertIsNone(db.get_latest_news_summary(self.user["id"]))
+
+
+    def test_generate_summary_without_a_client_uses_the_shared_one(self) -> None:
+        """The background scheduler calls generate_summary(config) with no client.
+
+        That path used to raise NameError, because the module referenced a client
+        factory it never imported — so the nightly job died silently.
+        """
+        digest = "## Summary\nUS furniture demand steady [Furniture Today](https://www.furnituretoday.com/x)"
+        with mock.patch.object(news.llm, "get_client", return_value=mock.Mock()) as get_client, \
+                mock.patch.object(news.research_agent, "run", return_value=digest):
+            record = news.generate_summary(self.config)
+
+        get_client.assert_called_once()
+        self.assertIn("## Summary", record["summary"])
+
+    def test_generate_summary_without_a_key_raises_a_readable_error(self) -> None:
+        with mock.patch.object(news.llm, "get_client", return_value=None):
+            with self.assertRaises(news.NewsGenerationError):
+                news.generate_summary(self.config)
+
+    def test_us_furniture_sources_are_requested_for_english_topics(self) -> None:
+        task, _, _ = news.build_task(
+            "US furniture retail", "brief", datetime.now(timezone.utc), "en"
+        )
+        self.assertIn("Furniture Today", task)
+        self.assertIn("CPSC", task)
 
 
 if __name__ == "__main__":

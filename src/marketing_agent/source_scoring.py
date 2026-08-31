@@ -37,6 +37,13 @@ TIER_LABELS = {
 TIER_SCORES = {1: 100, 2: 80, 3: 50, 4: 25}
 
 OFFICIAL_EXACT_DOMAINS = {
+    # US import, duty, and product-safety primary sources — the regulators that
+    # actually move a furniture importer's numbers.
+    "usitc.gov",
+    "cbp.gov",
+    "cpsc.gov",
+    "trade.gov",
+    "census.gov",
     "sec.gov",
     "ftc.gov",
     "fda.gov",
@@ -65,6 +72,16 @@ OFFICIAL_SUFFIXES = (
 )
 
 AUTHORITATIVE_EXACT_DOMAINS = {
+    # US furniture / home-furnishings trade press.
+    "furnituretoday.com",
+    "homenewsnow.com",
+    "hfndigital.com",
+    "businessofhome.com",
+    "furnitureworldmagazine.com",
+    "ahfa.us",
+    "highpointmarket.org",
+    "retaildive.com",
+    "modernretail.co",
     "reuters.com",
     "apnews.com",
     "bloomberg.com",

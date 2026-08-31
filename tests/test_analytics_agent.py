@@ -15,20 +15,17 @@ class AnalyticsAgentTests(unittest.TestCase):
         tmp.write_bytes(content)
         return tmp
 
-    def test_uploads_file_and_passes_container_upload_without_inlining(self) -> None:
+    def test_passes_run_python_tool_without_inlining_the_data(self) -> None:
         big_csv = "channel,clicks\n" + "\n".join(f"linkedin,{i}" for i in range(5000))
         path = self._write_temp("campaign.csv", big_csv.encode("utf-8"))
 
         captured: dict = {}
 
         def fake_run_agent(**kwargs):
-            captured["user_message"] = kwargs["user_message"]
-            captured["tools"] = kwargs["tools"]
-            captured["extra_headers"] = kwargs.get("extra_headers")
+            captured.update(kwargs)
             return "## Key Metrics\nok"
 
         client = mock.Mock()
-        client.beta.files.upload.return_value = mock.Mock(id="file_abc123")
 
         with mock.patch.object(analytics_agent, "run_agent", side_effect=fake_run_agent):
             result = analytics_agent.run(
@@ -39,42 +36,53 @@ class AnalyticsAgentTests(unittest.TestCase):
             )
 
         self.assertEqual(result, "## Key Metrics\nok")
-        # File was uploaded to the Files API and later deleted.
-        client.beta.files.upload.assert_called_once()
-        client.beta.files.delete.assert_called_once_with("file_abc123")
 
-        content = captured["user_message"]
-        self.assertIsInstance(content, list)
-        # A container_upload block references the uploaded file id.
-        upload_blocks = [b for b in content if b.get("type") == "container_upload"]
-        self.assertEqual(len(upload_blocks), 1)
-        self.assertEqual(upload_blocks[0]["file_id"], "file_abc123")
+        brief = captured["user_message"]
+        self.assertIsInstance(brief, str)
+        # The raw data must NOT be inlined into the prompt — only the filename.
+        self.assertNotIn("linkedin,4999", brief)
+        self.assertIn("Analyze channel performance", brief)
+        self.assertIn("campaign.csv", brief)
+        self.assertIn("Which channel has the most clicks?", brief)
 
-        # The raw data must NOT be inlined into the prompt.
-        text_blocks = "\n".join(b.get("text", "") for b in content if b.get("type") == "text")
-        self.assertNotIn("linkedin,4999", text_blocks)
-        self.assertIn("Analyze channel performance", text_blocks)
+        # The local execution tool is wired up with a handler bound to this file.
+        self.assertEqual(captured["tools"][0]["name"], "run_python")
+        self.assertIn("run_python", captured["client_tool_handlers"])
 
-        # Code execution tool + Files API beta header are wired up.
-        self.assertEqual(captured["tools"][0]["type"], "code_execution_20260120")
-        self.assertEqual(captured["extra_headers"], {"anthropic-beta": "files-api-2025-04-14"})
+    def test_handler_executes_against_the_data_file(self) -> None:
+        path = self._write_temp("campaign.csv", b"channel,clicks\nlinkedin,7\n")
+        captured: dict = {}
+
+        with mock.patch.object(
+            analytics_agent, "run_agent", side_effect=lambda **kw: captured.update(kw) or "ok"
+        ):
+            analytics_agent.run(client=mock.Mock(), task="t", data_path=str(path))
+
+        handler = captured["client_tool_handlers"]["run_python"]
+        output = handler({"code": "print(open('campaign.csv').read().strip())"})
+        self.assertIn("linkedin,7", output)
 
     def test_csv_path_alias_still_accepted(self) -> None:
         path = self._write_temp("data.json", json.dumps([{"a": 1}]).encode("utf-8"))
-        client = mock.Mock()
-        client.beta.files.upload.return_value = mock.Mock(id="file_xyz")
 
         with mock.patch.object(analytics_agent, "run_agent", return_value="ok"):
-            result = analytics_agent.run(client=client, task="t", csv_path=str(path))
+            result = analytics_agent.run(client=mock.Mock(), task="t", csv_path=str(path))
 
         self.assertEqual(result, "ok")
-        client.beta.files.upload.assert_called_once()
 
     def test_missing_file_returns_error(self) -> None:
-        client = mock.Mock()
-        result = analytics_agent.run(client=client, task="t", data_path="/no/such/file.csv")
+        with mock.patch.object(analytics_agent, "run_agent") as run_agent:
+            result = analytics_agent.run(
+                client=mock.Mock(), task="t", data_path="/no/such/file.csv"
+            )
         self.assertIn("not found", result)
-        client.beta.files.upload.assert_not_called()
+        run_agent.assert_not_called()
+
+    def test_disabled_code_execution_degrades(self) -> None:
+        path = self._write_temp("campaign.csv", b"channel,clicks\nlinkedin,7\n")
+        with mock.patch.object(analytics_agent, "code_exec_enabled", return_value=False):
+            result = analytics_agent.run(client=mock.Mock(), task="t", data_path=str(path))
+        self.assertIn("Analysis Unavailable", result)
 
 
 if __name__ == "__main__":

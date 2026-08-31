@@ -6,9 +6,9 @@ import json
 import threading
 from typing import Any, AsyncIterator, Callable
 
-import anthropic
 from fastapi import Request
 
+from marketing_agent import llm_client
 from marketing_agent.conversation import Conversation
 from marketing_agent.orchestrator import run_orchestrator
 
@@ -17,7 +17,7 @@ HEARTBEAT_INTERVAL_SECONDS = 10
 
 
 async def orchestrator_event_stream(
-    client: anthropic.Anthropic,
+    client: llm_client.DeepSeek,
     conversation: Conversation,
     prompt: Any,
     request: Request | None = None,

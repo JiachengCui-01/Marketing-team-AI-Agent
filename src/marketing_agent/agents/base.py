@@ -3,8 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-import anthropic
-
+from .. import llm_client
 from ..config import (
     MAX_TOOL_ROUNDS,
     MODEL_ID,
@@ -26,27 +25,27 @@ def unavailable_markdown(
     retry_noun: str,
     credits_for: str,
 ) -> str:
-    """Return a normal markdown result for a failed Anthropic call.
+    """Return a normal markdown result for a failed model call.
 
     Shared by sub-agents so a transient API error surfaces as a helpful message
     instead of bubbling up and being retried forever by the orchestrator.
     """
     message = str(exc) or exc.__class__.__name__
     lower = message.lower()
-    if "credit balance is too low" in lower:
+    if "insufficient balance" in lower or "credit balance is too low" in lower:
         reason = (
-            "Anthropic rejected the request because the account credit balance is too low. "
-            f"Add credits or update billing, then retry the {retry_noun}."
+            "DeepSeek rejected the request because the account balance is too low. "
+            f"Top up the account, then retry the {retry_noun}."
         )
-    elif isinstance(exc, anthropic.APIConnectionError):
+    elif isinstance(exc, llm_client.APIConnectionError):
         cause = getattr(exc, "__cause__", None)
         detail = f" ({cause})" if cause else ""
         reason = (
-            f"The server could not connect to the Anthropic API for {feature}"
+            f"The server could not connect to the DeepSeek API for {feature}"
             f"{detail}. Check network/firewall permissions and retry."
         )
     else:
-        reason = f"Anthropic API error: {message}"
+        reason = f"DeepSeek API error: {message}"
 
     return "\n".join(
         [
@@ -55,15 +54,15 @@ def unavailable_markdown(
             reason,
             "",
             "## What to do next",
-            "1. Confirm `ANTHROPIC_API_KEY` is set for the API server.",
-            f"2. Confirm the Anthropic account has enough credits for {credits_for}.",
+            "1. Confirm `DEEPSEEK_API_KEY` is set for the API server.",
+            f"2. Confirm the DeepSeek account has enough balance for {credits_for}.",
             "3. Retry after billing/network access is fixed.",
         ]
     )
 
 
 def run_agent(
-    client: anthropic.Anthropic,
+    client: llm_client.DeepSeek,
     system: str,
     user_message: str | list[dict],
     tools: list[dict] | None = None,
@@ -77,12 +76,12 @@ def run_agent(
     """Run a single agent turn to completion.
 
     - ``user_message`` may be a plain string or a list of content blocks (e.g. to
-      attach a ``container_upload`` for the code-execution sandbox).
-    - Server-side tools (web_search, code_execution) resolve automatically.
-    - Client-side tools are dispatched via ``client_tool_handlers`` keyed by tool name;
-      each handler takes the parsed ``input`` dict and returns a string result.
+      attach an image).
+    - Tools are dispatched via ``client_tool_handlers`` keyed by tool name; each
+      handler takes the parsed ``input`` dict and returns a string result. DeepSeek
+      exposes no server-side tools, so every tool passed here needs a handler.
     - ``on_event`` is called for observability with (event_type, payload).
-    - ``extra_headers`` is forwarded to the API (e.g. the Files API beta header).
+    - ``extra_headers`` is forwarded to the API.
 
     Returns the final assistant text.
     """
@@ -118,7 +117,6 @@ def run_agent(
             continue
 
         if stop == "tool_use":
-            # Resolve any client-side tool calls. Server tools are already resolved.
             tool_results = []
             for block in response.content:
                 if block.type != "tool_use":
@@ -149,8 +147,9 @@ def run_agent(
                     })
 
             if not tool_results:
-                # tool_use stop but no client tools to run — likely all server-side, loop again.
-                continue
+                # tool_use stop with nothing resolvable — there is no server-side tool
+                # to wait on, so return whatever text came back instead of spinning.
+                return _extract_text(response.content)
 
             messages.append({"role": "user", "content": tool_results})
             continue

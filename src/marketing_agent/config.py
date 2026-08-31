@@ -4,15 +4,30 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-MODEL_ID = "claude-opus-4-8"
+# ---------------------------------------------------------------------------
+# Model provider: DeepSeek (OpenAI-compatible chat-completions API).
+# ``llm_client`` translates the Anthropic-shaped calls the agents make into this
+# dialect, so only the model IDs and endpoint live here.
+# ---------------------------------------------------------------------------
+
+DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+DEEPSEEK_TIMEOUT_SECONDS = float(os.environ.get("DEEPSEEK_TIMEOUT", "300"))
+
+# Reasoning model driving the orchestrator, the OA copilot, and the sub-agents.
+MODEL_ID = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-pro")
 
 # Cheap, fast model used to extract long-term marketing profile facts from
 # prompts. Kept separate from the orchestrator/sub-agent model so memory
-# learning never pays Opus rates.
-MEMORY_EXTRACTION_MODEL = "claude-haiku-4-5-20251001"
+# learning never pays the reasoning-model rate.
+MEMORY_EXTRACTION_MODEL = os.environ.get("DEEPSEEK_FAST_MODEL", "deepseek-v4-flash")
 
 # Cheap, fast model used to plan clarifying questions before a task runs.
-CLARIFY_MODEL = "claude-haiku-4-5-20251001"
+CLARIFY_MODEL = MEMORY_EXTRACTION_MODEL
+
+# The text models reject image content, so requests carrying an image are routed
+# to the vision model instead (see ``llm_client._resolve_model``).
+VISION_MODEL = os.environ.get("DEEPSEEK_VISION_MODEL", "deepseek-v4-flash-vision-exp")
+VISION_CAPABLE_MODELS = {VISION_MODEL}
 
 _FALSEY = {"0", "false", "no", "off", ""}
 
@@ -40,7 +55,8 @@ def clarify_llm_enabled() -> bool:
 ORCHESTRATOR_MAX_TOKENS = 16000
 SUBAGENT_MAX_TOKENS = 16000
 
-# Effort levels per agent (Opus 4.8 supports low|medium|high|xhigh|max).
+# Thinking effort per agent. ``llm_client`` maps these onto DeepSeek's
+# ``thinking.effort`` (low|medium|high).
 ORCHESTRATOR_EFFORT = "high"
 SUBAGENT_EFFORT = "medium"
 

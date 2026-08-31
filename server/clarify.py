@@ -25,12 +25,19 @@ _MAX_QUESTIONS = 3
 _MAX_OPTIONS = 4
 
 _SYSTEM = (
-    "You help a marketing AI decide whether to ask the user a few clarifying questions "
-    "before starting a task. You are given the user's request and their known long-term "
-    "marketing profile.\n"
+    "You help the AI workspace of a US-facing direct-to-consumer furniture brand decide "
+    "whether to ask the user a few clarifying questions before starting a task. The "
+    "company designs large furniture (sofas, bed frames, dining sets, storage), has it "
+    "made by contract suppliers, and sells it into the United States through Amazon, "
+    "Wayfair, its own store, and visual social channels.\n"
+    "You are given the user's request and their known long-term profile.\n"
     "Decide if asking 1-3 SHORT questions would materially improve the deliverable. "
     "If the request is already clear enough, or the missing details are already in the "
     "profile, set needs_clarification=false and ask nothing — do not nitpick.\n"
+    "The details that most often change the output here are: which product or SKU, "
+    "which channel it is going to (marketplace listing vs own product page vs social), "
+    "the room or use case, the buyer situation (new home, replacement, small space), and "
+    "which physical specs are already confirmed. Ask about those before anything else.\n"
     "When you do ask: make each question specific to THIS request, phrased in the user's "
     "language; give 2-4 concrete quick-reply options plus allow_custom=true so the user can "
     "type their own answer. Never ask about something already stated in the request or the "
@@ -84,7 +91,7 @@ def _user_content(prompt: str, profile: dict, locale: str) -> str:
         known = "(none)"
     return (
         f"User request:\n{prompt[:4000]}\n\n"
-        f"Known long-term marketing profile (do not re-ask these):\n{known}\n\n"
+        f"Known long-term business profile (do not re-ask these):\n{known}\n\n"
         f"Write any questions and options in {lang}."
     )
 

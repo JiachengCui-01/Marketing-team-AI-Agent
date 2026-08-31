@@ -6,27 +6,44 @@ DELEGATION_TOOLS = [
         "name": "delegate_to_content_agent",
         "description": (
             "Send a brief to the content/copywriting specialist. Use this for ANY request "
-            "to draft marketing copy: social posts, blog drafts, email campaigns, ad copy. "
-            "Do NOT write copy yourself — always delegate it."
+            "to draft customer-facing copy: marketplace listings, product pages, social "
+            "posts, video scripts, email, ads, blog guides, or PDF deliverables such as a "
+            "spec sheet or catalog page. Do NOT write copy yourself — always delegate it."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "The copywriting brief: what to write, key message, any constraints.",
+                    "description": (
+                        "The copywriting brief: what to write, which product, key message, "
+                        "and any known specs (dimensions, materials, finish, assembly, "
+                        "delivery method). Pass through every spec the user gave — the "
+                        "specialist is forbidden from inventing them."
+                    ),
                 },
                 "format": {
                     "type": "string",
-                    "enum": ["social_post", "blog", "email", "ad_copy", "pdf"],
+                    "enum": [
+                        "listing",
+                        "product_page",
+                        "social_post",
+                        "blog",
+                        "email",
+                        "ad_copy",
+                        "pdf",
+                    ],
                     "description": "Channel / format of the copy.",
                 },
                 "platform": {
                     "type": "string",
                     "enum": [
-                        "linkedin",
-                        "twitter",
-                        "xiaohongshu",
+                        "amazon_listing",
+                        "wayfair_listing",
+                        "dtc_product_page",
+                        "instagram",
+                        "pinterest",
+                        "tiktok",
                         "blog",
                         "email",
                         "ad_copy",
@@ -34,22 +51,27 @@ DELEGATION_TOOLS = [
                         "generic_social",
                     ],
                     "description": (
-                        "Optional platform/style skill to apply. Use xiaohongshu for "
-                        "小红书/Little Red Book requests, linkedin for B2B LinkedIn posts, "
-                        "twitter for X/Twitter posts."
+                        "Optional channel/style skill to apply. Use amazon_listing for "
+                        "Amazon titles/bullets/A+, wayfair_listing for Wayfair or "
+                        "Overstock attribute copy, dtc_product_page for our own store's "
+                        "product detail page, pinterest for search-driven room "
+                        "inspiration pins, tiktok for short video scripts."
                     ),
                 },
                 "tone": {
                     "type": "string",
-                    "description": "Optional tone descriptor (e.g. 'confident', 'playful', 'authoritative').",
+                    "description": "Optional tone descriptor (e.g. 'warm', 'understated', 'confident').",
                 },
                 "audience": {
                     "type": "string",
-                    "description": "Optional target audience (e.g. 'B2B SaaS marketers').",
+                    "description": (
+                        "Optional target audience (e.g. 'US renters furnishing a small "
+                        "apartment', 'homeowners replacing a worn sectional')."
+                    ),
                 },
                 "length_hint": {
                     "type": "string",
-                    "description": "Optional length hint (e.g. '3 variants', '600 words').",
+                    "description": "Optional length hint (e.g. '3 variants', '1200 words').",
                 },
             },
             "required": ["task", "format"],
@@ -59,10 +81,12 @@ DELEGATION_TOOLS = [
         "name": "delegate_to_analytics_agent",
         "description": (
             "Send a data-analytics task to the analytics specialist. Use this for any "
-            "request that involves analyzing a data file (CSV, Excel, or JSON) of campaign "
-            "data, computing KPIs (CTR, ROAS, CPA, etc.), spotting trends, or producing "
-            "performance insights. The specialist loads the file in a code-execution "
-            "sandbox and can handle large files — never compute metrics yourself."
+            "request that involves analyzing a data file (CSV, Excel, or JSON) of sales, "
+            "advertising, listing, or returns data — computing ACOS/TACOS, conversion "
+            "rate, AOV, return rate, margin after landed cost, or inventory turns, "
+            "spotting trends, and producing performance insights. The specialist runs "
+            "pandas over the file and can handle large datasets — never compute metrics "
+            "yourself."
         ),
         "input_schema": {
             "type": "object",
@@ -91,9 +115,11 @@ DELEGATION_TOOLS = [
         "name": "delegate_to_research_agent",
         "description": (
             "Send a market/competitor research task to the research specialist. Use this "
-            "for ANY request that requires current external information: industry trends, "
-            "competitor announcements, market signals, recent news. The specialist uses "
-            "web search and cites sources — never make up external facts."
+            "for ANY request that requires current external information: US furniture and "
+            "home-furnishings demand, competitor listings and pricing, category and style "
+            "trends, marketplace policy changes, tariffs and duties, or product-safety "
+            "rules. The specialist uses web search and cites sources — never make up "
+            "external facts."
         ),
         "input_schema": {
             "type": "object",
@@ -110,7 +136,10 @@ DELEGATION_TOOLS = [
                 "competitors": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional list of competitor names to focus on.",
+                    "description": (
+                        "Optional list of competing brands or sellers to focus on "
+                        "(e.g. Article, Castlery, Burrow, West Elm, or an Amazon seller)."
+                    ),
                 },
             },
             "required": ["task", "topics"],

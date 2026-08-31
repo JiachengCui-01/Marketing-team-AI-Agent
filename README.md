@@ -1,40 +1,44 @@
-# Marketing Agent · 企业营销团队 AI 工作台
+# 家居出海工作台 · 大件家具 DTC 的多智能体 AI 系统
 
-> 面向企业营销团队的**多智能体 AI 工作台**：一个入口里既有「内容 / 分析 / 研究」营销专家协作，又有「审批 / 任务 / 日程 / 知识问答」的 OA 助手，外加实时 IM 消息与通讯录协同 —— **全过程可追踪、写操作先草稿后确认、结果持久化兜底**。
+> 面向**自主设计大件家具、找供应商代工、以 DTC 方式卖到美国**的外贸团队：一个入口里既有「Listing / 数据 / 市场」三类专家协作，又有「审批 / 任务 / 日程 / 资料问答」的办公助手，外加实时 IM 消息与通讯录协同 —— **全过程可追踪、写操作先草稿后确认、实物参数绝不编造**。
 
 ---
 
 ## 1. 项目背景
 
-企业营销团队的日常被割裂在一堆工具里：写多平台文案、分析投放数据、做竞品与行业研究，还要处理请假/报销审批、任务派发、会议日程、查内部制度文档 —— 上下文频繁切换，效率低。
+做美国市场的家具外贸，日常被割裂在一堆工具和时区里：写 Amazon / Wayfair listing 和独立站商详、拍图配图、算广告与退货数据、盯竞品和平台政策，还要处理审批、派任务、约会议、翻产品规格书和供应商资料 —— 上下文频繁切换，效率低。
 
-而通用 AI 聊天工具用于团队办公时有三个硬伤：
+而通用 AI 聊天工具用在这门生意上有四个硬伤：
 
 - **黑箱**：看不到 AI 每一步在做什么，出了结果也难以信任。
 - **易幻觉、易越权**：一个模型既写文案又"算"指标又"声称"外部事实，容易编造。
+- **不懂这个品类**：通用工具会把大件家具当成一般消费品 —— 给沙发写 B2B 帖、给床架做"手持展示"图、只盯 CTR/CVR 而忽略 ACOS 和退货率。
 - **写操作有风险、结果易丢**：直接执行"已提交审批 / 已创建日程"却无人确认；流式连接一断，结果就没了。
 
-**Marketing Agent** 把「营销专家团队 + 企业 OA 助手 + 实时协同」整合进**一个可追踪、可兜底、先确认后执行**的工作台。
+尤其是幻觉这一条，在大件家具上代价不对称：**一个编错的尺寸就是一次退货加一条差评**，而退货的物流成本往往高于这单的毛利。所以本系统把「实物参数不得凭空编造」写成了跨层的硬约束 —— 缺失的尺寸、材质、承重、组装时间、配送时效会以 `[待确认 xxx]` 显式留白，而不是补一个看起来合理的数字。
+
+**家居出海工作台**把「内容与 Listing 专家 + 数据专家 + 市场研究专家 + 办公助手 + 实时协同」整合进**一个可追踪、可兜底、先确认后执行**的系统。
 
 ## 2. 产品目标
 
 | 目标 | 做法 |
 | --- | --- |
-| 一个入口完成 **营销 + 办公 + 协同** | 编排器统一调度营销专家与 OA 工具，侧边栏聚合消息/通讯录/审批/任务/日历/新闻/图像 |
-| 过程**可见**、结果**可兜底** | 右侧 Agent Trace 实时展示编排步骤；产出物（文案 PDF / 图片 / 摘要）落库持久化 |
+| 一个入口完成 **对外营销 + 内部办公 + 协同** | 编排器统一调度三类专家与办公工具，侧边栏聚合消息/通讯录/审批/任务/日历/行业简报/产品图 |
+| 过程**可见**、结果**可兜底** | 右侧 Agent Trace 实时展示编排步骤；产出物（规格单 PDF / 产品图 / 简报）落库持久化 |
 | 写操作 **human-in-the-loop** | 审批 / 任务 / 日程一律"先出草稿卡 → 用户确认 → 才落库" |
+| **实物参数零编造** | 尺寸/材质/承重/组装/配送只能来自输入、附件或引用来源，缺失即显式留白 |
 | **企业级** 多人协作 | 组织 + 邀请码、组织内/外部通讯录、实时 IM（人↔人 / 群）、用户级数据隔离与权限 |
 
 ## 3. 核心功能
 
-- **营销多智能体对话**：编排器（chief of staff）按需分派 **内容 / 分析 / 研究** 三类专家，综合成带引用的最终回答，必要时产出 PDF。
+- **多智能体对话**：编排器按需分派 **内容与 Listing / 数据 / 市场研究** 三类专家，综合成带引用的最终回答，必要时产出 PDF。内容专家按渠道 SOP 工作 —— Amazon listing、Wayfair 属性表、独立站商详、Instagram / Pinterest / TikTok、EDM、广告、SEO 选购指南。
 - **Agent Trace 追踪 + 预览面板**：右栏两个标签 —— `追踪` 实时显示 intake→planning→delegating→synthesis 每一步；`预览` 以**浏览器式多标签**内联打开产出物、上传件、被引用的网页与知识库文档。
-- **企业 OA 助手（对话即可发起）**：审批（请假/报销/采购/通用）、任务待办、日程日历、知识问答 —— 全部通过聊天用自然语言发起，AI 生成**草稿卡**，用户点确认后才真正写入。
-- **知识库 RAG**：上传文档 → 检索 → 回答附**来源引用**，点击引用可在预览区打开原文（embedding → reranker → 词法多级检索，缺重依赖时自动降级）。
-- **行业新闻自动摘要**：配置每日行业/主题、简报或详报、推送时间与时区，定时抓取并生成**分级来源**摘要，可手动刷新、可撤销回滚。
-- **营销图 AI 生成**：文生图（Gemini）、上传参考图、一键抠图去背景、按平台风格（淘宝 / 小红书 / 亚马逊 / Instagram）套模板画布合成、生成历史与再编辑。
+- **办公助手（对话即可发起）**：审批（请假/报销/采购/通用）、任务待办、日程日历、资料问答 —— 全部通过聊天用自然语言发起，AI 生成**草稿卡**，用户点确认后才真正写入。涉及美国客户或供应链交期的时间会提醒确认时区。
+- **产品与供应商资料 RAG**：上传规格书、打样记录、平台规则、物流与关税文件 → 检索 → 回答附**来源引用**，点击引用可在预览区打开原文（embedding → reranker → 词法多级检索，缺重依赖时自动降级）。查询理解会做同义扩展（实木↔硬木↔solid wood、头程↔海运）并识别 `product_spec` 意图。
+- **行业简报自动摘要**：配置每日主题（美国家具零售、家居消费趋势、家具关税等）、简报或详报、推送时间与时区，定时抓取并生成**分级来源**摘要。来源分级已纳入 USITC / CBP / CPSC / trade.gov 与家居行业媒体（Furniture Today、Home News Now、HFN、Business of Home）。
+- **产品图 AI 生成**：文生图（Gemini）、上传参考图、一键抠图去背景、按渠道风格（Amazon 合规白底 / Wayfair 列表图 / 独立站 Hero / Instagram / Pinterest）套模板画布合成。模板覆盖家具最需要的图型：**尺寸标注图、材质工艺特写、房间实景、尺度对比**。
 - **实时协同**：IM 消息（人↔人 / 群聊、未读数、已读回执、文件消息，基于 SSE 实时推送）+ 通讯录（组织成员 / 外部联系人 / 联系人申请 / 星标 / 我的群组）。
-- **账户与个性化**：注册登录、组织与邀请码、可解释且可关闭的**营销记忆**（自动学习你的品牌/渠道偏好，附证据台账）。
+- **账户与个性化**：注册登录、组织与邀请码、可解释且可关闭的**长期业务记忆**（自动学习品类、渠道、目标客户与指标口径偏好，附证据台账；一次性的产品参数不会被记成长期偏好）。
 
 ## 4. 产品架构
 
@@ -52,25 +56,26 @@
 └───────────────▲────────────────────────────────────────────────┘
                 │ 进程内调用
 ┌───────────────┴────────────────────────────────────────────────┐
-│  多智能体核心（src/marketing_agent/，Anthropic Claude SDK）      │
+│  多智能体核心（src/marketing_agent/，DeepSeek API）              │
 │                                                                  │
 │   Orchestrator / OA Copilot  ── 任务控制层（不直接干活）         │
-│        ├─ delegate → 内容 Agent（多平台文案 + PDF）              │
-│        ├─ delegate → 分析 Agent（Files API + 代码沙箱算指标）    │
-│        ├─ delegate → 研究 Agent（web_search + 分级来源）         │
+│        ├─ delegate → 内容 Agent（Listing / 商详 / 社媒 + PDF）   │
+│        ├─ delegate → 数据 Agent（本地 Python 算 ACOS/退货率）    │
+│        ├─ delegate → 市场 Agent（搜索 API + 分级来源）           │
 │        └─ OA 工具：draft_approval / draft_task / draft_event /   │
 │                    query_* / search_knowledge_base              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-- **编排器（`orchestrator.py`）**：tool-use 循环（最多 12 轮），并行分派专家、再综合为 markdown。硬约束：**它自己不写文案、不算指标、不声称外部事实**，一律通过 delegate 工具下派，避免越权与幻觉。
+- **业务词表（`domain.py`）**：品类、渠道、受众、KPI 和「不得编造」清单集中在一处，所有提示词从这里取词，避免各文件口径漂移。
+- **编排器（`orchestrator.py`）**：tool-use 循环（最多 12 轮），并行分派专家、再综合为 markdown。硬约束：**它自己不写文案、不算指标、不声称外部事实、不填实物参数**，一律通过 delegate 工具下派，避免越权与幻觉。
 - **OA Copilot（`oa/agent.py`）**：聊天实际运行者，复用编排器的分派/流式机制，额外挂载 OA 工具，一个助手同时覆盖办公流程与营销分派。
-- **三类专家（`agents/`）**：内容（渠道 SOP 技能）、分析（数据不进 prompt，上传到 Files API 在沙箱里跑 pandas 算 CTR/CVR/ROAS）、研究（服务端 web_search + `source_scoring` 分级）。
+- **三类专家（`agents/`）**：内容（11 个渠道 SOP 技能，含 Amazon / Wayfair listing 的字数与合规约束）、数据（数据不进 prompt，模型写 pandas 由 `tools/code_exec.py` 在临时目录里执行，算 ACOS/TACOS、转化率、客单价、退货率与扣除退货后的净 ROAS）、市场（`tools/web_search.py` 调搜索 API + `source_scoring` 分级）。
 
 ## 5. 典型任务流程示例：
-**场景 A · 研究 → 分析 → 文案（一句话完成一条营销链路）**
-用户："帮我调研下竞品近期的投放打法，结合我们上周的投放数据，写 3 条小红书文案。"
-→ 编排器 `intake/planning` → 并行 `delegating` 研究 Agent（web_search 查竞品）+ 分析 Agent（跑上周数据）→ `specialist_done` → 内容 Agent 产出文案 → `synthesis` 汇总为带**来源引用**的回答（含竞品简报 PDF）。全过程在右侧 Trace 可见。
+**场景 A · 市场 → 数据 → Listing（一句话完成一条链路）**
+用户："帮我看下同价位竞品的 listing 怎么写的，结合上周的广告和退货数据，给这款实木餐桌重写 Amazon 五点描述。"
+→ 编排器 `intake/planning` → 并行 `delegating` 市场 Agent（web_search 查竞品 listing 与评论）+ 数据 Agent（跑上周 ACOS 与退货率）→ `specialist_done` → 内容 Agent 按 `amazon_listing` SOP 产出标题、五点与关键词 → `synthesis` 汇总为带**来源引用**的回答。全过程在右侧 Trace 可见。缺失的尺寸会以 `[待确认 xxx]` 留白。
 
 **场景 B · 对话式办公（请假 / 排会，草稿→确认）**
 用户："生成日程"
@@ -83,19 +88,19 @@
 <img width="1280" height="692" alt="image" src="https://github.com/user-attachments/assets/bb2235af-24bb-4fde-a52a-b38538289d08" />
 <img width="1280" height="698" alt="image" src="https://github.com/user-attachments/assets/fe9ac547-fcc0-4bcb-aa75-b12c87f3e585" />
 
-**场景 C · 知识问答（内部制度秒查，来源可溯）**
-用户："公司的报销制度、额度和流程是什么？"→ 检索知识库 → 回答附**来源 capsule** → 点引用在预览区直接打开原始文档。
+**场景 C · 资料问答（规格与制度秒查，来源可溯）**
+用户："这款餐桌的板材和承重是多少？"或"公司的报销制度、额度和流程是什么？"→ 检索知识库 → 回答附**来源 capsule** → 点引用在预览区直接打开原始文档。
 <img width="1280" height="696" alt="image" src="https://github.com/user-attachments/assets/c109cf91-f21c-4d96-9cec-7ee9bf53ad1b" />
 
-**场景 D · 行业新闻日报**
-配置每日行业摘要（行业、简报/详报、时间、时区）→ 定时抓取 → 生成**分级来源**摘要推送，可手动"立即刷新"。
+**场景 D · 行业简报日报**
+配置每日摘要主题（如美国家具零售、家具关税）→ 定时抓取 → 生成**分级来源**摘要推送，可手动"立即刷新"。关税与 CPSC 规则变化会被当作重要发现而非背景。
 <img width="1280" height="695" alt="image" src="https://github.com/user-attachments/assets/88e46ffb-2791-4837-a753-7297b00e8960" />
 可配置自动总结的内容主题、详细程度、自动推送时间：
 <img width="1280" height="696" alt="image" src="https://github.com/user-attachments/assets/ca727eac-7a5b-4e68-bf43-7386390a71ec" />
 <img width="1280" height="696" alt="24 小时行业新闻自动收集与摘要" src="https://github.com/user-attachments/assets/ae1832b2-a6f0-4512-913e-05ffad7062e9" />
 
-**场景 E · 营销图生成**
-上传产品图 → 可选是否一键抠图 → 可以选平台模板（小红书/淘宝/亚马逊/Instagram）/或者直接在下方输入栏输入需求→ 生成 → 历史与再编辑。
+**场景 E · 产品图生成**
+上传家具产品图 → 可选是否一键抠图 → 可以选渠道模板（Amazon 合规白底 / 尺寸标注 / 材质特写 / Wayfair 房间实景 / 独立站 Hero / Instagram / Pinterest）/或者直接在下方输入栏输入需求→ 生成 → 历史与再编辑。
 <img width="1277" height="696" alt="image" src="https://github.com/user-attachments/assets/5cc04a40-1da3-494a-b387-9546e428ffa4" />
 模板生成：
 <img width="1280" height="695" alt="image" src="https://github.com/user-attachments/assets/647dafdf-f86a-4384-94c9-81a84c50f9d2" />
@@ -117,7 +122,11 @@ IM 消息（人↔人 / 群聊、未读数、已读回执、文件消息，基�
 ## 6. 技术栈
 
 **后端 / Agent（`pyproject.toml`）**
-- `anthropic`（Claude SDK）—— 编排器、专家、OA copilot、视觉、代码执行、web_search
+- **DeepSeek API**（`deepseek-v4-pro` / `-flash` / `-flash-vision-exp`）—— 编排器、专家、OA copilot、视觉
+  - `llm_client.py` 把代码里 Anthropic 风格的 Messages 调用翻译成 DeepSeek 的 OpenAI 兼容协议，并处理思考模式与强制 tool_choice 的互斥、图片请求自动路由到视觉模型
+  - `httpx` —— 唯一的模型/搜索 HTTP 依赖（连接池复用）
+- **搜索**：`tools/web_search.py` 可插拔 Tavily / Serper / Brave / 博查 / **Gemini**（DeepSeek 无内置联网搜索）。Gemini 走 Google Search grounding，复用图像生成那把 `GEMINI_API_KEY`，不用再注册搜索厂商；配了专用搜索 key 时优先用专用的，因为它们会返回发布日期
+- **代码执行**：`tools/code_exec.py` 本地子进程跑模型写的 pandas（DeepSeek 无远程沙箱，见第 8 节安全说明）
 - `fastapi` + `uvicorn[standard]` —— API / ASGI；`sse-starlette` —— SSE 流式
 - `google-genai` —— Gemini 文生图；`Pillow` + `rembg` + `onnxruntime` —— 抠图去背景
 - `pypdf` + `python-docx` —— 文档抽取；`reportlab` —— PDF 产出
@@ -139,7 +148,7 @@ IM 消息（人↔人 / 群聊、未读数、已读回执、文件消息，基�
 `Plan Mode 规划 → 实现 → 浏览器实测验证（SSE/交互/回归）→ 提交 → 部署`
 
 - **迭代路线**：MVP 营销多智能体 → 引入 OA Copilot（审批/任务/日程/知识库、草稿-确认）→ 企业协同（IM 消息 + 通讯录）→ 体验打磨（引用点开预览、编辑消息重新生成、停止生成、日程时区修正）。
-- **智能体本身也基于 Anthropic SDK**：编排器 `high` effort、专家 `medium`，另用轻量 `claude-haiku-4-5` 做记忆抽取与澄清，成本与质量分层。
+- **智能体运行在 DeepSeek 上**：编排器 `high` 思考强度、专家 `medium`，另用轻量 `deepseek-v4-flash` 做记忆抽取与澄清，带图请求自动路由到 `deepseek-v4-flash-vision-exp`，成本与质量分层。
 - 每次改动都在真实浏览器里验证（读取控制台/网络/SSE、点选交互），而非仅跑单测。
 
 ## 8. 可信、安全与异常设计
@@ -150,6 +159,8 @@ IM 消息（人↔人 / 群聊、未读数、已读回执、文件消息，基�
 - **优雅降级**：专家不可用时返回 `## …Unavailable` 的 markdown 而非抛错；图像生成永不崩；KB 检索 embedding→reranker→词法逐级降级；**流式失败自动回退** `/complete` 再恢复会话记录，避免结果丢失。
 - **时区与时间**：日历存 epoch 瞬时、拒绝过去时间（120s 偏差容忍）、按用户时区调度新闻；OA 提示词注入当前本地时间以正确解析"明天/周五"。
 - **反越权 / 反幻觉**：编排器被硬性约束不写文案、不算指标、不编造外部事实，只能下派。
+- **代码执行边界**：迁移到 DeepSeek 后没有了远程代码沙箱，分析 Agent 改为在服务端子进程里执行模型写的 pandas（`tools/code_exec.py`）：一次性临时工作目录、只放当次数据文件、120s 墙钟超时、输出截断，进程退出即清理。这不是沙箱——生产部署应把 API 服务本身放进容器（只读根文件系统、禁出网），或用 `MARKETING_AGENT_LOCAL_CODE_EXEC=0` 关闭该能力（分析 Agent 会明确返回不可用）。
+- **不编造来源**：未配置搜索 API key 时，研究 Agent 直接返回「研究不可用」并说明要设置哪个环境变量，而不是凭记忆生成看起来像真的 URL。
 
 ## 9. 测试与评测
 
@@ -160,15 +171,17 @@ IM 消息（人↔人 / 群聊、未读数、已读回执、文件消息，基�
   ```bash
   pytest tests -q
   ```
-  （测试用独立 DB，设置 `MARKETING_AGENT_DB_PATH` 到临时路径、`ANTHROPIC_API_KEY=test-key`、`MARKETING_AGENT_MEMORY_LLM=0`。）
+  （测试用独立 DB，设置 `MARKETING_AGENT_DB_PATH` 到临时路径、`DEEPSEEK_API_KEY=test-key`、`MARKETING_AGENT_MEMORY_LLM=0`；测试全程不出网。）
 
 ## 10. 快速开始
 
-**前置**：Python 3.11+、Node 18+、`ANTHROPIC_API_KEY`（必需）、`GEMINI_API_KEY`（营销图功能）。
+**前置**：Python 3.11+、Node 18+、`DEEPSEEK_API_KEY`（必需）、`GEMINI_API_KEY`（产品图生成 **+** 研究 Agent 的联网搜索，一把 key 两用）。如果你已有专用搜索服务，也可改用 `TAVILY_API_KEY` / `SERPER_API_KEY` / `BRAVE_SEARCH_API_KEY` / `BOCHA_API_KEY`，它们会优先于 Gemini 生效。
+
+> DeepSeek 没有内置联网搜索：`GEMINI_API_KEY` 和四个专用搜索 key 一个都没配时，研究 Agent 会明确返回「研究不可用」，而不是编造来源。
 
 ```bash
 # 1) 后端
-cp .env.example .env          # 填入 ANTHROPIC_API_KEY / GEMINI_API_KEY
+cp .env.example .env          # 填入 DEEPSEEK_API_KEY / GEMINI_API_KEY
 pip install -e .
 python -m uvicorn server.main:app --host 127.0.0.1 --port 8000
 
@@ -182,18 +195,19 @@ npm run dev                    # http://localhost:3000
 打开 `http://localhost:3000` 注册账号即可使用。也可用命令行：
 
 ```bash
-marketing-agent --help         # 内置 CLI（内容/分析/研究）
+marketing-agent --help         # 内置 CLI（Listing/数据/市场）
 ```
 
 ## 11. 项目结构
 
 ```text
 src/marketing_agent/          Agent 核心（可安装包 + CLI 入口）
-  orchestrator.py             营销"chief of staff"编排循环
+  orchestrator.py             编排循环（营销负责人角色）
   oa/agent.py, oa/tools.py    企业 OA copilot + 草稿/查询工具
   agents/                     content / analytics / research 专家 + base、技能
   tools/                      delegation_tools、image_gen(Gemini)、pdf_tool
-  config.py, source_scoring.py, conversation.py, memory*.py
+  domain.py                   业务词表（品类/渠道/受众/KPI/禁编造清单）
+  config.py, source_scoring.py, conversation.py, llm_client.py
 server/                       FastAPI 后端
   main.py                     应用工厂、CORS、新闻定时任务
   routes.py                   全部 /api 端点        db.py  SQLite 结构与数据访问
@@ -205,8 +219,8 @@ web/                          Next.js 14 前端
   components/*.tsx            各功能面板 + chat/preview/auth UI
   lib/*                       api、sse、i18n、stores(sessions/im)、oa-drafts
 tests/                        pytest 套件（见 §9）
-skills/                       营销 SOP 技能（竞品定位简报、产品发布战役）
-data/sample_campaign.csv      分析示例输入
+skills/                       业务 SOP 技能（竞品 Listing 对比、新品上架战役）
+data/sample_campaign.csv      分析示例输入（含退货列）
 render.yaml · vercel.json     部署配置
 ```
 

@@ -13,7 +13,7 @@ ID_BOB = "110101199001010023"
 
 
 class OaHandlerTests(unittest.TestCase):
-    """The OA tool handlers must work without any Anthropic API key (offline degrade)."""
+    """The OA tool handlers must work without any model API key (offline degrade)."""
 
     def setUp(self) -> None:
         sessions.reset_for_tests()

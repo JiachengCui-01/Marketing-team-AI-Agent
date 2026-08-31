@@ -15,7 +15,13 @@ services:
         value: 3.11.9
       - key: MARKETING_AGENT_DB_PATH
         value: /var/data/marketing_agent.db
-      - key: ANTHROPIC_API_KEY
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      # Gemini does double duty: product-image generation, and web search for the
+      # research agent via Google Search grounding (DeepSeek has no built-in
+      # search). A dedicated search vendor key, if set, takes priority — see
+      # tools/web_search.py.
+      - key: TAVILY_API_KEY
         sync: false
       - key: GEMINI_API_KEY
         sync: false

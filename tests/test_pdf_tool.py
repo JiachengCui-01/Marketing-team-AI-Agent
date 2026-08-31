@@ -15,7 +15,7 @@ class PdfToolTests(unittest.TestCase):
                 result = pdf_tool.generate_pdf(
                     {
                         "title": "中文营销方案",
-                        "subtitle": "小红书内容规划",
+                        "subtitle": "实木餐桌规格单",
                         "sections": [
                             {
                                 "heading": "目标人群",

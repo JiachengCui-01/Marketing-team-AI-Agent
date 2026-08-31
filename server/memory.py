@@ -27,16 +27,18 @@ LEARNED_MULTI_VALUE_CAP = 8
 # Max de-duped values kept per field when rendering/storing a profile.
 PROFILE_VALUE_CAP = 12
 
+# NOTE: these keys are persisted in the evidence ledger — do not rename them.
+# Only the labels are display text.
 MARKETING_PROFILE_FIELDS = {
     "role_title": "Role/title",
-    "industry": "Industry",
+    "industry": "Industry / category",
     "company_brand": "Company/brand",
-    "products": "Products/services",
+    "products": "Product line",
     "target_customers": "Target customers",
-    "channels": "Preferred channels",
+    "channels": "Sales & marketing channels",
     "tone_preferences": "Tone/style preferences",
-    "report_format_preferences": "Report format preferences",
-    "kpi_data_preferences": "KPI/data definition preferences",
+    "report_format_preferences": "Deliverable format preferences",
+    "kpi_data_preferences": "KPI/metric definition preferences",
     "other_preferences": "Other long-term preferences",
 }
 
@@ -445,51 +447,68 @@ def _clean_observation_value(value: str) -> str:
 
 
 _INDUSTRY_PATTERNS = [
-    (r"服装|女装|男装|穿搭|fashion|apparel", "Fashion/apparel"),
-    (r"saas|软件|系统|平台|crm|企业服务", "B2B SaaS / enterprise services"),
-    (r"教育|课程|培训", "Education/training"),
-    (r"消费品|零售|电商|店铺", "Consumer goods / ecommerce"),
+    (r"家具|家居|软装|沙发|床架|餐桌|柜|furniture|home furnishing|furnishings",
+     "Furniture & home furnishings"),
+    (r"外贸|出口|跨境|海外仓|独立站|cross-?border|export|dtc",
+     "Cross-border export / DTC"),
+    (r"供应商|工厂|代工|打样|oem|odm|sourcing",
+     "Design & contract manufacturing"),
+    (r"消费品|零售|电商|店铺|marketplace", "Consumer goods / ecommerce"),
 ]
 
 _PRODUCT_PATTERNS = [
-    (r"服装|衣服|款式|女装|男装|裙|裤|外套", "Apparel products"),
-    (r"saas|软件|系统|平台|工具|解决方案", "Software / SaaS product"),
-    (r"课程|培训|资料|社群", "Education product"),
+    (r"沙发|床架|床头|餐桌|餐椅|茶几|边柜|书桌|衣柜|储物柜|sofa|sectional|couch|"
+     r"bed frame|headboard|dining table|dresser|sideboard|nightstand|desk|coffee table",
+     "Large furniture (sofa, bed, table, storage)"),
+    (r"实木|硬木|板式|布艺|绒|皮|金属|橡木|胡桃|solid wood|oak|walnut|upholster|"
+     r"boucle|linen|veneer",
+     "Materials & finishes"),
+    (r"地毯|灯具|挂画|抱枕|饰品|软装|decor|rug|lighting", "Home decor & soft furnishings"),
 ]
 
 _AUDIENCE_PATTERNS = [
-    (r"b2b|企业客户|决策者|老板|创始人|管理层", "B2B decision makers"),
-    (r"市场|运营|增长|销售|bd", "Marketing / growth / sales teams"),
-    (r"女性|女生|白领|通勤|宝妈|学生", "Consumer lifestyle audiences"),
+    (r"房主|业主|租客|美国消费者|homeowner|renter|us consumer|apartment",
+     "US homeowners & renters"),
+    (r"新房|搬家|入住|首次|装修|first[- ]time|new home|moving|renovat",
+     "First-time & new-home furnishers"),
+    (r"设计师|室内设计|搭配|风格|interior design|designer|stylist",
+     "Interior design enthusiasts"),
 ]
 
 _CHANNEL_PATTERNS = [
-    (r"小红书|xhs", "Little Red Book"),
-    (r"linkedin|领英", "LinkedIn"),
-    (r"公众号|微信|朋友圈|社群|私域", "WeChat / owned channels"),
-    (r"抖音|短视频|视频号|tiktok", "Short video"),
-    (r"邮件|email|newsletter", "Email/newsletter"),
+    (r"亚马逊|amazon|asin|fba", "Amazon"),
+    (r"wayfair|overstock", "Wayfair / Overstock"),
+    (r"独立站|自有站|官网|shopify|dtc\b", "Own DTC store"),
+    (r"instagram|ins\b|meta|facebook", "Instagram / Meta"),
+    (r"pinterest|pin\b", "Pinterest"),
+    (r"tiktok|抖音|短视频|视频号", "TikTok / short video"),
+    (r"邮件|email|newsletter|edm", "Email/newsletter"),
+    (r"google ads|google shopping|搜索广告|购物广告|sem", "Paid search & shopping"),
 ]
 
 _TONE_PATTERNS = [
     (r"专业|正式|克制|权威", "Professional"),
-    (r"亲切|自然|种草|真实", "Authentic and friendly"),
-    (r"高级|精致|质感", "Premium/refined"),
+    (r"温馨|亲切|自然|真实|舒适|cozy|warm", "Warm and authentic"),
+    (r"高级|精致|质感|极简|premium|refined|minimal", "Premium/refined"),
     (r"幽默|活泼|年轻", "Playful/young"),
 ]
 
 _DELIVERABLE_PATTERNS = [
+    (r"listing|标题|五点|bullet|a\+|asin 文案", "Marketplace listing"),
+    (r"商详|详情页|product page|落地页|landing page", "Product page copy"),
     (r"文案|post|copy|caption", "Marketing copy"),
-    (r"报告|pdf|brief", "Report/brief"),
-    (r"方案|campaign|计划|策划", "Campaign plan"),
+    (r"报告|pdf|brief|规格单|spec sheet|目录|catalog", "Report/brief"),
+    (r"方案|campaign|计划|策划|上架", "Campaign plan"),
     (r"邮件|email", "Email"),
-    (r"脚本|短视频|口播", "Video script"),
+    (r"脚本|短视频|口播|script", "Video script"),
 ]
 
 _ROLE_PATTERNS = [
-    (r"marketingdirector|cmo|founder|ceo", "Marketing or business owner"),
+    (r"marketingdirector|cmo|founder|ceo|老板", "Marketing or business owner"),
     (r"市场|营销|增长|运营", "Marketing / growth / operations"),
     (r"销售|bd|商务", "Sales / business development"),
+    (r"产品|设计|选品|采购|供应链|sourcing|product manager", "Product & sourcing"),
+    (r"物流|仓储|报关|清关|头程|logistics", "Operations & logistics"),
 ]
 
 _COMPANY_PATTERNS = [
@@ -497,7 +516,12 @@ _COMPANY_PATTERNS = [
 ]
 
 _KPI_PATTERNS = [
-    (r"kpi|roi|ctr|cpa|cac|gmv", "Performance and conversion metrics"),
+    (r"kpi|roi|ctr|cpa|cac|gmv|acos|tacos|roas|aov|客单价",
+     "Performance and conversion metrics"),
     (r"转化率|线索|留资|销售额|获客成本", "Performance and conversion metrics"),
-    (r"曝光|阅读|互动|点赞|收藏|评论|分享", "Reach and engagement metrics"),
+    (r"退货|退款|差评|评分|评论|review|return rate|refund",
+     "Returns and after-sales metrics"),
+    (r"毛利|利润|成本|落地成本|头程|运费|关税|fob|cif|landed cost|margin|tariff",
+     "Margin and landed cost"),
+    (r"曝光|阅读|互动|点赞|收藏|分享|impression", "Reach and engagement metrics"),
 ]

@@ -78,10 +78,11 @@ export function ImageTemplatesModal({
   const platformLabel = (p: string) =>
     (
       {
-        taobao: t.imagePlatformTaobao,
-        xiaohongshu: t.imagePlatformXiaohongshu,
         amazon: t.imagePlatformAmazon,
+        wayfair: t.imagePlatformWayfair,
+        dtc_site: t.imagePlatformDtcSite,
         instagram: t.imagePlatformInstagram,
+        pinterest: t.imagePlatformPinterest,
         generic: t.imagePlatformGeneric,
       } as Record<string, string>
     )[p] ?? p;
@@ -89,14 +90,15 @@ export function ImageTemplatesModal({
     (
       {
         white: t.imageStyleWhite,
-        scene: t.imageStyleScene,
-        promo: t.imageStylePromo,
-        lifestyle: t.imageStyleLifestyle,
-        handheld: t.imageStyleHandheld,
-        flatlay: t.imageStyleFlatlay,
         multiangle: t.imageStyleMultiangle,
+        dimension: t.imageStyleDimension,
+        detail: t.imageStyleDetail,
+        roomset: t.imageStyleRoomset,
+        hero: t.imageStyleHero,
+        scale: t.imageStyleScale,
         editorial: t.imageStyleEditorial,
         minimal: t.imageStyleMinimal,
+        inspiration: t.imageStyleInspiration,
         clean: t.imageStyleClean,
       } as Record<string, string>
     )[s] ?? s;

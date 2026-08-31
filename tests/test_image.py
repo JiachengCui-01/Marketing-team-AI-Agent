@@ -18,8 +18,8 @@ _PNG_1x1 = (
 
 class ImageSkillTests(unittest.TestCase):
     def test_select_by_chinese_alias(self) -> None:
-        self.assertEqual(select_image_skill(None, "帮我做一张小红书封面").key, "xiaohongshu")
-        self.assertEqual(select_image_skill(None, "淘宝主图").key, "taobao")
+        self.assertEqual(select_image_skill(None, "帮我做一张亚马逊主图").key, "amazon")
+        self.assertEqual(select_image_skill(None, "独立站首页 hero 图").key, "dtc_site")
 
     def test_explicit_style_key_wins(self) -> None:
         self.assertEqual(select_image_skill("amazon", "random").key, "amazon")
@@ -28,7 +28,7 @@ class ImageSkillTests(unittest.TestCase):
         self.assertEqual(select_image_skill(None, "hello world").key, "generic")
 
     def test_prompt_prefix_mentions_platform_and_ratio(self) -> None:
-        skill = IMAGE_SKILLS["taobao"]
+        skill = IMAGE_SKILLS["amazon"]
         prefix = skill.prompt_prefix()
         self.assertIn(skill.label, prefix)
         self.assertIn(skill.aspect_ratio, prefix)
@@ -64,7 +64,7 @@ class ImageGenTests(unittest.TestCase):
         with mock.patch.object(image_gen, "_generate_raw", return_value=_PNG_1x1) as raw:
             result = image_gen.generate_image(
                 "a bottle on a desk",
-                skill=IMAGE_SKILLS["xiaohongshu"],
+                skill=IMAGE_SKILLS["pinterest"],
                 reference_images=[(b"ref", "image/png")],
             )
         self.assertTrue(result["ok"])
@@ -157,7 +157,7 @@ class ImageDbTests(unittest.TestCase):
 
     def test_history_crud_and_isolation(self) -> None:
         rec = db.add_image_history(
-            self.a["id"], prompt="p", style_key="taobao",
+            self.a["id"], prompt="p", style_key="amazon",
             artifact_id=None, source_upload_id=None, params={"aspect_ratio": "1:1"},
         )
         self.assertEqual(db.list_image_history(self.a["id"])[0]["id"], rec["id"])
@@ -178,9 +178,9 @@ class ImageDbTests(unittest.TestCase):
 
     def test_templates_seeded_and_filterable(self) -> None:
         self.assertTrue(len(db.list_image_templates()) >= 5)
-        taobao = db.list_image_templates("taobao")
-        self.assertTrue(taobao)
-        self.assertTrue(all(t["platform"] == "taobao" for t in taobao))
+        amazon = db.list_image_templates("amazon")
+        self.assertTrue(amazon)
+        self.assertTrue(all(t["platform"] == "amazon" for t in amazon))
 
     def test_template_seed_is_idempotent(self) -> None:
         before = len(db.list_image_templates())

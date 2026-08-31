@@ -596,7 +596,13 @@ export async function refreshNews(language: "zh" | "en"): Promise<NewsSummary> {
 
 // ---------- marketing image ----------
 
-export type ImageStyleKey = "xiaohongshu" | "taobao" | "amazon" | "instagram" | "generic";
+export type ImageStyleKey =
+  | "amazon"
+  | "wayfair"
+  | "dtc_site"
+  | "instagram"
+  | "pinterest"
+  | "generic";
 
 export type WorkflowSkill = {
   id: string;

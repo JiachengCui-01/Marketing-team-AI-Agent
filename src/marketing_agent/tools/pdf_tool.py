@@ -8,6 +8,7 @@ from typing import Any
 from xml.sax.saxutils import escape
 
 from marketing_agent.config import PROJECT_ROOT
+from marketing_agent.domain import BRAND
 
 ARTIFACTS_DIR = PROJECT_ROOT / "tmp" / "artifacts"
 PDF_FONT_NAME = "STSong-Light"
@@ -189,9 +190,10 @@ def _body_flowables(body: str, styles: dict[str, Any], table_width: float) -> li
 GENERATE_PDF_TOOL = {
     "name": "generate_pdf",
     "description": (
-        "Render a multi-section marketing PDF and return an artifact id the user can "
-        "preview and download. Use this when the user asks for a PDF deliverable "
-        "(brochure, one-pager, campaign brief, 小红书 post layout, etc.)."
+        "Render a multi-section PDF and return an artifact id the user can preview and "
+        "download. Use this when the user asks for a PDF deliverable (product spec "
+        "sheet, category catalog page, competitor listing comparison, launch brief, "
+        "one-pager, etc.)."
     ),
     "input_schema": {
         "type": "object",
@@ -249,7 +251,7 @@ def generate_pdf(payload: dict[str, Any]) -> dict[str, Any]:
     path = ARTIFACTS_DIR / f"{artifact_id}_{filename}"
 
     report_date = payload.get("date") or date.today().strftime("%Y-%m-%d")
-    eyebrow = payload.get("eyebrow") or "Marketing Strategy Deliverable"
+    eyebrow = payload.get("eyebrow") or "Brand & Product Deliverable"
     title = payload.get("title", "Untitled")
     subtitle = payload.get("subtitle") or ""
 
@@ -352,7 +354,7 @@ def generate_pdf(payload: dict[str, Any]) -> dict[str, Any]:
         topMargin=18 * mm,
         bottomMargin=18 * mm,
         title=str(title),
-        author="Marketing Agent",
+        author=f"{BRAND} Marketing Workspace",
     )
     doc.report_title = str(title)  # type: ignore[attr-defined]
     story: list[Any] = []
@@ -407,7 +409,7 @@ def generate_pdf(payload: dict[str, Any]) -> dict[str, Any]:
         canvas.line(document.leftMargin, height - 12 * mm, width - document.rightMargin, height - 12 * mm)
         canvas.setFont(regular_font, 8)
         canvas.setFillColor(colors.HexColor(BRAND_MUTED))
-        canvas.drawString(document.leftMargin, height - 9 * mm, "Marketing Agent")
+        canvas.drawString(document.leftMargin, height - 9 * mm, BRAND)
         canvas.drawRightString(width - document.rightMargin, height - 9 * mm, str(getattr(document, "report_title", ""))[:70])
         canvas.line(document.leftMargin, 11 * mm, width - document.rightMargin, 11 * mm)
         canvas.drawString(document.leftMargin, 7 * mm, "Confidential")

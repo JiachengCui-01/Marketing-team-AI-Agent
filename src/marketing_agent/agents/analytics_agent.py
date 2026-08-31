@@ -1,61 +1,83 @@
-"""Analytics agent — campaign performance analysis via server-side code execution.
+"""Analytics agent — campaign performance analysis via local code execution.
 
-The data file is uploaded to the Files API and attached to the code-execution
-sandbox as a ``container_upload`` block, so the raw data never enters the prompt.
-This lets the agent analyze large files (CSV, Excel, JSON) that would otherwise
-blow the context window.
+Anthropic ran this in a remote sandbox with the data file uploaded through the
+Files API. DeepSeek has neither, so the same workflow runs against
+``tools/code_exec.py``: the model writes pandas, the server executes it in a
+scratch directory that holds only this task's data file, and only printed results
+come back. The raw data still never enters the prompt, so large files stay out of
+the context window.
+
+See ``tools/code_exec.py`` for the security caveats of executing model-written
+code on the API server.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
-import anthropic
-
+from .. import llm_client
+from ..domain import BRAND, kpi_block
+from ..tools.code_exec import RUN_PYTHON_TOOL, enabled as code_exec_enabled, make_handler
 from .base import run_agent, unavailable_markdown
 
-# Files API is still beta; code execution itself is GA.
-FILES_BETA_HEADER = {"anthropic-beta": "files-api-2025-04-14"}
+TOOLS = [RUN_PYTHON_TOOL]
 
-TOOLS = [{"type": "code_execution_20260120", "name": "code_execution"}]
-
-# Map extensions to MIME types the Files API / sandbox understand.
-_EXT_MIME = {
-    ".csv": "text/csv",
-    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    ".xls": "application/vnd.ms-excel",
-    ".json": "application/json",
-    ".xml": "application/xml",
+# Extensions the agent knows how to load, and the label shown in the brief.
+_EXT_KIND = {
+    ".csv": "CSV",
+    ".xlsx": "Excel workbook",
+    ".xls": "Excel workbook (legacy)",
+    ".json": "JSON",
+    ".xml": "XML",
 }
 
-SYSTEM = """You are a marketing analytics specialist. You analyze campaign performance data
-using the code_execution tool (pandas, numpy, and openpyxl are available in the sandbox).
+SYSTEM = f"""You are the performance analyst for {BRAND}, a design-led large-furniture
+brand selling direct to consumers in the United States. You analyze sales, advertising,
+listing, and returns data using the run_python tool (pandas, numpy, and openpyxl are
+available).
 
-A data file has been uploaded into the sandbox for you. Your workflow:
+The data file named in the brief is already in the working directory of every
+run_python call — open it by its bare filename. Each call is a fresh process, so
+nothing carries over between calls: every script must re-import and re-load the
+file, and must print whatever you need to read.
 
-1. Locate the uploaded file in the container (list the working directory / typical
-   upload locations if needed), then load it with pandas based on its extension:
+Your workflow:
+
+1. First call: load the file with pandas based on its extension and print the
+   shape, column names, dtypes, and a few rows so you know what you are working with.
    - .csv  -> pandas.read_csv
    - .xlsx / .xls -> pandas.read_excel  (openpyxl is installed)
    - .json -> pandas.read_json  (or json + pandas.json_normalize)
-   Inspect columns and dtypes first. Never paste the raw data back into your reply.
-2. Compute the relevant marketing KPIs from whatever columns are present:
+   Never print the raw dataset back into your reply.
+2. Next calls: compute the relevant KPIs from whatever columns are present:
    - CTR = clicks / impressions
-   - CVR = conversions / clicks
-   - CPC = spend / clicks
-   - CPA = spend / conversions
-   - ROAS = revenue / spend
-   - Trends: day-over-day or week-over-week change for each channel/campaign.
-3. Identify the top 3-5 findings — not summary statistics, but actionable observations
-   ("LinkedIn ROAS improved 18% WoW while Facebook flat" beats "mean ROAS was 9.4").
-4. Recommend 3 concrete next actions tied to the findings.
+   - CVR = conversions / clicks (conversion rate)
+   - AOV = revenue / orders
+   - ACOS = ad spend / ad revenue         (TACOS = ad spend / total revenue)
+   - ROAS = revenue / spend               (1 / ACOS)
+   - CPC = spend / clicks, CPA = spend / conversions
+   - Return rate = returns / orders, and returned revenue as a share of revenue
+   - Net revenue = revenue - returned revenue, and net ROAS on that basis
+   - Trends: day-over-day or week-over-week change per channel, campaign, or SKU.
+   Skip any metric whose input columns are absent — say so rather than approximating.
+3. On this product line, ALWAYS surface return rate when the data supports it. A
+   channel with strong ROAS and a high return rate is usually losing money once
+   freight both ways is counted, and that inversion is the finding worth reporting.
+4. Group by whichever dimension the data actually supports — channel, campaign, SKU,
+   or product category. Prefer the one that makes the recommendation actionable.
+5. Identify the top 3-5 findings — not summary statistics, but actionable observations
+   ("Amazon ACOS improved to 14% while its return rate rose to 11%, so net contribution
+   fell" beats "mean ROAS was 9.4").
+6. Recommend 3 concrete next actions tied to the findings.
 
-For large datasets, aggregate/group in the sandbox and only report the computed
+{kpi_block()}
+
+For large datasets, aggregate/group inside the script and print only the computed
 results — do not print entire dataframes.
 
 Output format (markdown):
 
 ## Key Metrics
-(a small table — channel-level KPIs)
+(a small table — KPIs by channel, campaign, or SKU, whichever the data supports)
 
 ## Findings
 1. ...
@@ -75,14 +97,14 @@ def _analytics_unavailable(exc: Exception) -> str:
     return unavailable_markdown(
         exc,
         title="## Analysis Unavailable",
-        feature="code execution",
+        feature="data analysis",
         retry_noun="analysis request",
-        credits_for="code execution",
+        credits_for="data analysis",
     )
 
 
 def run(
-    client: anthropic.Anthropic,
+    client: llm_client.DeepSeek,
     task: str,
     csv_path: str | None = None,
     data_path: str | None = None,
@@ -98,14 +120,23 @@ def run(
     if not path.exists():
         return f"Error: data file not found at {path}."
 
-    ext = path.suffix.lower()
-    mime = _EXT_MIME.get(ext, "application/octet-stream")
+    if not code_exec_enabled():
+        return (
+            "## Analysis Unavailable\n\n"
+            "Local code execution is disabled on this server "
+            "(`MARKETING_AGENT_LOCAL_CODE_EXEC=0`), so performance data cannot be analyzed.\n\n"
+            "## What to do next\n"
+            "1. Re-enable local code execution on the API server, or\n"
+            "2. Analyze the file outside the agent and paste the computed metrics into the chat."
+        )
+
+    kind = _EXT_KIND.get(path.suffix.lower(), "data file")
     questions = questions or []
 
     brief_parts = [
         f"Task: {task}",
-        f"Data file: {path.name} (type: {mime})",
-        "The file has been uploaded into your sandbox — load it there and analyze it.",
+        f"Data file: {path.name} ({kind})",
+        "The file is in the working directory of every run_python call — load it there.",
     ]
     if questions:
         brief_parts.append("")
@@ -113,26 +144,13 @@ def run(
         brief_parts.extend(f"- {q}" for q in questions)
     brief = "\n".join(brief_parts)
 
-    uploaded = None
     try:
-        with path.open("rb") as fh:
-            uploaded = client.beta.files.upload(file=(path.name, fh, mime))
-        content = [
-            {"type": "text", "text": brief},
-            {"type": "container_upload", "file_id": uploaded.id},
-        ]
         return run_agent(
             client=client,
             system=SYSTEM,
-            user_message=content,
+            user_message=brief,
             tools=TOOLS,
-            extra_headers=FILES_BETA_HEADER,
+            client_tool_handlers={"run_python": make_handler(path)},
         )
-    except anthropic.APIError as exc:
+    except llm_client.APIError as exc:
         return _analytics_unavailable(exc)
-    finally:
-        if uploaded is not None:
-            try:
-                client.beta.files.delete(uploaded.id)
-            except Exception:  # noqa: BLE001 - cleanup is best-effort
-                pass

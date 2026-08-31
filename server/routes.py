@@ -10,11 +10,11 @@ from datetime import datetime
 from typing import AsyncIterator
 from urllib.parse import quote
 
-import anthropic
 from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from sse_starlette.sse import EventSourceResponse
 
+from marketing_agent import llm_client
 from marketing_agent.agents.image_skills import IMAGE_SKILLS, select_image_skill
 from marketing_agent.conversation import Conversation
 from marketing_agent.file_inputs import build_prompt_addendum, extract
@@ -35,10 +35,10 @@ router = APIRouter(prefix="/api")
 _BACKGROUND_TASKS: set[asyncio.Task] = set()
 
 
-def _client() -> anthropic.Anthropic:
+def _client() -> llm_client.DeepSeek:
     client = llm.get_client()
     if client is None:
-        raise HTTPException(500, "ANTHROPIC_API_KEY not configured on server.")
+        raise HTTPException(500, "DEEPSEEK_API_KEY not configured on server.")
     return client
 
 
@@ -995,9 +995,9 @@ def _build_user_message(
     extracted: list[dict] = []
     image_blocks: list[dict] = []
 
-    # Data files are analyzed in the code-execution sandbox by the analytics agent,
-    # so we never inline their contents — we only pass the path. This keeps large
-    # datasets out of the prompt.
+    # Data files are executed against by the analytics agent, so we never inline
+    # their contents — we only pass the path. This keeps large datasets out of
+    # the prompt.
     data_exts = {".csv", ".xlsx", ".xls", ".json"}
 
     for fid in _attached_ids(file_ids, csv_id):
@@ -1068,13 +1068,13 @@ def _pdf_sections_from_markdown(text: str, output_language: str = "en") -> list[
 
 def _create_competitive_pdf_artifact(user_id: str, session_id: str, text: str, output_language: str = "en") -> dict:
     if output_language == "zh":
-        title = "竞品分析报告"
+        title = "竞品 Listing 对比简报"
         subtitle = "基于所选竞品分析 skill 生成"
-        eyebrow = "企业营销交付物"
+        eyebrow = "品牌与产品交付物"
     else:
         title = "Competitive Positioning Brief"
         subtitle = "Generated from the selected competitive analysis skill."
-        eyebrow = "Marketing Strategy Deliverable"
+        eyebrow = "Brand & Product Deliverable"
     payload = {
         "title": title,
         "subtitle": subtitle,

@@ -15,7 +15,7 @@ from server.main import app
 class RouteTests(unittest.TestCase):
     def setUp(self) -> None:
         sessions.reset_for_tests()
-        os.environ["ANTHROPIC_API_KEY"] = "test-key"
+        os.environ["DEEPSEEK_API_KEY"] = "test-key"
         # Deterministic heuristic extraction; never call the model in tests.
         os.environ["MARKETING_AGENT_MEMORY_LLM"] = "0"
         os.environ["MARKETING_AGENT_CLARIFY_LLM"] = "0"
@@ -176,7 +176,7 @@ class RouteTests(unittest.TestCase):
             json={
                 "profile": {
                     "role_title": ["Marketing lead"],
-                    "industry": ["B2B SaaS"],
+                    "industry": ["大件家具出口"],
                     "channels": "LinkedIn\nEmail",
                     "target_customers": ["Enterprise buyers"],
                 }
@@ -184,7 +184,7 @@ class RouteTests(unittest.TestCase):
         )
         self.assertEqual(saved.status_code, 200, saved.text)
         body = saved.json()
-        self.assertEqual(body["profile"]["industry"], ["B2B SaaS"])
+        self.assertEqual(body["profile"]["industry"], ["大件家具出口"])
         self.assertEqual(body["profile"]["channels"], ["LinkedIn", "Email"])
 
         # Manual save and auto-learned memory are independent layers: saving the
@@ -195,7 +195,7 @@ class RouteTests(unittest.TestCase):
         self.client.put(
             "/api/memory/marketing",
             headers=self.headers,
-            json={"profile": {"industry": ["B2B SaaS"]}},
+            json={"profile": {"industry": ["大件家具出口"]}},
         )
         self.assertTrue(db.list_user_marketing_memory_evidence(user_id))
 
@@ -520,11 +520,11 @@ class RouteTests(unittest.TestCase):
 
     def test_image_skills_and_templates(self) -> None:
         skills = self.client.get("/api/image/skills", headers=self.headers).json()["skills"]
-        self.assertTrue(any(s["id"] == "taobao" for s in skills))
+        self.assertTrue(any(s["id"] == "amazon" for s in skills))
         tpls = self.client.get(
-            "/api/image/templates", headers=self.headers, params={"platform": "taobao"}
+            "/api/image/templates", headers=self.headers, params={"platform": "amazon"}
         ).json()["templates"]
-        self.assertTrue(tpls and all(t["platform"] == "taobao" for t in tpls))
+        self.assertTrue(tpls and all(t["platform"] == "amazon" for t in tpls))
 
     def test_image_generate_persists_and_previews(self) -> None:
         from server import routes
@@ -532,7 +532,7 @@ class RouteTests(unittest.TestCase):
         file_id = self._upload_png()
         fake = {
             "ok": True,
-            "filename": "marketing_taobao.png",
+            "filename": "marketing_amazon.png",
             "mime": "image/png",
             "path": str(Path(self.upload_tmp.name) / "gen.png"),
         }
@@ -541,7 +541,7 @@ class RouteTests(unittest.TestCase):
             res = self.client.post(
                 "/api/image/generate",
                 headers=self.headers,
-                json={"prompt": "nice bottle", "style_key": "taobao",
+                json={"prompt": "oak dining table", "style_key": "amazon",
                       "source": {"type": "upload", "id": file_id}},
             )
         self.assertEqual(res.status_code, 200, res.text)
@@ -617,13 +617,13 @@ class RouteTests(unittest.TestCase):
 
     def test_image_templates_platform_and_style_filter(self) -> None:
         all_t = self.client.get("/api/image/templates", headers=self.headers).json()["templates"]
-        self.assertTrue(any(t["platform"] == "taobao" for t in all_t))
+        self.assertTrue(any(t["platform"] == "amazon" for t in all_t))
         self.assertTrue(all("style" in t for t in all_t))
         # platform filter
-        taobao = self.client.get(
-            "/api/image/templates", headers=self.headers, params={"platform": "taobao"}
+        amazon = self.client.get(
+            "/api/image/templates", headers=self.headers, params={"platform": "amazon"}
         ).json()["templates"]
-        self.assertTrue(taobao and all(t["platform"] == "taobao" for t in taobao))
+        self.assertTrue(amazon and all(t["platform"] == "amazon" for t in amazon))
         # style filter is a distinct axis
         white = self.client.get(
             "/api/image/templates", headers=self.headers, params={"style": "white"}
@@ -635,7 +635,7 @@ class RouteTests(unittest.TestCase):
         res = self.client.post(
             "/api/image/compose-save",
             headers=self.headers,
-            json={"file_id": file_id, "template_id": "t_taobao_white", "style_key": "taobao", "prompt": "新品上市"},
+            json={"file_id": file_id, "template_id": "t_amazon_white", "style_key": "amazon", "prompt": "新品上架"},
         )
         self.assertEqual(res.status_code, 200, res.text)
         body = res.json()
@@ -653,7 +653,7 @@ class RouteTests(unittest.TestCase):
         res = self.client.post(
             "/api/image/compose-save",
             headers=bob,
-            json={"file_id": file_id, "style_key": "taobao"},
+            json={"file_id": file_id, "style_key": "amazon"},
         )
         self.assertEqual(res.status_code, 404)
 

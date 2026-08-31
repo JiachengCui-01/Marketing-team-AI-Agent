@@ -955,8 +955,8 @@ def _norm_evidence_key(value: str) -> str:
     """Normalized key for merging trivially-different phrasings of one value.
 
     Folds case, full/half-width, whitespace and punctuation so e.g.
-    "AI 办公Agent系统" and "ai办公agent系统。" collapse to the same key. Deeper
-    paraphrase merging (e.g. "AI办公Agent系统" vs "AI办公Agent") is handled by
+    "实木餐桌系列" and "实木餐桌系列。" collapse to the same key. Deeper
+    paraphrase merging (e.g. "实木餐桌系列" vs "实木餐桌") is handled by
     LLM canonicalization at extraction time.
     """
     s = unicodedata.normalize("NFKC", str(value)).casefold().strip()
@@ -1396,28 +1396,56 @@ def get_latest_news_summary(user_id: str) -> dict | None:
 # (see marketing_agent.agents.image_skills). Reseeded deterministically on init.
 # Columns: (id, platform, style_key, style, label, prompt, aspect_ratio, sort_order)
 _IMAGE_TEMPLATE_SEED = [
-    ("tpl_taobao_white", "taobao", "taobao", "white", "纯白主图",
-     "Clean e-commerce main image on a pure white background, product centered and sharp.", "1:1", 10),
-    ("tpl_taobao_scene", "taobao", "taobao", "scene", "场景主图",
-     "Product hero shot in a minimal lifestyle scene with soft shadows.", "1:1", 20),
-    ("tpl_taobao_promo", "taobao", "taobao", "promo", "促销氛围图",
-     "High-energy promotional main image with bold accent color blocks and space for a price tag.", "1:1", 30),
-    ("tpl_xhs_lifestyle", "xiaohongshu", "xiaohongshu", "lifestyle", "生活场景",
-     "Warm lifestyle flat-lay with cozy props and space for a caption sticker at the top.", "3:4", 10),
-    ("tpl_xhs_hand", "xiaohongshu", "xiaohongshu", "handheld", "手持展示",
-     "Aspirational hand-held product shot with soft natural light.", "3:4", 20),
-    ("tpl_xhs_flatlay", "xiaohongshu", "xiaohongshu", "flatlay", "平铺构图",
-     "Top-down flat-lay with coordinated props arranged around the product.", "3:4", 30),
+    # --- Amazon: compliance first, then the gallery slots that answer objections.
     ("tpl_amazon_white", "amazon", "amazon", "white", "合规白底主图",
-     "Marketplace-compliant main image: product only on pure white, straight-on hero angle.", "1:1", 10),
+     "Marketplace-compliant main image: the furniture piece alone on pure white, "
+     "three-quarter hero angle, full silhouette visible.", "1:1", 10),
     ("tpl_amazon_multi", "amazon", "amazon", "multiangle", "多角度展示",
-     "Product shown from multiple angles on white, arranged cleanly for a listing gallery.", "1:1", 20),
-    ("tpl_ins_editorial", "instagram", "instagram", "editorial", "杂志风",
-     "Editorial feed image with a cohesive color palette and shallow depth of field.", "4:5", 10),
+     "The piece shown from front, side, and back on white, arranged cleanly for a "
+     "listing gallery.", "1:1", 20),
+    ("tpl_amazon_dimension", "amazon", "amazon", "dimension", "尺寸标注图",
+     "Technical dimension callout: the piece on white with clean measurement lines and "
+     "leader arrows marking width, depth, height, and seat height.", "1:1", 30),
+    ("tpl_amazon_detail", "amazon", "amazon", "detail", "材质工艺特写",
+     "Tight close-up on the material and joinery — wood grain, weave, stitching, or "
+     "hardware — with shallow depth of field.", "1:1", 40),
+    # --- Wayfair: browse-grid legibility and scale.
+    ("tpl_wayfair_roomset", "wayfair", "wayfair", "roomset", "房间实景",
+     "Catalog room set: the piece styled in a lightly furnished, light-neutral interior "
+     "so its scale reads at thumbnail size.", "1:1", 10),
+    ("tpl_wayfair_white", "wayfair", "wayfair", "white", "白底属性图",
+     "Clean attribute shot on a seamless light background, full piece in frame with "
+     "true-to-life finish color.", "1:1", 20),
+    # --- Own store: wide hero with copy space, plus a styled vignette.
+    ("tpl_dtc_hero", "dtc_site", "dtc_site", "hero", "首页 Hero 横幅",
+     "Wide editorial hero: the piece off-center in a real, well-composed interior with "
+     "natural window light and clear negative space for a headline.", "16:9", 10),
+    ("tpl_dtc_roomset", "dtc_site", "dtc_site", "roomset", "房间搭配场景",
+     "Full room story showing the piece with coordinated rug, lighting, and textiles.",
+     "16:9", 20),
+    ("tpl_dtc_scale", "dtc_site", "dtc_site", "scale", "尺度对比图",
+     "Scale reference: the piece beside a common object of known size so a shopper can "
+     "judge whether it fits their room.", "16:9", 30),
+    # --- Instagram: editorial feed.
+    ("tpl_ins_editorial", "instagram", "instagram", "editorial", "杂志风房间",
+     "Editorial feed image: a styled room anchored by the piece, cohesive palette, soft "
+     "directional daylight.", "4:5", 10),
     ("tpl_ins_minimal", "instagram", "instagram", "minimal", "极简风",
-     "Minimalist composition with lots of negative space and one confident focal point.", "4:5", 20),
+     "Minimalist composition with generous negative space and one confident focal point.",
+     "4:5", 20),
+    ("tpl_ins_detail", "instagram", "instagram", "detail", "材质细节",
+     "Intimate material detail shot styled for the feed — texture, grain, and light.",
+     "4:5", 30),
+    # --- Pinterest: tall, searchable room inspiration.
+    ("tpl_pin_inspiration", "pinterest", "pinterest", "inspiration", "房间灵感",
+     "Tall room-inspiration image: an aspirational but reproducible interior in a clearly "
+     "identifiable style, with the piece central to the look.", "3:4", 10),
+    ("tpl_pin_roomset", "pinterest", "pinterest", "roomset", "风格搭配",
+     "Styled vignette showing how to pair the piece — palette, materials, and companion "
+     "furniture visible.", "3:4", 20),
+    # --- Fallback.
     ("tpl_generic_clean", "generic", "generic", "clean", "干净背景",
-     "Versatile marketing composition on a simple neutral background.", "1:1", 10),
+     "Versatile composition on a simple neutral background.", "1:1", 10),
 ]
 
 
