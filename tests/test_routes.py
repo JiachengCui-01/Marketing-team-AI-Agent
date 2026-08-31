@@ -122,6 +122,19 @@ class RouteTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_registration_does_not_require_id_card(self) -> None:
+        response = self.client.post(
+            "/api/auth/register",
+            json={
+                "account": "no-id@example.com",
+                "password": "password123",
+                "username": "No ID",
+                "real_name": "李四",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["user"]["id_card_masked"], "")
+
     def test_account_must_be_email_or_phone(self) -> None:
         response = self.client.post(
             "/api/auth/register",
