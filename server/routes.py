@@ -278,7 +278,15 @@ def plan_clarification(request: Request, payload: dict = Body(...)) -> dict:
                 "mime": rec["mime"],
                 "size": rec["size"],
             })
-    return clarify.plan_clarification(user["id"], prompt, locale, attachments)
+    history = []
+    for item in payload.get("history") or []:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip()
+        content = str(item.get("content") or "").strip()
+        if role in {"user", "assistant"} and content:
+            history.append({"role": role, "content": content[:2000]})
+    return clarify.plan_clarification(user["id"], prompt, locale, attachments, history[-10:])
 
 
 # ---------- news ----------

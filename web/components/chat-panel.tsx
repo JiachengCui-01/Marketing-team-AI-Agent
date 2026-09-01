@@ -286,6 +286,10 @@ export function ChatPanel({
         text,
         locale,
         Array.from(new Set([...attached.map((file) => file.file_id), ...workspaceFileIds])),
+        messages
+          .filter((message) => !message.pending && (message.role === "user" || message.role === "assistant"))
+          .slice(-10)
+          .map((message) => ({ role: message.role, content: message.content })),
       );
     } catch {
       plan = null;
@@ -303,15 +307,9 @@ export function ChatPanel({
       return;
     }
 
-    // LLM unavailable or errored — fall back to the heuristic flow.
-    // When files are already supplied, a rigid client-side checklist is more
-    // likely to re-ask something visible in those files than to help. If the
-    // context-aware planner is unavailable, let the downstream multimodal agent
-    // inspect the attachments and ask only if it genuinely cannot proceed.
-    if (attached.length === 0 && workspaceFileIds.length === 0 && looksAmbiguous(text, marketingMemory)) {
-      openHeuristicClarify(text);
-      return;
-    }
+    // Never fall back to a fixed checklist. If contextual planning is unavailable,
+    // the executing agent receives the same task context and can ask naturally only
+    // when it discovers a genuinely blocking gap.
     onSend(text);
     resetClarify();
   }

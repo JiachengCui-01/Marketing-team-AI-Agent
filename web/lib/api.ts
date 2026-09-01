@@ -304,11 +304,12 @@ export async function requestClarification(
   prompt: string,
   locale: "zh" | "en",
   fileIds: string[] = [],
+  history: Array<{ role: "user" | "assistant"; content: string }> = [],
 ): Promise<ClarifyPlan> {
   const res = await fetch(`${API_BASE}/api/clarify`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ prompt, locale, file_ids: fileIds }),
+    body: JSON.stringify({ prompt, locale, file_ids: fileIds, history }),
   });
   if (!res.ok) throw new Error(await parseJsonError(res));
   return res.json();

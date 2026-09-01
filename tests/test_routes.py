@@ -279,7 +279,12 @@ class RouteTests(unittest.TestCase):
             response = self.client.post(
                 "/api/clarify",
                 headers=self.headers,
-                json={"prompt": "分析这款产品的竞品", "locale": "zh", "file_ids": [file_id]},
+                json={
+                    "prompt": "分析这款产品的竞品",
+                    "locale": "zh",
+                    "file_ids": [file_id],
+                    "history": [{"role": "user", "content": "用于 Amazon US"}],
+                },
             )
 
         self.assertEqual(response.status_code, 200, response.text)
@@ -287,6 +292,7 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(attachments[0]["file_id"], file_id)
         self.assertEqual(attachments[0]["original_name"], "product.png")
         self.assertEqual(attachments[0]["mime"], "image/png")
+        self.assertEqual(planner.call_args.args[4], [{"role": "user", "content": "用于 Amazon US"}])
 
     def test_session_create_delete(self) -> None:
         created = self.client.post("/api/sessions", headers=self.headers)
