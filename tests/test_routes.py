@@ -272,6 +272,22 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(empty.status_code, 200, empty.text)
         self.assertFalse(empty.json()["needs_clarification"])
 
+    def test_clarify_endpoint_passes_attached_image_context(self) -> None:
+        file_id = self._upload_png()
+        planned = {"needs_clarification": False, "questions": [], "source": "llm"}
+        with mock.patch("server.routes.clarify.plan_clarification", return_value=planned) as planner:
+            response = self.client.post(
+                "/api/clarify",
+                headers=self.headers,
+                json={"prompt": "分析这款产品的竞品", "locale": "zh", "file_ids": [file_id]},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        attachments = planner.call_args.args[3]
+        self.assertEqual(attachments[0]["file_id"], file_id)
+        self.assertEqual(attachments[0]["original_name"], "product.png")
+        self.assertEqual(attachments[0]["mime"], "image/png")
+
     def test_session_create_delete(self) -> None:
         created = self.client.post("/api/sessions", headers=self.headers)
         self.assertEqual(created.status_code, 200)
@@ -328,7 +344,7 @@ class RouteTests(unittest.TestCase):
             files={"file": ("产品图.png", b"not-empty", "image/png")},
         )
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["original_name"], "upload.png")
+        self.assertEqual(response.json()["original_name"], "产品图.png")
 
     def test_upload_accepts_jfif(self) -> None:
         response = self.client.post(
@@ -387,6 +403,36 @@ class RouteTests(unittest.TestCase):
                     "artifact_id": rec["id"],
                     "filename": "Campaign.pdf",
                     "mime": "application/pdf",
+                }
+            ],
+        )
+
+    def test_session_messages_include_submitted_uploads(self) -> None:
+        from server import routes
+
+        session_id = self._create_session()
+        file_id = self._upload_png()
+        user_id = db.get_user_by_account("alice@example.com")["id"]
+        routes._persist_user_prompt(
+            user_id,
+            session_id,
+            "分析这款产品的竞品",
+            [file_id],
+        )
+
+        response = self.client.get(f"/api/sessions/{session_id}/messages", headers=self.headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        user_message = response.json()["messages"][0]
+        self.assertEqual(user_message["role"], "user")
+        self.assertEqual(
+            user_message["attachments"],
+            [
+                {
+                    "file_id": file_id,
+                    "original_name": "product.png",
+                    "mime": "image/png",
+                    "ext": ".png",
+                    "size": 67,
                 }
             ],
         )

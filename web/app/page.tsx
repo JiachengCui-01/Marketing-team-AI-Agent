@@ -219,11 +219,14 @@ export default function HomePage() {
           return local.map((msg) => {
             while (j < stored.length && stored[j].role !== msg.role) j++;
             if (j < stored.length) {
-              const serverId = stored[j].id;
+              const serverMessage = stored[j];
+              const serverId = serverMessage.id;
               j++;
-              return serverId != null && msg.server_id !== serverId
-                ? { ...msg, server_id: serverId }
-                : msg;
+              return {
+                ...msg,
+                ...(serverId != null ? { server_id: serverId } : {}),
+                attachments: serverMessage.attachments ?? msg.attachments,
+              };
             }
             return msg;
           });
@@ -359,6 +362,7 @@ export default function HomePage() {
           role: m.role,
           content: m.content,
           artifacts: m.artifacts,
+          attachments: m.attachments,
         }));
         // Restore any AI draft cards for this session (persisted client-side).
         const savedDrafts = listDrafts(id);
@@ -419,12 +423,12 @@ export default function HomePage() {
       setTraceBySession((current) => ({ ...current, [sid]: [] }));
       setSessionMessages(sid, (m) => [
         ...m,
-        { id: newId(), role: "user", content: text },
+        { id: newId(), role: "user", content: text, attachments: [...attached] },
         { id: newId(), role: "assistant", content: assistantText },
       ]);
       store.touch();
     },
-    [activeId, busy, ensureSession, setSessionMessages, store, t],
+    [activeId, attached, busy, ensureSession, setSessionMessages, store, t],
   );
 
   const handleSend = useCallback(async (override?: string, opts?: { force?: boolean }) => {
@@ -448,7 +452,13 @@ export default function HomePage() {
     setRunningSessions((current) => ({ ...current, [sid]: true }));
     setTraceBySession((current) => ({ ...current, [sid]: [] }));
 
-    const userMsg: ChatMessage = { id: newId(), role: "user", content: text };
+    const submittedAttachments = [...attached];
+    const userMsg: ChatMessage = {
+      id: newId(),
+      role: "user",
+      content: text,
+      attachments: submittedAttachments,
+    };
     const pendingId = newId();
     const pendingMsg: ChatMessage = {
       id: pendingId,
@@ -478,6 +488,7 @@ export default function HomePage() {
           role: m.role,
           content: m.content,
           artifacts: m.artifacts,
+          attachments: m.attachments,
         }));
         const recoveredAssistant = [...hydrated]
           .reverse()

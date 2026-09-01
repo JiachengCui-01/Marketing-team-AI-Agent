@@ -1,7 +1,7 @@
 """LLM-driven clarification planner.
 
-Given a user's task request (and their long-term marketing profile), a cheap
-fast model decides whether asking 1-3 short questions would materially improve
+Given a user's task request, attachments, and long-term marketing profile, a cheap
+fast model decides whether asking 0-2 short questions would materially improve
 the deliverable, and if so generates those questions with concrete quick-reply
 options — in the user's language, skipping anything already known.
 
@@ -21,7 +21,7 @@ from . import llm, memory
 logger = logging.getLogger(__name__)
 
 _TOOL_NAME = "plan_clarification"
-_MAX_QUESTIONS = 3
+_MAX_QUESTIONS = 2
 _MAX_OPTIONS = 4
 
 _SYSTEM = (
@@ -31,13 +31,17 @@ _SYSTEM = (
     "made by contract suppliers, and sells it into the United States through Amazon, "
     "Wayfair, its own store, and visual social channels.\n"
     "You are given the user's request and their known long-term profile.\n"
-    "Decide if asking 1-3 SHORT questions would materially improve the deliverable. "
+    "Decide if asking 0-2 SHORT questions would materially improve the deliverable. "
     "If the request is already clear enough, or the missing details are already in the "
     "profile, set needs_clarification=false and ask nothing — do not nitpick.\n"
-    "The details that most often change the output here are: which product or SKU, "
-    "which channel it is going to (marketplace listing vs own product page vs social), "
-    "the room or use case, the buyer situation (new home, replacement, small space), and "
-    "which physical specs are already confirmed. Ask about those before anything else.\n"
+    "Choose questions from the concrete request and supplied context, not from a fixed "
+    "checklist. Ask only for information that changes the next action or comparison.\n"
+    "Attached files are already part of the task. In particular, when an image is attached "
+    "and the request says 'this product', treat the product itself as supplied: NEVER ask "
+    "what product/category/SKU it is or ask the user to describe the image. A downstream "
+    "vision-capable agent will inspect it. You may ask for a non-visual fact the image cannot "
+    "establish, such as target marketplace, price band, material/spec confirmation, or the "
+    "decision the report should support, but only if it is truly needed.\n"
     "When you do ask: make each question specific to THIS request, phrased in the user's "
     "language; give 2-4 concrete quick-reply options plus allow_custom=true so the user can "
     "type their own answer. Never ask about something already stated in the request or the "
@@ -46,7 +50,12 @@ _SYSTEM = (
 )
 
 
-def plan_clarification(user_id: str, prompt: str, locale: str = "zh") -> dict:
+def plan_clarification(
+    user_id: str,
+    prompt: str,
+    locale: str = "zh",
+    attachments: list[dict] | None = None,
+) -> dict:
     prompt = (prompt or "").strip()
     if not prompt:
         return _empty("empty")
@@ -65,7 +74,10 @@ def plan_clarification(user_id: str, prompt: str, locale: str = "zh") -> dict:
             system=_SYSTEM,
             tools=[_TOOL],
             tool_choice={"type": "tool", "name": _TOOL_NAME},
-            messages=[{"role": "user", "content": _user_content(prompt, profile, locale)}],
+            messages=[{
+                "role": "user",
+                "content": _user_content(prompt, profile, locale, attachments or []),
+            }],
         )
         plan = _parse(response)
         plan["source"] = "llm"
@@ -79,7 +91,7 @@ def _empty(source: str) -> dict:
     return {"needs_clarification": False, "questions": [], "source": source}
 
 
-def _user_content(prompt: str, profile: dict, locale: str) -> str:
+def _user_content(prompt: str, profile: dict, locale: str, attachments: list[dict]) -> str:
     lang = "Chinese" if locale == "zh" else "English"
     if profile:
         known = "\n".join(
@@ -89,8 +101,24 @@ def _user_content(prompt: str, profile: dict, locale: str) -> str:
         )
     else:
         known = "(none)"
+    if attachments:
+        supplied = "\n".join(
+            f"- {item.get('original_name') or item.get('name') or 'file'} "
+            f"({item.get('mime') or 'unknown type'})"
+            for item in attachments[:10]
+        )
+    else:
+        supplied = "(none)"
+    has_image = any(str(item.get("mime") or "").startswith("image/") for item in attachments)
+    image_note = (
+        "YES — treat the referenced product as supplied; do not ask what it is."
+        if has_image
+        else "no"
+    )
     return (
         f"User request:\n{prompt[:4000]}\n\n"
+        f"Files already attached to this request:\n{supplied}\n"
+        f"Product image already supplied: {image_note}\n\n"
         f"Known long-term business profile (do not re-ask these):\n{known}\n\n"
         f"Write any questions and options in {lang}."
     )
@@ -151,7 +179,7 @@ _TOOL = {
             },
             "questions": {
                 "type": "array",
-                "description": "1-3 short, request-specific questions (empty if not needed).",
+                "description": "0-2 short, request-specific questions (empty if not needed).",
                 "items": {
                     "type": "object",
                     "properties": {

@@ -86,12 +86,15 @@ def validate(content: bytes, original_name: str) -> tuple[str, str]:
 def save(content: bytes, original_name: str, content_type: str | None = None) -> dict:
     _ensure_dir()
     safe_name, ext = validate(content, original_name)
+    display_name = Path(original_name).name.strip()[:160]
     file_id = uuid.uuid4().hex
     target = UPLOAD_DIR / f"{file_id}_{safe_name}"
     target.write_bytes(content)
     return {
         "file_id": file_id,
-        "original_name": safe_name,
+        # Keep the user's real basename for display. Only the private storage
+        # filename is ASCII-sanitized; React escapes this label when rendering.
+        "original_name": display_name,
         "size": len(content),
         "mime": EXT_MIME.get(ext, content_type or "application/octet-stream"),
         "ext": ext,

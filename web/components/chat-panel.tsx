@@ -282,7 +282,11 @@ export function ChatPanel({
     setClarifyChecking(true);
     let plan: ClarifyPlan | null = null;
     try {
-      plan = await requestClarification(text, locale);
+      plan = await requestClarification(
+        text,
+        locale,
+        Array.from(new Set([...attached.map((file) => file.file_id), ...workspaceFileIds])),
+      );
     } catch {
       plan = null;
     }
@@ -300,7 +304,11 @@ export function ChatPanel({
     }
 
     // LLM unavailable or errored — fall back to the heuristic flow.
-    if (looksAmbiguous(text, marketingMemory)) {
+    // When files are already supplied, a rigid client-side checklist is more
+    // likely to re-ask something visible in those files than to help. If the
+    // context-aware planner is unavailable, let the downstream multimodal agent
+    // inspect the attachments and ask only if it genuinely cannot proceed.
+    if (attached.length === 0 && workspaceFileIds.length === 0 && looksAmbiguous(text, marketingMemory)) {
       openHeuristicClarify(text);
       return;
     }
@@ -461,6 +469,7 @@ export function ChatPanel({
                 key={m.id}
                 message={m}
                 onPreviewArtifact={onPreviewArtifact}
+                onPreviewUpload={onPreviewUpload}
                 onDownloadArtifact={onDownloadArtifact}
                 onEditMessage={onEditMessage}
                 canEdit={!busy}

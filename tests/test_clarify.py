@@ -62,7 +62,7 @@ class ClarifyTests(unittest.TestCase):
 
         self.assertEqual(plan["source"], "llm")
         self.assertTrue(plan["needs_clarification"])
-        self.assertLessEqual(len(plan["questions"]), 3)  # questions capped
+        self.assertLessEqual(len(plan["questions"]), 2)  # questions capped
         for q in plan["questions"]:
             self.assertLessEqual(len(q["options"]), 4)  # options capped
             self.assertTrue(q["allow_custom"])  # default
@@ -70,6 +70,24 @@ class ClarifyTests(unittest.TestCase):
         sent = client.messages.calls[0]["messages"][0]["content"]
         self.assertIn("帮我写点东西", sent)
         self.assertEqual(client.messages.calls[0]["tool_choice"], {"type": "tool", "name": "plan_clarification"})
+
+    def test_attached_image_is_explicit_context_for_the_planner(self) -> None:
+        client = _client_with({"needs_clarification": False, "questions": []})
+        attachments = [
+            {
+                "file_id": "img1",
+                "original_name": "蓝色沙发.jpg",
+                "mime": "image/jpeg",
+                "size": 123,
+            }
+        ]
+        with mock.patch("server.clarify.llm.get_client", return_value=client):
+            clarify.plan_clarification("u1", "分析这款产品的竞品", "zh", attachments)
+
+        sent = client.messages.calls[0]["messages"][0]["content"]
+        self.assertIn("蓝色沙发.jpg", sent)
+        self.assertIn("Product image already supplied: YES", sent)
+        self.assertIn("NEVER ask", clarify._SYSTEM)
 
     def test_needs_true_but_no_valid_questions_becomes_false(self) -> None:
         client = _client_with({"needs_clarification": True, "questions": []})

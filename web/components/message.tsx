@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { User, Sparkles, FileText, Download, BookOpen, Pencil } from "lucide-react";
+import { User, Sparkles, FileText, FileImage, Download, BookOpen, Pencil } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/i18n";
 import { StatusChip, type StatusInfo } from "./status-chip";
-import { artifactDownloadUrl, type OaDraft } from "@/lib/api";
+import { artifactDownloadUrl, uploadPreviewUrl, type OaDraft, type UploadResponse } from "@/lib/api";
 import { AvatarImage } from "./auth-ui";
 import { CitationMarkdown } from "./citation-markdown";
 import { OaDraftCard } from "./oa-draft-card";
@@ -27,11 +27,13 @@ export type ChatMessage = {
   artifacts?: MessageArtifact[];
   drafts?: OaDraft[];
   kbSources?: { title: string; doc_id: string }[];
+  attachments?: UploadResponse[];
 };
 
 export function MessageBubble({
   message,
   onPreviewArtifact,
+  onPreviewUpload,
   onDownloadArtifact,
   onEditMessage,
   canEdit,
@@ -39,6 +41,7 @@ export function MessageBubble({
 }: {
   message: ChatMessage;
   onPreviewArtifact?: (a: MessageArtifact) => void;
+  onPreviewUpload?: (file: UploadResponse) => void;
   onDownloadArtifact?: (a: MessageArtifact) => void;
   onEditMessage?: (message: ChatMessage, newText: string) => void;
   canEdit?: boolean;
@@ -149,7 +152,25 @@ export function MessageBubble({
         ) : showTypingDots ? (
           <TypingDots />
         ) : isUser ? (
-          <span className="whitespace-pre-wrap">{message.content}</span>
+          <div className="flex min-w-0 flex-col gap-2.5">
+            {message.attachments && message.attachments.length > 0 ? (
+              <div
+                className={cn(
+                  "grid w-64 max-w-full gap-2",
+                  message.attachments.length > 1 ? "grid-cols-2" : "grid-cols-1",
+                )}
+              >
+                {message.attachments.map((file) => (
+                  <MessageAttachment
+                    key={file.file_id}
+                    file={file}
+                    onPreview={onPreviewUpload}
+                  />
+                ))}
+              </div>
+            ) : null}
+            <span className="whitespace-pre-wrap">{message.content}</span>
+          </div>
         ) : (
           <>
             <CitationMarkdown content={message.content + (message.pending ? "▍" : "")} stripSourceSections />
@@ -208,6 +229,40 @@ export function MessageBubble({
         ) : null}
       </div>
     </div>
+  );
+}
+
+function MessageAttachment({
+  file,
+  onPreview,
+}: {
+  file: UploadResponse;
+  onPreview?: (file: UploadResponse) => void;
+}) {
+  const isImage = file.mime.startsWith("image/");
+  return (
+    <button
+      type="button"
+      onClick={() => onPreview?.(file)}
+      className="min-w-0 overflow-hidden rounded-xl border border-white/25 bg-black/10 text-left transition hover:bg-black/15"
+      title={file.original_name}
+    >
+      {isImage ? (
+        <img
+          src={uploadPreviewUrl(file.file_id)}
+          alt={file.original_name}
+          className="h-32 w-full object-cover"
+        />
+      ) : (
+        <div className="flex h-20 items-center justify-center">
+          <FileText size={24} />
+        </div>
+      )}
+      <span className="flex min-w-0 items-center gap-1.5 px-2.5 py-2 text-xs">
+        {isImage ? <FileImage size={13} className="shrink-0" /> : <FileText size={13} className="shrink-0" />}
+        <span className="truncate">{file.original_name}</span>
+      </span>
+    </button>
   );
 }
 

@@ -268,7 +268,17 @@ def plan_clarification(request: Request, payload: dict = Body(...)) -> dict:
     locale = "en" if str(payload.get("locale") or "zh").lower().startswith("en") else "zh"
     if not prompt:
         return {"needs_clarification": False, "questions": [], "source": "empty"}
-    return clarify.plan_clarification(user["id"], prompt, locale)
+    attachments: list[dict] = []
+    for file_id in _attached_ids(payload.get("file_ids")):
+        rec = db.get_upload(file_id, user["id"])
+        if rec is not None:
+            attachments.append({
+                "file_id": rec["id"],
+                "original_name": rec["original_name"],
+                "mime": rec["mime"],
+                "size": rec["size"],
+            })
+    return clarify.plan_clarification(user["id"], prompt, locale, attachments)
 
 
 # ---------- news ----------
@@ -479,6 +489,10 @@ def get_session_messages(request: Request, session_id: str) -> dict:
     if db.get_session(session_id, user["id"]) is None:
         raise HTTPException(404, "Session not found.")
     rows = db.list_messages(session_id)
+    attachments_by_message: dict[int, list[dict]] = {}
+    for attachment in db.list_message_uploads(session_id, user["id"]):
+        message_id = int(attachment.pop("message_id"))
+        attachments_by_message.setdefault(message_id, []).append(attachment)
     artifacts = [
         {
             "artifact_id": rec["id"],
@@ -504,14 +518,20 @@ def get_session_messages(request: Request, session_id: str) -> dict:
                         if block.get("type") == "text" and block.get("text"):
                             texts.append(block["text"])
                 if texts:
-                    out.append({"id": row["id"], "role": role, "content": "\n\n".join(texts)})
+                    message = {"id": row["id"], "role": role, "content": "\n\n".join(texts)}
+                    if row["id"] in attachments_by_message:
+                        message["attachments"] = attachments_by_message[row["id"]]
+                    out.append(message)
                 # Skip tool-result-only user turns from UI rendering.
                 continue
             content = parsed if isinstance(parsed, str) else content
         except Exception:  # noqa: BLE001
             pass
         if role in ("user", "assistant") and isinstance(content, str):
-            out.append({"id": row["id"], "role": role, "content": content})
+            message = {"id": row["id"], "role": role, "content": content}
+            if row["id"] in attachments_by_message:
+                message["attachments"] = attachments_by_message[row["id"]]
+            out.append(message)
     if artifacts:
         for message in reversed(out):
             if message["role"] == "assistant":
@@ -1062,11 +1082,20 @@ def _build_user_message(
     return prompt + addendum + skill_addendum
 
 
-def _persist_user_prompt(user_id: str, session_id: str, prompt: str) -> None:
+def _persist_user_prompt(
+    user_id: str,
+    session_id: str,
+    prompt: str,
+    file_ids: str | list[str] | None = None,
+    csv_id: str | None = None,
+) -> None:
     rows = db.list_messages(session_id)
     last = rows[-1] if rows else None
     if not last or last["role"] != "user" or last["content"] != prompt:
-        db.add_message(session_id, "user", prompt)
+        message_id = db.add_message(session_id, "user", prompt)
+    else:
+        message_id = int(last["id"])
+    db.set_message_uploads(message_id, _attached_ids(file_ids, csv_id))
     db.update_session(session_id, user_id=user_id, name=_derive_name(session_id, prompt), touch=True)
     # Long-term memory learning runs in the background (see _schedule_memory_update)
     # so LLM extraction never delays the model response.
@@ -1212,7 +1241,7 @@ async def stream_session(
     selected_skills = _selected_skill_ids(skill_ids)
     output_language = _output_language_for_prompt(prompt)
     user_message = _build_user_message(user["id"], prompt, file_ids, csv_id, selected_skills)
-    _persist_user_prompt(user["id"], session_id, prompt)
+    _persist_user_prompt(user["id"], session_id, prompt, file_ids, csv_id)
     _schedule_memory_update(user["id"], prompt)
 
     # Build user_message — string if no images, else list-of-blocks.
@@ -1256,7 +1285,13 @@ async def complete_session(request: Request, session_id: str, payload: dict = Bo
         payload.get("csv_id"),
         selected_skills,
     )
-    _persist_user_prompt(user["id"], session_id, prompt)
+    _persist_user_prompt(
+        user["id"],
+        session_id,
+        prompt,
+        payload.get("file_ids"),
+        payload.get("csv_id"),
+    )
     _schedule_memory_update(user["id"], prompt)
     client = _client()
     events: list[dict] = []

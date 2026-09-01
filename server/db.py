@@ -158,6 +158,16 @@ CREATE TABLE IF NOT EXISTS uploads (
 );
 CREATE INDEX IF NOT EXISTS idx_uploads_user ON uploads(user_id, created_at);
 
+CREATE TABLE IF NOT EXISTS message_uploads (
+    message_id INTEGER NOT NULL,
+    upload_id TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (message_id, upload_id),
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (upload_id) REFERENCES uploads(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_message_uploads_message ON message_uploads(message_id, position);
+
 CREATE TABLE IF NOT EXISTS news_configs (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL UNIQUE,
@@ -493,6 +503,7 @@ def _drop_anonymous_tables_if_needed(conn: sqlite3.Connection) -> None:
         conn.executescript(
             """
             DROP TABLE IF EXISTS artifacts;
+            DROP TABLE IF EXISTS message_uploads;
             DROP TABLE IF EXISTS messages;
             DROP TABLE IF EXISTS sessions;
             DROP TABLE IF EXISTS groups;
@@ -757,19 +768,20 @@ def delete_session(session_id: str, user_id: str | None = None) -> bool:
 
 # ---------- messages ----------
 
-def add_message(session_id: str, role: str, content: Any) -> None:
+def add_message(session_id: str, role: str, content: Any) -> int:
     """content can be str or any JSON-serializable structure (lists for assistant content)."""
     _ensure()
     payload = content if isinstance(content, str) else json.dumps(content, default=str)
     now = time.time()
     with _connect() as conn:
-        conn.execute(
+        cur = conn.execute(
             "INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
             (session_id, role, payload, now),
         )
         conn.execute(
             "UPDATE sessions SET updated_at = ? WHERE id = ?", (now, session_id)
         )
+        return int(cur.lastrowid)
 
 
 def list_messages(session_id: str) -> list[dict]:
@@ -780,6 +792,37 @@ def list_messages(session_id: str) -> list[dict]:
             (session_id,),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def set_message_uploads(message_id: int, upload_ids: list[str]) -> None:
+    """Bind uploaded files to the user message that submitted them."""
+    _ensure()
+    deduped = list(dict.fromkeys(fid for fid in upload_ids if fid))
+    with _connect() as conn:
+        conn.execute("DELETE FROM message_uploads WHERE message_id = ?", (message_id,))
+        conn.executemany(
+            "INSERT INTO message_uploads (message_id, upload_id, position) VALUES (?, ?, ?)",
+            [(message_id, file_id, index) for index, file_id in enumerate(deduped)],
+        )
+
+
+def list_message_uploads(session_id: str, user_id: str) -> list[dict]:
+    """Return attachment metadata grouped by persisted message id."""
+    _ensure()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT mu.message_id, u.id AS file_id, u.original_name, u.mime, u.ext, u.size
+            FROM message_uploads AS mu
+            JOIN messages AS m ON m.id = mu.message_id
+            JOIN sessions AS s ON s.id = m.session_id
+            JOIN uploads AS u ON u.id = mu.upload_id AND u.user_id = s.user_id
+            WHERE m.session_id = ? AND s.user_id = ?
+            ORDER BY mu.message_id ASC, mu.position ASC
+            """,
+            (session_id, user_id),
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def truncate_messages_from(session_id: str, from_message_id: int) -> int:
@@ -2758,6 +2801,7 @@ def reset_for_tests() -> None:
                         DROP TABLE IF EXISTS image_templates;
                         DROP TABLE IF EXISTS news_summaries;
                         DROP TABLE IF EXISTS news_configs;
+                        DROP TABLE IF EXISTS message_uploads;
                         DROP TABLE IF EXISTS uploads;
                         DROP TABLE IF EXISTS artifacts;
                         DROP TABLE IF EXISTS user_marketing_memory_evidence;

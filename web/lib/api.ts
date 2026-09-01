@@ -131,6 +131,7 @@ export type StoredMessage = {
   role: "user" | "assistant";
   content: string;
   artifacts?: MessageArtifact[];
+  attachments?: UploadResponse[];
 };
 
 export type MessageArtifact = {
@@ -299,11 +300,15 @@ export async function getMarketingMemoryEvidence(): Promise<MarketingMemoryEvide
   return res.json();
 }
 
-export async function requestClarification(prompt: string, locale: "zh" | "en"): Promise<ClarifyPlan> {
+export async function requestClarification(
+  prompt: string,
+  locale: "zh" | "en",
+  fileIds: string[] = [],
+): Promise<ClarifyPlan> {
   const res = await fetch(`${API_BASE}/api/clarify`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ prompt, locale }),
+    body: JSON.stringify({ prompt, locale, file_ids: fileIds }),
   });
   if (!res.ok) throw new Error(await parseJsonError(res));
   return res.json();
