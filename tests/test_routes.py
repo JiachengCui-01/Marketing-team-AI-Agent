@@ -542,6 +542,7 @@ class RouteTests(unittest.TestCase):
         self.assertTrue(cfg["model_api"])
         self.assertIn("image_generation", cfg)
         self.assertIn("web_search", cfg)
+        self.assertIn("product_browser", cfg)
         self.assertIn("local_code_execution", cfg)
 
     def test_health_flags_missing_model_key(self) -> None:

@@ -4,7 +4,9 @@ services:
     # existing services by name, so reusing the old name would try to adopt that
     # service instead of creating a fresh one.
     name: furniture-dtc-agent-api
-    runtime: python
+    # Chromium and its OS libraries are provided by the pinned Playwright image.
+    # Render supports switching an existing Blueprint-managed service to Docker.
+    runtime: docker
     # `standard` (2 GB) is sized for background removal: rembg loads onnxruntime
     # plus the ~170 MB u2net model on first cutout. The import is lazy, so
     # everything else fits comfortably in `starter` (512 MB) — drop to starter if
@@ -12,8 +14,8 @@ services:
     # and the cutout feature aside entirely. The free plan has no persistent disk,
     # so SQLite would be wiped on every restart; fine for a demo, not for real use.
     plan: standard
-    buildCommand: pip install -e .
-    startCommand: uvicorn server.main:app --host 0.0.0.0 --port $PORT
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     # Returns 200 even when unconfigured, and its body reports which capabilities
     # are wired — curl it after deploying to confirm the keys landed.
     healthCheckPath: /api/health
@@ -49,3 +51,10 @@ services:
         sync: false
       - key: CORS_ORIGIN_REGEX
         value: https://.*\.vercel\.app
+      # The browser is restricted to public URLs returned by web search. Render's
+      # container runtime needs Chromium's sandbox disabled; request routing still
+      # blocks private/link-local hosts, downloads, and non-review interactions.
+      - key: MARKETING_AGENT_PRODUCT_BROWSER
+        value: "1"
+      - key: MARKETING_AGENT_BROWSER_NO_SANDBOX
+        value: "1"

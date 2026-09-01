@@ -70,7 +70,7 @@ def health() -> dict:
     a rolled-back deploy would hide the reason it failed. ``config`` reports
     booleans only, never key material, so this stays safe to expose.
     """
-    from marketing_agent.tools import code_exec, web_search
+    from marketing_agent.tools import code_exec, product_browser, web_search
 
     search = web_search.active_provider()
     return {
@@ -80,6 +80,7 @@ def health() -> dict:
             "model_api": bool(os.environ.get("DEEPSEEK_API_KEY", "").strip()),
             "image_generation": bool(os.environ.get("GEMINI_API_KEY", "").strip()),
             "web_search": search[0] if search else None,
+            "product_browser": product_browser.enabled(),
             "local_code_execution": code_exec.enabled(),
         },
     }

@@ -6,7 +6,7 @@ from unittest import mock
 
 from server import db, news
 from marketing_agent.agents import research_agent
-from marketing_agent.tools import web_search
+from marketing_agent.tools import product_browser, web_search
 
 
 class NewsTests(unittest.TestCase):
@@ -33,8 +33,12 @@ class NewsTests(unittest.TestCase):
     def test_research_exposes_the_client_side_search_tool(self) -> None:
         # DeepSeek has no server-side search, so the agent carries its own tool.
         self.assertEqual(research_agent.TOOLS[0]["name"], "web_search")
+        self.assertEqual(research_agent.TOOLS[1]["name"], "browse_product_page")
         self.assertIn("query", research_agent.TOOLS[0]["input_schema"]["properties"])
+        self.assertIn("url", research_agent.TOOLS[1]["input_schema"]["properties"])
         self.assertIn("never run more than", research_agent.SYSTEM.lower())
+        self.assertIn("untrusted evidence", research_agent.SYSTEM.lower())
+        self.assertIn("at least two distinct collected reviews", research_agent.SYSTEM.lower())
 
     def test_research_unavailable_without_a_search_provider(self) -> None:
         with mock.patch.object(web_search, "is_available", return_value=False):
@@ -105,6 +109,47 @@ class NewsTests(unittest.TestCase):
         self.assertIn("[Furniture Today](https://www.furnituretoday.com/x)", result)
         self.assertIn("## Source Credibility", result)
         self.assertIn("Tier 2", result)
+
+    def test_research_only_browses_urls_returned_by_search(self) -> None:
+        captured: dict = {}
+
+        def fake_run_agent(**kwargs):
+            captured.update(kwargs)
+            return "## Summary\nBrowser-verified finding [Product](https://shop.example.com/p/sofa)"
+
+        results = [
+            web_search.SearchResult(
+                title="Product",
+                url="https://shop.example.com/p/sofa",
+                snippet="A product page.",
+            )
+        ]
+        browser_result = {
+            "source_type": "live_browser",
+            "final_url": results[0].url,
+            "product": {"price": "999", "currency": "USD"},
+            "reviews": ["Assembly instructions were unclear."],
+        }
+        with mock.patch.object(web_search, "is_available", return_value=True), \
+                mock.patch.object(research_agent, "run_agent", side_effect=fake_run_agent), \
+                mock.patch.object(web_search, "search", return_value=results), \
+                mock.patch.object(product_browser, "browse_product_page", return_value=browser_result):
+            research_agent.run(
+                mock.Mock(),
+                task="Compare sofas",
+                topics=["sofas"],
+                response_language="en",
+            )
+            handlers = captured["client_tool_handlers"]
+            denied = handlers["browse_product_page"]({"url": "https://other.example.com/p/1"})
+            search_output = handlers["web_search"]({"query": "comparable sofas"})
+            browsed = handlers["browse_product_page"]({"url": results[0].url})
+
+        self.assertIn(results[0].url, search_output)
+        self.assertIn("only open an exact URL", denied)
+        self.assertIn("BEGIN UNTRUSTED BROWSER EVIDENCE", browsed)
+        self.assertIn('"source_type": "live_browser"', browsed)
+        self.assertIn("Assembly instructions were unclear", browsed)
 
     def test_build_task_uses_requested_language(self) -> None:
         from datetime import datetime, timezone

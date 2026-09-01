@@ -61,7 +61,7 @@
 │   Orchestrator / OA Copilot  ── 任务控制层（不直接干活）         │
 │        ├─ delegate → 内容 Agent（Listing / 商详 / 社媒 + PDF）   │
 │        ├─ delegate → 数据 Agent（本地 Python 算 ACOS/退货率）    │
-│        ├─ delegate → 市场 Agent（搜索 API + 分级来源）           │
+│        ├─ delegate → 市场 Agent（搜索 + 商品页浏览 + 分级来源）  │
 │        └─ OA 工具：draft_approval / draft_task / draft_event /   │
 │                    query_* / search_knowledge_base              │
 └─────────────────────────────────────────────────────────────────┘
@@ -70,12 +70,12 @@
 - **业务词表（`domain.py`）**：品类、渠道、受众、KPI 和「不得编造」清单集中在一处，所有提示词从这里取词，避免各文件口径漂移。
 - **编排器（`orchestrator.py`）**：tool-use 循环（最多 12 轮），并行分派专家、再综合为 markdown。硬约束：**它自己不写文案、不算指标、不声称外部事实、不填实物参数**，一律通过 delegate 工具下派，避免越权与幻觉。
 - **OA Copilot（`oa/agent.py`）**：聊天实际运行者，复用编排器的分派/流式机制，额外挂载 OA 工具，一个助手同时覆盖办公流程与营销分派。
-- **三类专家（`agents/`）**：内容（11 个渠道 SOP 技能，含 Amazon / Wayfair listing 的字数与合规约束）、数据（数据不进 prompt，模型写 pandas 由 `tools/code_exec.py` 在临时目录里执行，算 ACOS/TACOS、转化率、客单价、退货率与扣除退货后的净 ROAS）、市场（`tools/web_search.py` 调搜索 API + `source_scoring` 分级）。
+- **三类专家（`agents/`）**：内容（11 个渠道 SOP 技能，含 Amazon / Wayfair listing 的字数与合规约束）、数据（数据不进 prompt，模型写 pandas 由 `tools/code_exec.py` 在临时目录里执行，算 ACOS/TACOS、转化率、客单价、退货率与扣除退货后的净 ROAS）、市场（先由 `tools/web_search.py` 找到真实商品页，再由 `tools/product_browser.py` 渲染网页、滚动并点击评论入口/加载更多，提取结构化商品信息与可见评论，最后用 `source_scoring` 分级）。
 
 ## 5. 典型任务流程示例：
 **场景 A · 市场 → 数据 → Listing（一句话完成一条链路）**
 用户："帮我看下同价位竞品的 listing 怎么写的，结合上周的广告和退货数据，给这款实木餐桌重写 Amazon 五点描述。"
-→ 编排器 `intake/planning` → 并行 `delegating` 市场 Agent（web_search 查竞品 listing 与评论）+ 数据 Agent（跑上周 ACOS 与退货率）→ `specialist_done` → 内容 Agent 按 `amazon_listing` SOP 产出标题、五点与关键词 → `synthesis` 汇总为带**来源引用**的回答。全过程在右侧 Trace 可见。缺失的尺寸会以 `[待确认 xxx]` 留白。
+→ 编排器 `intake/planning` → 并行 `delegating` 市场 Agent（搜索真实竞品页，并用无头浏览器加载动态商品数据与可见评论）+ 数据 Agent（跑上周 ACOS 与退货率）→ `specialist_done` → 内容 Agent 按 `amazon_listing` SOP 产出标题、五点与关键词 → `synthesis` 汇总为带**来源引用**的回答。全过程在右侧 Trace 可见。缺失的尺寸会以 `[待确认 xxx]` 留白。
 
 **场景 B · 对话式办公（请假 / 排会，草稿→确认）**
 用户："生成日程"
@@ -126,6 +126,7 @@ IM 消息（人↔人 / 群聊、未读数、已读回执、文件消息，基�
   - `llm_client.py` 把代码里 Anthropic 风格的 Messages 调用翻译成 DeepSeek 的 OpenAI 兼容协议，并处理思考模式与强制 tool_choice 的互斥、图片请求自动路由到视觉模型
   - `httpx` —— 唯一的模型/搜索 HTTP 依赖（连接池复用）
 - **搜索**：`tools/web_search.py` 可插拔 Tavily / Serper / Brave / 博查 / **Gemini**（DeepSeek 无内置联网搜索）。Gemini 走 Google Search grounding，复用图像生成那把 `GEMINI_API_KEY`，不用再注册搜索厂商；配了专用搜索 key 时优先用专用的，因为它们会返回发布日期
+- **真实商品页采集**：`playwright` 启动 Chromium，只访问搜索结果中返回的公开商品链接；渲染 JavaScript、滚动页面并点击评论/加载更多控件，读取 JSON-LD、价格、评分、评论总数与当前可见的评论样本。它不会登录、绕过验证码或反爬限制，也不会把少量样本描述成全部用户反馈
 - **代码执行**：`tools/code_exec.py` 本地子进程跑模型写的 pandas（DeepSeek 无远程沙箱，见第 8 节安全说明）
 - `fastapi` + `uvicorn[standard]` —— API / ASGI；`sse-starlette` —— SSE 流式
 - `google-genai` —— Gemini 文生图；`Pillow` + `rembg` + `onnxruntime` —— 抠图去背景
@@ -161,6 +162,7 @@ IM 消息（人↔人 / 群聊、未读数、已读回执、文件消息，基�
 - **反越权 / 反幻觉**：编排器被硬性约束不写文案、不算指标、不编造外部事实，只能下派。
 - **代码执行边界**：迁移到 DeepSeek 后没有了远程代码沙箱，分析 Agent 改为在服务端子进程里执行模型写的 pandas（`tools/code_exec.py`）：一次性临时工作目录、只放当次数据文件、120s 墙钟超时、输出截断，进程退出即清理。这不是沙箱——生产部署应把 API 服务本身放进容器（只读根文件系统、禁出网），或用 `MARKETING_AGENT_LOCAL_CODE_EXEC=0` 关闭该能力（分析 Agent 会明确返回不可用）。
 - **不编造来源**：未配置搜索 API key 时，研究 Agent 直接返回「研究不可用」并说明要设置哪个环境变量，而不是凭记忆生成看起来像真的 URL。
+- **浏览边界**：商品页浏览器拒绝内网/本机地址和跨站跳转，屏蔽下载及图片/视频等非必要资源，并把网页文字视为不可信证据；研究结论必须给出采集时间、来源链接、实际观察到的价格/评分/评论量和样本数，至少两条不同评论支持后才称为重复痛点。
 
 ## 9. 测试与评测
 
@@ -250,4 +252,4 @@ render.yaml · vercel.json     部署配置
 
 ---
 
-> 部署：后端 Render（`render.yaml`，持久磁盘挂 SQLite / rembg 权重）；前端 Vercel（`vercel.json`，构建 `web/`）。
+> 部署：后端 Render（`render.yaml`，使用 Playwright Docker 镜像，并以持久磁盘挂 SQLite / rembg 权重）；前端 Vercel（`vercel.json`，构建 `web/`）。
