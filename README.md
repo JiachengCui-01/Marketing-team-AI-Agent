@@ -252,4 +252,4 @@ render.yaml · vercel.json     部署配置
 
 ---
 
-> 部署：后端 Render（`render.yaml`，使用 Playwright Docker 镜像，并以持久磁盘挂 SQLite / rembg 权重）；前端 Vercel（`vercel.json`，构建 `web/`）。
+> 部署：后端 Render（`render.yaml`，使用 Playwright Docker 镜像，并以持久磁盘挂 SQLite / rembg 权重；容器启动时修正挂载盘权限后降权运行）；前端 Vercel（`vercel.json`，构建 `web/`）。
