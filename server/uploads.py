@@ -13,7 +13,20 @@ from marketing_agent.config import PROJECT_ROOT
 UPLOAD_DIR = PROJECT_ROOT / "tmp" / "uploads"
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
-ALLOWED_EXT = {".csv", ".xlsx", ".xls", ".json", ".pdf", ".docx", ".png", ".jpg", ".jpeg", ".webp"}
+ALLOWED_EXT = {
+    ".csv",
+    ".xlsx",
+    ".xls",
+    ".json",
+    ".pdf",
+    ".docx",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".jpe",
+    ".jfif",
+    ".webp",
+}
 
 EXT_MIME = {
     ".csv": "text/csv",
@@ -25,6 +38,8 @@ EXT_MIME = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
+    ".jpe": "image/jpeg",
+    ".jfif": "image/jpeg",
     ".webp": "image/webp",
 }
 
@@ -49,9 +64,11 @@ def sanitize_filename(original_name: str) -> tuple[str, str]:
         raise UploadValidationError(
             f"Unsupported file type '{ext}'. Allowed: {', '.join(sorted(ALLOWED_EXT))}"
         )
-    safe_stem = _SAFE_NAME_RE.sub("_", Path(name).stem).strip("._")
-    if not safe_stem:
-        raise UploadValidationError("Invalid filename.")
+    # A filename made entirely from Chinese or other non-ASCII characters used
+    # to collapse to an empty stem and make an otherwise valid image fail with
+    # HTTP 400. The UUID already provides uniqueness, so a neutral fallback is
+    # safe and keeps the original extension/type validation intact.
+    safe_stem = _SAFE_NAME_RE.sub("_", Path(name).stem).strip("._") or "upload"
     safe_name = f"{safe_stem}{ext}"[:160]
     return safe_name, ext
 

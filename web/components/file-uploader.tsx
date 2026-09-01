@@ -13,7 +13,7 @@ import { useRef, useState } from "react";
 import { uploadFile, type UploadResponse } from "@/lib/api";
 import { localizeError, useI18n } from "@/lib/i18n";
 
-const ACCEPT = ".csv,.xlsx,.xls,.json,.pdf,.docx,image/png,image/jpeg";
+const ACCEPT = ".csv,.xlsx,.xls,.json,.pdf,.docx,.png,.jpg,.jpeg,.jpe,.jfif,.webp,image/png,image/jpeg,image/webp";
 
 function iconFor(mime: string) {
   if (mime.startsWith("image/")) return FileImage;

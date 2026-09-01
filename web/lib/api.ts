@@ -447,10 +447,17 @@ export async function uploadFile(file: File): Promise<UploadResponse> {
     try {
       const res = await uploadTo(url, file);
       if (res.ok) return res.json();
-      const detail = await res.text().catch(() => "");
-      lastError = new Error(`upload ${res.status}: ${detail || res.statusText}`);
-    } catch (error) {
+      const error = new Error(await parseJsonError(res));
+      // A 4xx response is a definitive validation/authentication result. Retrying
+      // it against fallback hosts only hides that useful message when a legacy
+      // host is offline, which previously surfaced as "Cannot reach server".
+      if (res.status >= 400 && res.status < 500) throw error;
       lastError = error;
+    } catch (error) {
+      if (error instanceof Error && !/failed to fetch|load failed|networkerror|fetch failed/i.test(error.message)) {
+        throw error;
+      }
+      if (lastError === null) lastError = error;
     }
   }
   throw lastError instanceof Error ? lastError : new Error("upload failed");

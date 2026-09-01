@@ -321,6 +321,24 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["mime"], "application/pdf")
 
+    def test_upload_accepts_chinese_image_filename(self) -> None:
+        response = self.client.post(
+            "/api/upload",
+            headers=self.headers,
+            files={"file": ("产品图.png", b"not-empty", "image/png")},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["original_name"], "upload.png")
+
+    def test_upload_accepts_jfif(self) -> None:
+        response = self.client.post(
+            "/api/upload",
+            headers=self.headers,
+            files={"file": ("product.jfif", b"not-empty", "image/jpeg")},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["mime"], "image/jpeg")
+
     def test_upload_rejects_oversized_csv(self) -> None:
         oversized = b"a" * (uploads.MAX_UPLOAD_BYTES + 1)
         response = self.client.post(
