@@ -375,6 +375,16 @@ function RecommendationCard({ rec, rank }: { rec: SelectionRecommendation; rank:
         </div>
       </div>
 
+      {rec.score_breakdown ? (
+        <div className="mb-2 flex flex-wrap gap-x-3 gap-y-1 rounded-lg bg-bg-subtle/60 px-2.5 py-1.5 text-[10px] text-fg-subtle">
+          <span>{t.selScoreDemand} {rec.score_breakdown.demand}/30</span>
+          <span>{t.selScoreGrowth} {rec.score_breakdown.growth}/20</span>
+          <span>{t.selScoreAov} {rec.score_breakdown.aov_fit}/20</span>
+          <span>{t.selScoreCompetition} {rec.score_breakdown.competition}/20</span>
+          <span>{t.selScoreQuality} {rec.score_breakdown.quality_fit}/10</span>
+        </div>
+      ) : null}
+
       {shown.length ? (
         <dl className="mb-2 grid grid-cols-2 gap-x-3 gap-y-1 sm:grid-cols-3">
           {shown.map(([label, value, estimated]) => (

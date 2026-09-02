@@ -654,6 +654,13 @@ export type SelectionRecommendation = {
   reviews?: string;
   competition?: "low" | "medium" | "high";
   score: number;
+  score_breakdown?: {
+    demand: number;
+    growth: number;
+    aov_fit: number;
+    competition: number;
+    quality_fit: number;
+  };
   reason: string;
 };
 

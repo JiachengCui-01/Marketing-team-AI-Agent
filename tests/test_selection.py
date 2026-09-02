@@ -286,7 +286,10 @@ class GenerationTests(unittest.TestCase):
                 mock.patch.object(selection.sellersprite, "call_tool", return_value=_NODE_REPLY):
             record = selection.generate_report(self.config, client)
 
-        self.assertEqual(record["dashboard"]["recommendations"][0]["score"], 78)
+        recommendation = record["dashboard"]["recommendations"][0]
+        # The server ignores the model's 78 and applies the deterministic formula.
+        self.assertEqual(recommendation["score"], 20)
+        self.assertEqual(recommendation["score_breakdown"]["growth"], 20.0)
         self.assertIn("优先做实木餐桌", record["summary"])
         # Provenance is appended by the system, not written by the model.
         self.assertIn("## 数据来源", record["summary"])
@@ -294,6 +297,34 @@ class GenerationTests(unittest.TestCase):
         self.assertTrue(record["vendor_tools"])
         # The scheduler must see the run so it does not immediately re-fire.
         self.assertIsNotNone(db.get_selection_config(self.user["id"])["last_run_at"])
+
+    def test_opportunity_score_uses_fixed_weights_and_ignores_model_score(self) -> None:
+        dashboard = {
+            "recommendations": [{
+                "title": "Sofa", "category": "sofas", "score": 1,
+                "price": "$600", "monthly_sales": "5,000",
+                "monthly_revenue": "$500,000", "reviews": "100",
+                "rating": "4.2", "competition": "low", "reason": "strong",
+            }],
+            "trends": [{"category": "sofas", "change_pct": 20}],
+        }
+        selection.calculate_opportunity_scores(dashboard)
+        rec = dashboard["recommendations"][0]
+        self.assertEqual(rec["score"], 100)
+        self.assertEqual(rec["score_breakdown"], {
+            "demand": 30.0,
+            "growth": 20.0,
+            "aov_fit": 20.0,
+            "competition": 20.0,
+            "quality_fit": 10.0,
+        })
+
+    def test_missing_evidence_contributes_zero_instead_of_a_guessed_score(self) -> None:
+        dashboard = {"recommendations": [{
+            "title": "Unknown", "category": "storage", "score": 99, "reason": "gap",
+        }]}
+        selection.calculate_opportunity_scores(dashboard)
+        self.assertEqual(dashboard["recommendations"][0]["score"], 0)
 
     def test_a_model_that_skips_the_tool_call_is_an_error_not_an_empty_report(self) -> None:
         client = mock.Mock()

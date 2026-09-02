@@ -363,13 +363,9 @@ _TOOL = {
                             "enum": ["low", "medium", "high"],
                             "description": "Read from brand/seller concentration and review depth.",
                         },
-                        "score": {
-                            "type": "integer",
-                            "description": "Opportunity score 0-100, justified by the reason.",
-                        },
                         "reason": {"type": "string", "description": "Why this is or is not an opportunity."},
                     },
-                    "required": ["title", "category", "score", "reason"],
+                    "required": ["title", "category", "reason"],
                 },
             },
             "trends": {
@@ -474,6 +470,108 @@ def _as_dicts(value: Any) -> list[dict]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, dict)]
+
+
+# Opportunity score: deterministic, stable across runs, and independent of the model.
+# Each component contributes points directly to the 100-point total.
+OPPORTUNITY_WEIGHTS = {
+    "demand": 30,       # monthly sales 15 + monthly revenue 15
+    "growth": 20,       # category demand trend
+    "aov_fit": 20,      # price fit for freight-shipped large furniture
+    "competition": 20,  # concentration 12 + review depth 8
+    "quality_fit": 10,  # observed rating as evidence of product/category viability
+}
+
+
+def _number(value: Any) -> float | None:
+    """Parse dashboard values such as '$638,074', '4.5K', or '52.1%'."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip().upper().replace(",", "")
+    match = re.search(r"-?\d+(?:\.\d+)?", text)
+    if not match:
+        return None
+    number = float(match.group())
+    if "K" in text[match.end():match.end() + 2]:
+        number *= 1_000
+    elif "M" in text[match.end():match.end() + 2]:
+        number *= 1_000_000
+    return number
+
+
+def _clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
+    return max(low, min(high, value))
+
+
+def _piecewise(value: float | None, points: tuple[tuple[float, float], ...]) -> float:
+    if value is None:
+        return 0.0
+    if value <= points[0][0]:
+        return points[0][1]
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        if value <= x1:
+            return y0 + (value - x0) * (y1 - y0) / (x1 - x0)
+    return points[-1][1]
+
+
+def _trend_change(trends: list[dict], category: str) -> float | None:
+    key = category.strip().casefold()
+    for trend in trends:
+        candidate = str(trend.get("category") or "").strip().casefold()
+        if not candidate or not (candidate == key or candidate in key or key in candidate):
+            continue
+        explicit = _number(trend.get("change_pct"))
+        if explicit is not None:
+            return explicit
+        values = [_number(p.get("value")) for p in trend.get("points", []) if isinstance(p, dict)]
+        values = [v for v in values if v is not None]
+        if len(values) >= 2 and values[0] != 0:
+            return (values[-1] - values[0]) / abs(values[0]) * 100
+    return None
+
+
+def calculate_opportunity_scores(dashboard: dict) -> None:
+    """Overwrite every recommendation score using the documented fixed formula."""
+    trends = _as_dicts(dashboard.get("trends"))
+    for rec in _as_dicts(dashboard.get("recommendations")):
+        sales = _number(rec.get("monthly_sales"))
+        revenue = _number(rec.get("monthly_revenue"))
+        price = _number(rec.get("price"))
+        reviews = _number(rec.get("reviews"))
+        rating = _number(rec.get("rating"))
+        growth = _trend_change(trends, str(rec.get("category") or ""))
+
+        # Fixed absolute thresholds make scores comparable between separate reports.
+        demand_points = 15 * _clamp((sales or 0) / 5_000 * 100) / 100
+        demand_points += 15 * _clamp((revenue or 0) / 500_000 * 100) / 100
+        growth_points = 20 * (0 if growth is None else _clamp((growth + 20) / 40 * 100)) / 100
+        aov_points = 20 * _piecewise(price, (
+            (0, 0), (100, 25), (200, 65), (300, 90), (600, 100),
+            (1_000, 90), (1_500, 70), (2_500, 40),
+        )) / 100
+        competition_level = {"low": 100, "medium": 60, "high": 25}.get(
+            str(rec.get("competition") or "").lower(), 0
+        )
+        competition_points = 12 * competition_level / 100
+        competition_points += 8 * _piecewise(reviews, (
+            (0, 100), (100, 100), (500, 80), (2_000, 55),
+            (5_000, 30), (10_000, 15), (50_000, 0),
+        )) / 100 if reviews is not None else 0
+        quality_points = 10 * _piecewise(rating, (
+            (0, 0), (3.5, 20), (3.8, 65), (4.2, 100), (4.5, 85), (5.0, 60),
+        )) / 100
+
+        breakdown = {
+            "demand": round(demand_points, 1),
+            "growth": round(growth_points, 1),
+            "aov_fit": round(aov_points, 1),
+            "competition": round(competition_points, 1),
+            "quality_fit": round(quality_points, 1),
+        }
+        rec["score_breakdown"] = breakdown
+        rec["score"] = round(sum(breakdown.values()))
 
 
 # --------------------------------------------------------------------------
@@ -594,6 +692,7 @@ def generate_report(config_row: dict, client=None) -> dict:
         raise SelectionGenerationError(f"选品分析生成失败：{exc}") from exc
 
     dashboard = _parse(response)
+    calculate_opportunity_scores(dashboard)
     summary = dashboard.pop("summary", "")
     ledger = provenance.SourceLedger()
     ledger.record(provenance.SELLERSPRITE, f"{len(tools_used)} 个接口" if language == "zh" else f"{len(tools_used)} endpoints")
