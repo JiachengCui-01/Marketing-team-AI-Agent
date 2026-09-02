@@ -81,8 +81,8 @@ export function SelectionPanel() {
     : t.selNoConfig;
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
-      <div className="flex-1 overflow-y-auto">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-4xl px-4 py-6">
           {meta && !meta.available ? (
             <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-warn/40 bg-warn/10 px-3.5 py-3 text-sm text-warn">

@@ -29,17 +29,20 @@ export function AutomationPanel({ onBack }: { onBack: () => void }) {
   ];
 
   return (
-    <div className="panel-card flex min-w-0 flex-1 flex-col">
-      <header className="col-header">
-        <button onClick={onBack} className="btn-ghost px-2.5 py-1.5 text-sm">
+    <div className="panel-card flex min-h-0 min-w-0 flex-1 flex-col">
+      <header className="col-header !grid grid-cols-[1fr_auto_1fr]">
+        <button
+          onClick={onBack}
+          className="btn-ghost justify-self-start px-2.5 py-1.5 text-sm"
+        >
           <ArrowLeft size={15} />
           <span>{t.back}</span>
         </button>
-        <div className="mx-auto flex items-center gap-2 text-sm font-medium">
+        <div className="flex items-center gap-2 justify-self-center text-sm font-medium">
           <Robot size={15} weight="duotone" className="text-feature-selection" />
           <span>{t.automation}</span>
         </div>
-        <div className="seg" role="tablist" aria-label={t.automation}>
+        <div className="seg justify-self-end" role="tablist" aria-label={t.automation}>
           {tabs.map(({ id, label, icon: Icon, tone }) => {
             const active = tab === id;
             return (
