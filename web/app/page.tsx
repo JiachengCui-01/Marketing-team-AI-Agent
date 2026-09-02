@@ -18,11 +18,10 @@ import {
 } from "@/components/preview-panel";
 import { PreviewOpenerProvider, type PreviewOpener } from "@/lib/preview-context";
 import { SessionSidebar } from "@/components/session-sidebar";
-import { NewsPanel } from "@/components/news-panel";
+import { AutomationPanel } from "@/components/automation-panel";
 import { MarketingImagePanel } from "@/components/image-panel";
 import { MessagesPanel } from "@/components/messages-panel";
 import { ContactsPanel } from "@/components/contacts-panel";
-import { ApprovalsPanel } from "@/components/approvals-panel";
 import { TasksPanel } from "@/components/tasks-panel";
 import { CalendarPanel } from "@/components/calendar-panel";
 import { HeaderCalendar } from "@/components/header-calendar";
@@ -106,11 +105,10 @@ export default function HomePage() {
   const [switchOpen, setSwitchOpen] = useState(false);
   const [view, setView] = useState<
     | "chat"
-    | "news"
+    | "automation"
     | "image"
     | "messages"
     | "contacts"
-    | "approvals"
     | "tasks"
     | "calendar"
   >("chat");
@@ -863,11 +861,10 @@ export default function HomePage() {
           onCreateGroup={store.createGroup}
           onRenameGroup={store.renameGroup}
           onDeleteGroup={handleDeleteGroup}
-          onOpenApprovals={() => setView("approvals")}
           onOpenTasks={() => setView("tasks")}
           onOpenMessages={() => setView("messages")}
           onOpenContacts={() => setView("contacts")}
-          onOpenNews={() => setView("news")}
+          onOpenAutomation={() => setView("automation")}
           onOpenImage={() => setView("image")}
           view={view}
           messageUnread={im.unreadTotal}
@@ -902,14 +899,12 @@ export default function HomePage() {
           )
         ) : (
           <>
-        {view === "approvals" ? (
-          <ApprovalsPanel key={user.id} onBack={() => setView("chat")} />
-        ) : view === "tasks" ? (
+        {view === "tasks" ? (
           <TasksPanel key={user.id} onBack={() => setView("chat")} />
         ) : view === "calendar" ? (
           <CalendarPanel key={user.id} onBack={() => setView("chat")} />
-        ) : view === "news" ? (
-          <NewsPanel key={user.id} onBack={() => setView("chat")} />
+        ) : view === "automation" ? (
+          <AutomationPanel key={user.id} onBack={() => setView("chat")} />
         ) : view === "image" ? (
           <MarketingImagePanel
             key={user.id}

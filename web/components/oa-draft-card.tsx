@@ -2,26 +2,13 @@
 
 import { useState } from "react";
 import { FileCheck2, Loader2, CheckCircle2, XCircle } from "lucide-react";
-import {
-  createApproval,
-  saveCalendarEvent,
-  createTask,
-  type OaDraft,
-} from "@/lib/api";
+import { saveCalendarEvent, createTask, type OaDraft } from "@/lib/api";
 import { getDraftStatus, setDraftStatus } from "@/lib/oa-drafts";
 import { localizeError, useI18n } from "@/lib/i18n";
 
 const KIND_LABEL: Record<string, string> = {
-  approval: "审批草稿",
   task: "任务草稿",
   calendar: "日程草稿",
-};
-
-const APPROVAL_TYPE_LABEL: Record<string, string> = {
-  leave: "请假",
-  expense: "报销",
-  purchase: "采购",
-  general: "通用审批",
 };
 
 function fmt(v: unknown): string {
@@ -41,19 +28,14 @@ function draftRows(draft: OaDraft): [string, string][] {
       ["截止", fmt(draft.due)],
     ];
   }
-  if (draft.kind === "calendar") {
-    const start = draft.start ? new Date(String(draft.start)).toLocaleString() : "—";
-    const end = draft.end ? new Date(String(draft.end)).toLocaleString() : "—";
-    return [
-      ["开始", start],
-      ["结束", end],
-      ["地点", fmt(draft.location)],
-      ["参与人", fmt(draft.attendees)],
-    ];
-  }
-  return Object.entries((draft.fields as Record<string, unknown>) ?? {}).map(
-    ([k, v]) => [k, fmt(v)] as [string, string],
-  );
+  const start = draft.start ? new Date(String(draft.start)).toLocaleString() : "—";
+  const end = draft.end ? new Date(String(draft.end)).toLocaleString() : "—";
+  return [
+    ["开始", start],
+    ["结束", end],
+    ["地点", fmt(draft.location)],
+    ["参与人", fmt(draft.attendees)],
+  ];
 }
 
 /** A self-contained draft card rendered inline in the AI workspace chat. It manages its
@@ -74,10 +56,8 @@ export function OaDraftCard({ draft }: { draft: OaDraft }) {
   };
 
   const kindLabel = KIND_LABEL[draft.kind] ?? "草稿";
-  const badge =
-    draft.kind === "approval" ? APPROVAL_TYPE_LABEL[String(draft.type)] ?? String(draft.type) : null;
-  const confirmLabel = draft.kind === "approval" ? "确认提交" : "确认创建";
-  const actionLabel = draft.kind === "calendar" && draft.event_id ? "确认更新" : confirmLabel;
+  const badge = null;
+  const actionLabel = draft.kind === "calendar" && draft.event_id ? "确认更新" : "确认创建";
   const rows = draftRows(draft);
 
   async function confirm() {
@@ -113,14 +93,6 @@ export function OaDraftCard({ draft }: { draft: OaDraft }) {
         note = `${operation === "updated" ? "已更新" : "已创建"}日程：${new Date(
           ev.start_at * 1000,
         ).toLocaleString()}`;
-      } else {
-        const appr = await createApproval({
-          type: String(draft.type ?? "general"),
-          title: String(draft.title),
-          fields: (draft.fields as Record<string, unknown>) ?? {},
-        });
-        const approver = appr.steps[0]?.approver_name ?? "";
-        note = approver ? `已提交，待 ${approver} 审批` : "已提交";
       }
       commit({ status: "submitted", note });
     } catch (e) {

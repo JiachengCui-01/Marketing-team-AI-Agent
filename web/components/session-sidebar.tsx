@@ -19,9 +19,8 @@ import {
 import {
   ChatCircle,
   AddressBook,
-  SealCheck,
   ListChecks,
-  Newspaper as NewspaperDuo,
+  Robot as RobotDuo,
   ImageSquare,
 } from "@phosphor-icons/react";
 import { ContextMenu, type MenuItem } from "./context-menu";
@@ -53,11 +52,10 @@ export function SessionSidebar({
   onCreateGroup,
   onRenameGroup,
   onDeleteGroup,
-  onOpenApprovals,
   onOpenTasks,
   onOpenMessages,
   onOpenContacts,
-  onOpenNews,
+  onOpenAutomation,
   onOpenImage,
   messageUnread,
   view,
@@ -77,11 +75,10 @@ export function SessionSidebar({
   onCreateGroup: (name: string) => Promise<string> | void;
   onRenameGroup: (id: string, name: string) => void;
   onDeleteGroup: (id: string) => void;
-  onOpenApprovals: () => void;
   onOpenTasks: () => void;
   onOpenMessages: () => void;
   onOpenContacts: () => void;
-  onOpenNews: () => void;
+  onOpenAutomation: () => void;
   onOpenImage: () => void;
   messageUnread?: number;
   /** Which workspace view is showing. Read-only, drives nav highlighting only. */
@@ -157,14 +154,6 @@ export function SessionSidebar({
           <AddressBook size={17} weight="duotone" className={navIcon("contacts")} />
         </button>
         <button
-          onClick={onOpenApprovals}
-          className={navRail("approvals")}
-          aria-label={t.approvals}
-          title={t.approvals}
-        >
-          <SealCheck size={17} weight="duotone" className={navIcon("approvals")} />
-        </button>
-        <button
           onClick={onOpenTasks}
           className={navRail("tasks")}
           aria-label={t.tasks}
@@ -173,12 +162,12 @@ export function SessionSidebar({
           <ListChecks size={17} weight="duotone" className={navIcon("tasks")} />
         </button>
         <button
-          onClick={onOpenNews}
-          className={navRail("news")}
-          aria-label={t.industryNews}
-          title={t.industryNews}
+          onClick={onOpenAutomation}
+          className={navRail("automation")}
+          aria-label={t.automation}
+          title={t.automation}
         >
-          <NewspaperDuo size={17} weight="duotone" className={navIcon("news")} />
+          <RobotDuo size={17} weight="duotone" className={navIcon("automation")} />
         </button>
         <button
           onClick={onOpenImage}
@@ -350,13 +339,6 @@ export function SessionSidebar({
           <span className="truncate">{t.contacts}</span>
         </button>
         <button
-          onClick={onOpenApprovals}
-          className={navRow("approvals")}
-        >
-          <SealCheck size={17} weight="duotone" className={navIcon("approvals")} />
-          <span className="truncate">{t.approvals}</span>
-        </button>
-        <button
           onClick={onOpenTasks}
           className={navRow("tasks")}
         >
@@ -364,11 +346,11 @@ export function SessionSidebar({
           <span className="truncate">{t.tasks}</span>
         </button>
         <button
-          onClick={onOpenNews}
-          className={navRow("news")}
+          onClick={onOpenAutomation}
+          className={navRow("automation")}
         >
-          <NewspaperDuo size={17} weight="duotone" className={navIcon("news")} />
-          <span className="truncate">{t.industryNews}</span>
+          <RobotDuo size={17} weight="duotone" className={navIcon("automation")} />
+          <span className="truncate">{t.automation}</span>
         </button>
         <button
           onClick={onOpenImage}

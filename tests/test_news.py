@@ -30,15 +30,27 @@ class NewsTests(unittest.TestCase):
     def tearDown(self) -> None:
         db.reset_for_tests()
 
-    def test_research_exposes_the_client_side_search_tool(self) -> None:
+    def test_research_exposes_the_client_side_fallback_tools(self) -> None:
         # DeepSeek has no server-side search, so the agent carries its own tool.
-        self.assertEqual(research_agent.TOOLS[0]["name"], "web_search")
-        self.assertEqual(research_agent.TOOLS[1]["name"], "browse_product_page")
-        self.assertIn("query", research_agent.TOOLS[0]["input_schema"]["properties"])
-        self.assertIn("url", research_agent.TOOLS[1]["input_schema"]["properties"])
+        # These are the fallback pair; the primary source is discovered from
+        # SellerSprite's MCP server at call time.
+        self.assertEqual(research_agent.FALLBACK_TOOLS[0]["name"], "web_search")
+        self.assertEqual(research_agent.FALLBACK_TOOLS[1]["name"], "browse_product_page")
+        self.assertIn("query", research_agent.FALLBACK_TOOLS[0]["input_schema"]["properties"])
+        self.assertIn("url", research_agent.FALLBACK_TOOLS[1]["input_schema"]["properties"])
         self.assertIn("never run more than", research_agent.SYSTEM.lower())
         self.assertIn("untrusted evidence", research_agent.SYSTEM.lower())
         self.assertIn("at least two distinct collected reviews", research_agent.SYSTEM.lower())
+
+    def test_research_prompt_ranks_sellersprite_as_the_primary_source(self) -> None:
+        system = research_agent.SYSTEM
+        self.assertIn("SellerSprite (卖家精灵) is the primary source", system)
+        self.assertIn("web_search is the fallback", system)
+        self.assertIn("browse_product_page is the fallback", system)
+        # Estimated vendor figures must never be presented as measurements.
+        self.assertIn("MODELED ESTIMATES", system)
+        # The primary source must sort before the fallbacks in the hierarchy.
+        self.assertLess(system.find("primary source"), system.find("is the fallback"))
 
     def test_research_unavailable_without_a_search_provider(self) -> None:
         with mock.patch.object(web_search, "is_available", return_value=False):

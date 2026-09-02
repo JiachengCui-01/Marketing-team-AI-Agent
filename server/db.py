@@ -202,6 +202,40 @@ CREATE TABLE IF NOT EXISTS news_summaries (
 );
 CREATE INDEX IF NOT EXISTS idx_news_summaries_user ON news_summaries(user_id, created_at);
 
+-- Automation: scheduled product-selection analysis, built from SellerSprite data.
+CREATE TABLE IF NOT EXISTS selection_configs (
+    user_id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL DEFAULT 'all',
+    categories_json TEXT NOT NULL DEFAULT '[]',
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    refresh_time TEXT NOT NULL DEFAULT '09:00',
+    timezone TEXT NOT NULL DEFAULT 'UTC',
+    language TEXT NOT NULL DEFAULT 'zh',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_run_at REAL,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_selection_configs_enabled ON selection_configs(enabled);
+
+CREATE TABLE IF NOT EXISTS selection_reports (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    scope TEXT NOT NULL DEFAULT 'all',
+    categories_json TEXT NOT NULL DEFAULT '[]',
+    -- Normalized dashboard payload (KPIs, recommendations, trends) the BI view renders.
+    dashboard_json TEXT NOT NULL DEFAULT '{}',
+    summary TEXT NOT NULL DEFAULT '',
+    -- Which vendor tools actually answered, so the report can state its provenance.
+    vendor_tools_json TEXT NOT NULL DEFAULT '[]',
+    generated_at REAL NOT NULL,
+    created_at REAL NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_selection_reports_user ON selection_reports(user_id, created_at);
+
 CREATE TABLE IF NOT EXISTS image_history (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -327,36 +361,7 @@ CREATE TABLE IF NOT EXISTS im_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_im_messages_conv ON im_messages(conversation_id, created_at);
 
--- AI OA: approvals / tasks / calendar / knowledge base
-CREATE TABLE IF NOT EXISTS approvals (
-    id TEXT PRIMARY KEY,
-    org_id TEXT,
-    applicant_id TEXT NOT NULL,
-    type TEXT NOT NULL,
-    title TEXT NOT NULL,
-    form_json TEXT NOT NULL DEFAULT '{}',
-    status TEXT NOT NULL DEFAULT 'pending',
-    current_step INTEGER NOT NULL DEFAULT 0,
-    created_at REAL NOT NULL,
-    updated_at REAL NOT NULL,
-    FOREIGN KEY (applicant_id) REFERENCES users(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_approvals_applicant ON approvals(applicant_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status, created_at);
-
-CREATE TABLE IF NOT EXISTS approval_steps (
-    approval_id TEXT NOT NULL,
-    step_index INTEGER NOT NULL,
-    approver_id TEXT NOT NULL,
-    action TEXT NOT NULL DEFAULT 'pending',
-    comment TEXT,
-    acted_at REAL,
-    PRIMARY KEY (approval_id, step_index),
-    FOREIGN KEY (approval_id) REFERENCES approvals(id) ON DELETE CASCADE,
-    FOREIGN KEY (approver_id) REFERENCES users(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_approval_steps_approver ON approval_steps(approver_id, action);
-
+-- AI OA: tasks / calendar / knowledge base
 CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,
     org_id TEXT,
@@ -1432,6 +1437,147 @@ def get_latest_news_summary(user_id: str) -> dict | None:
     return data
 
 
+# ---------- automation: product-selection analysis ----------
+
+def _selection_config_row(row: sqlite3.Row | None) -> dict | None:
+    if row is None:
+        return None
+    data = dict(row)
+    data["enabled"] = bool(data.get("enabled"))
+    data["categories"] = _json_list(data.pop("categories_json", "[]"))
+    return data
+
+
+def _json_list(raw: Any) -> list:
+    try:
+        value = json.loads(raw or "[]")
+    except (ValueError, TypeError):
+        return []
+    return value if isinstance(value, list) else []
+
+
+def get_selection_config(user_id: str) -> dict | None:
+    _ensure()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM selection_configs WHERE user_id = ?", (user_id,)
+        ).fetchone()
+    return _selection_config_row(row)
+
+
+def upsert_selection_config(
+    user_id: str,
+    scope: str = "all",
+    categories: Iterable[str] | None = None,
+    marketplace: str = "US",
+    refresh_time: str = "09:00",
+    timezone: str = "UTC",
+    language: str = "zh",
+) -> dict:
+    _ensure()
+    now = time.time()
+    payload = json.dumps([str(c) for c in (categories or [])], ensure_ascii=False)
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO selection_configs (user_id, scope, categories_json, marketplace, "
+            "refresh_time, timezone, language, enabled, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET scope = excluded.scope, "
+            "categories_json = excluded.categories_json, marketplace = excluded.marketplace, "
+            "refresh_time = excluded.refresh_time, timezone = excluded.timezone, "
+            "language = excluded.language, enabled = 1, updated_at = excluded.updated_at",
+            (user_id, scope, payload, marketplace, refresh_time, timezone, language, now, now),
+        )
+    return get_selection_config(user_id)  # type: ignore[return-value]
+
+
+def delete_selection_config(user_id: str) -> bool:
+    _ensure()
+    with _connect() as conn:
+        cur = conn.execute("DELETE FROM selection_configs WHERE user_id = ?", (user_id,))
+        return cur.rowcount > 0
+
+
+def delete_selection_data(user_id: str) -> None:
+    """Drop the config and every stored report — used when the task is turned off."""
+    _ensure()
+    with _connect() as conn:
+        conn.execute("DELETE FROM selection_reports WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM selection_configs WHERE user_id = ?", (user_id,))
+
+
+def set_selection_config_last_run(user_id: str, ts: float) -> None:
+    _ensure()
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE selection_configs SET last_run_at = ?, updated_at = ? WHERE user_id = ?",
+            (ts, time.time(), user_id),
+        )
+
+
+def list_enabled_selection_configs() -> list[dict]:
+    _ensure()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM selection_configs WHERE enabled = 1"
+        ).fetchall()
+    return [_selection_config_row(row) for row in rows]  # type: ignore[misc]
+
+
+def add_selection_report(
+    user_id: str,
+    marketplace: str,
+    scope: str,
+    categories: Iterable[str],
+    dashboard: dict,
+    summary: str,
+    vendor_tools: Iterable[str],
+    generated_at: float,
+) -> dict:
+    _ensure()
+    rid = uuid.uuid4().hex
+    now = time.time()
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO selection_reports (id, user_id, marketplace, scope, categories_json, "
+            "dashboard_json, summary, vendor_tools_json, generated_at, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                rid,
+                user_id,
+                marketplace,
+                scope,
+                json.dumps([str(c) for c in categories], ensure_ascii=False),
+                json.dumps(dashboard, ensure_ascii=False),
+                summary,
+                json.dumps([str(t) for t in vendor_tools], ensure_ascii=False),
+                generated_at,
+                now,
+            ),
+        )
+    return get_latest_selection_report(user_id)  # type: ignore[return-value]
+
+
+def get_latest_selection_report(user_id: str) -> dict | None:
+    _ensure()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM selection_reports WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    data = dict(row)
+    data["categories"] = _json_list(data.pop("categories_json", "[]"))
+    data["vendor_tools"] = _json_list(data.pop("vendor_tools_json", "[]"))
+    try:
+        dashboard = json.loads(data.pop("dashboard_json", "{}") or "{}")
+    except (ValueError, TypeError):
+        dashboard = {}
+    data["dashboard"] = dashboard if isinstance(dashboard, dict) else {}
+    return data
+
+
 # ---------- image generation ----------
 
 # Global, editorial template catalog (not per-user). ``platform`` is the marketplace/
@@ -1730,182 +1876,6 @@ def remove_org_member(org_id: str, target_user_id: str) -> bool:
             (org_id, target_user_id),
         )
         return cur.rowcount > 0
-
-
-# ---------- AI OA: approvals ----------
-
-def _approval_row(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
-    d = dict(row)
-    d["form"] = json.loads(d.pop("form_json") or "{}")
-    steps = conn.execute(
-        "SELECT step_index, approver_id, action, comment, acted_at "
-        "FROM approval_steps WHERE approval_id = ? ORDER BY step_index",
-        (d["id"],),
-    ).fetchall()
-    d["steps"] = [dict(s) for s in steps]
-    return d
-
-
-def create_approval(
-    applicant_id: str,
-    type_: str,
-    title: str,
-    form: dict,
-    approver_ids: Iterable[str],
-    org_id: str | None = None,
-) -> dict:
-    _ensure()
-    aid = uuid.uuid4().hex
-    now = time.time()
-    with _connect() as conn:
-        conn.execute(
-            "INSERT INTO approvals (id, org_id, applicant_id, type, title, form_json, "
-            "status, current_step, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (aid, org_id, applicant_id, type_, title, json.dumps(form, ensure_ascii=False),
-             "pending", 0, now, now),
-        )
-        for idx, approver in enumerate(approver_ids):
-            conn.execute(
-                "INSERT INTO approval_steps (approval_id, step_index, approver_id, action) "
-                "VALUES (?, ?, ?, 'pending')",
-                (aid, idx, approver),
-            )
-        row = conn.execute("SELECT * FROM approvals WHERE id = ?", (aid,)).fetchone()
-        return _approval_row(conn, row)
-
-
-def get_approval(approval_id: str) -> dict | None:
-    _ensure()
-    with _connect() as conn:
-        row = conn.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
-        return _approval_row(conn, row) if row else None
-
-
-def list_approvals_created_by(user_id: str) -> list[dict]:
-    _ensure()
-    with _connect() as conn:
-        rows = conn.execute(
-            "SELECT * FROM approvals WHERE applicant_id = ? ORDER BY created_at DESC",
-            (user_id,),
-        ).fetchall()
-        return [_approval_row(conn, r) for r in rows]
-
-
-def list_approvals_pending_for(user_id: str) -> list[dict]:
-    """Approvals where it is currently this user's turn to act."""
-    _ensure()
-    with _connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT a.* FROM approvals a
-            JOIN approval_steps s ON s.approval_id = a.id AND s.step_index = a.current_step
-            WHERE a.status = 'pending' AND s.approver_id = ? AND s.action = 'pending'
-            ORDER BY a.created_at DESC
-            """,
-            (user_id,),
-        ).fetchall()
-        return [_approval_row(conn, r) for r in rows]
-
-
-def list_approvals_acted_by(user_id: str) -> list[dict]:
-    _ensure()
-    with _connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT DISTINCT a.* FROM approvals a
-            JOIN approval_steps s ON s.approval_id = a.id
-            WHERE s.approver_id = ? AND s.action != 'pending'
-            ORDER BY a.updated_at DESC
-            """,
-            (user_id,),
-        ).fetchall()
-        return [_approval_row(conn, r) for r in rows]
-
-
-def act_on_approval(
-    approval_id: str, approver_id: str, action: str, comment: str | None = None
-) -> dict | None:
-    """Record an approver's decision and advance the workflow.
-
-    ``action`` is ``'approved'`` or ``'rejected'``. Returns the updated approval,
-    or ``None`` if the caller is not the current approver / it is already settled.
-    """
-    _ensure()
-    now = time.time()
-    with _connect() as conn:
-        appr = conn.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
-        if appr is None or appr["status"] != "pending":
-            return None
-        step = conn.execute(
-            "SELECT * FROM approval_steps WHERE approval_id = ? AND step_index = ?",
-            (approval_id, appr["current_step"]),
-        ).fetchone()
-        if step is None or step["approver_id"] != approver_id or step["action"] != "pending":
-            return None
-        conn.execute(
-            "UPDATE approval_steps SET action = ?, comment = ?, acted_at = ? "
-            "WHERE approval_id = ? AND step_index = ?",
-            (action, comment, now, approval_id, appr["current_step"]),
-        )
-        if action == "rejected":
-            conn.execute(
-                "UPDATE approvals SET status = 'rejected', updated_at = ? WHERE id = ?",
-                (now, approval_id),
-            )
-        else:
-            total = conn.execute(
-                "SELECT COUNT(*) AS c FROM approval_steps WHERE approval_id = ?", (approval_id,)
-            ).fetchone()["c"]
-            next_step = int(appr["current_step"]) + 1
-            if next_step >= total:
-                conn.execute(
-                    "UPDATE approvals SET status = 'approved', updated_at = ? WHERE id = ?",
-                    (now, approval_id),
-                )
-            else:
-                conn.execute(
-                    "UPDATE approvals SET current_step = ?, updated_at = ? WHERE id = ?",
-                    (next_step, now, approval_id),
-                )
-        row = conn.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
-        return _approval_row(conn, row)
-
-
-def update_approval(approval_id: str, applicant_id: str, title=None, form=None) -> dict | None:
-    """Modify one's own still-pending application (title/form). Owner-only."""
-    _ensure()
-    with _connect() as conn:
-        appr = conn.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
-        if appr is None or appr["applicant_id"] != applicant_id or appr["status"] != "pending":
-            return None
-        sets, args = [], []
-        if title is not None:
-            sets.append("title = ?")
-            args.append(title)
-        if form is not None:
-            sets.append("form_json = ?")
-            args.append(json.dumps(form, ensure_ascii=False))
-        if sets:
-            sets.append("updated_at = ?")
-            args.append(time.time())
-            conn.execute(f"UPDATE approvals SET {', '.join(sets)} WHERE id = ?", (*args, approval_id))
-        row = conn.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
-        return _approval_row(conn, row)
-
-
-def withdraw_approval(approval_id: str, applicant_id: str) -> dict | None:
-    """Withdraw one's own still-pending application."""
-    _ensure()
-    with _connect() as conn:
-        appr = conn.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
-        if appr is None or appr["applicant_id"] != applicant_id or appr["status"] != "pending":
-            return None
-        conn.execute(
-            "UPDATE approvals SET status = 'withdrawn', updated_at = ? WHERE id = ?",
-            (time.time(), approval_id),
-        )
-        row = conn.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
-        return _approval_row(conn, row)
 
 
 # ---------- AI OA: tasks ----------

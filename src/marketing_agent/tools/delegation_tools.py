@@ -114,12 +114,17 @@ DELEGATION_TOOLS = [
     {
         "name": "delegate_to_research_agent",
         "description": (
-            "Send a market/competitor research task to the research specialist. Use this "
-            "for ANY request that requires current external information: US furniture and "
-            "home-furnishings demand, competitor listings and pricing, category and style "
-            "trends, marketplace policy changes, tariffs and duties, or product-safety "
-            "rules. The specialist uses web search and cites sources — never make up "
-            "external facts."
+            "Send a market/competitor/product-selection task to the research specialist. "
+            "Use this for ANY request that needs external market data or facts, including: "
+            "competitor research and listing comparison; product-selection and niche "
+            "analysis (选品/选品分析/机会品类); an ASIN's price, BSR, rating, review count, "
+            "or their history; keyword search volume, keyword mining, and traffic sources; "
+            "category size, demand trend, brand/seller concentration, price bands; US "
+            "furniture and home-furnishings demand and style trends; marketplace policy "
+            "changes, tariffs and duties, product-safety rules. The specialist queries "
+            "SellerSprite (卖家精灵) as its primary data source and falls back to web "
+            "search and live page browsing only for what SellerSprite cannot answer. "
+            "Never answer these from memory yourself."
         ),
         "input_schema": {
             "type": "object",

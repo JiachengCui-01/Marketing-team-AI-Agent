@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from . import llm_client
+from . import llm_client, provenance
 from .agents import analytics_agent, content_agent, research_agent
 from .domain import BRAND, business_context_block
 from .config import (
@@ -65,6 +65,13 @@ Hard rules:
     the end of factual sentences or bullets. Do not drop the specialist's source
     URLs or Source Credibility notes; the UI depends on those URLs to render source
     capsules and source-tier risk labels.
+12. Market and competitor data comes from SellerSprite (卖家精灵) as the primary source,
+    with web search and live page browsing as fallbacks. Keep the specialist's
+    attribution of which source a figure came from, and keep the distinction between
+    SellerSprite's observed values (price, BSR, rating, review count) and its modeled
+    estimates (sales volume, revenue). Never upgrade an estimate into a measured fact.
+
+{provenance.prompt_rules("en")}
 
 Be decisive. Don't ask clarifying questions unless the request is genuinely ambiguous.
 """
@@ -123,6 +130,9 @@ def run_orchestrator(
     conversation.messages.append({"role": "user", "content": user_message})
     failed_specialists: set[str] = set()
     research_contexts: list[str] = []
+    # Every specialist result, kept so the data-source footer can be rebuilt from
+    # what was actually used rather than from what the synthesis remembered.
+    specialist_outputs: list[str] = []
     if on_event:
         on_event(
             "orchestrator_step",
@@ -181,7 +191,7 @@ def run_orchestrator(
                         "status": "running",
                     },
                 )
-            final_text = _finalize_text(_final_text(response.content), research_contexts)
+            final_text = _finalize_text(_final_text(response.content), research_contexts, specialist_outputs)
             # Stream deltas of the already-completed text so the UI sees typewriter output.
             if on_event:
                 _stream_text(on_event, final_text)
@@ -240,6 +250,7 @@ def run_orchestrator(
                     on_event("delegating", {"specialist": block.name, "input": block.input})
                 try:
                     result = _dispatch(client, block.name, block.input, on_event=on_event)
+                    specialist_outputs.append(result)
                     if block.name == "delegate_to_research_agent":
                         research_contexts.append(result)
                     if _is_unavailable_result(result):
@@ -310,7 +321,7 @@ def run_orchestrator(
                     "status": "running",
                 },
             )
-        final = _finalize_text(_final_text(response.content), research_contexts)
+        final = _finalize_text(_final_text(response.content), research_contexts, specialist_outputs)
         if on_event:
             _stream_text(on_event, final)
             on_event(
@@ -345,15 +356,25 @@ def _final_text(content: list) -> str:
     return "\n".join(b.text for b in content if b.type == "text").strip()
 
 
-def _finalize_text(text: str, research_contexts: list[str]) -> str:
-    if not research_contexts:
-        return text
-    return annotate_markdown_with_source_tiers(
-        text,
-        language=_language_for_text(text),
-        fallback_source_text="\n\n".join(research_contexts),
-        ensure_inline_citations=True,
-    )
+def _finalize_text(
+    text: str,
+    research_contexts: list[str],
+    specialist_outputs: list[str] | None = None,
+) -> str:
+    language = _language_for_text(text)
+    if research_contexts:
+        text = annotate_markdown_with_source_tiers(
+            text,
+            language=language,
+            fallback_source_text="\n\n".join(research_contexts),
+            ensure_inline_citations=True,
+        )
+    # Re-derive the data-source footer from what the specialists actually used, so
+    # it survives a synthesis pass that dropped or garbled the specialist's own.
+    ledger = provenance.SourceLedger()
+    for output in specialist_outputs or []:
+        ledger.merge(provenance.detect_sources(output))
+    return provenance.append_section(text, ledger, language)
 
 
 def _language_for_text(text: str) -> str:

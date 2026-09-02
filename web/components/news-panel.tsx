@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, Settings, RefreshCw, Loader2, Newspaper, AlertTriangle, ShieldCheck } from "lucide-react";
+import { Settings, RefreshCw, Loader2, Newspaper, AlertTriangle, ShieldCheck } from "lucide-react";
 import {
   getNewsConfig,
   getNewsSummary,
@@ -18,7 +18,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { LoadingCard, Spinner } from "@/components/ui/spinner";
 import { CitationCapsules, CitationMarkdown, faviconUrl, type CitationSource } from "@/components/citation-markdown";
 
-export function NewsPanel({ onBack }: { onBack: () => void }) {
+export function NewsPanel() {
   const { locale, t } = useI18n();
   const [config, setConfig] = useState<NewsConfig | null>(null);
   const [summary, setSummary] = useState<NewsSummary | null>(null);
@@ -63,26 +63,7 @@ export function NewsPanel({ onBack }: { onBack: () => void }) {
   }
 
   return (
-    <div className="flex-1 flex flex-col min-w-0 panel-card">
-      <header className="col-header">
-        <button onClick={onBack} className="btn-ghost px-2.5 py-1.5 text-sm">
-          <ArrowLeft size={15} />
-          <span>{t.back}</span>
-        </button>
-        <div className="flex items-center gap-2 mx-auto text-sm font-medium">
-          <Newspaper size={15} className="text-feature-news" />
-          <span>{t.industryNews}</span>
-        </div>
-        <button
-          onClick={() => setSettingsOpen(true)}
-          className="btn-ghost px-2.5 py-1.5 text-sm"
-          title={t.newsSettings}
-        >
-          <Settings size={15} />
-          <span>{t.newsSettings}</span>
-        </button>
-      </header>
-
+    <div className="flex min-w-0 flex-1 flex-col">
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-4 py-6">
           {cancelled ? (
@@ -92,21 +73,27 @@ export function NewsPanel({ onBack }: { onBack: () => void }) {
             </div>
           ) : null}
 
-          <div className="mb-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-            <div className="min-w-0 truncate text-xs text-fg-subtle">
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <div className="min-w-0 flex-1 truncate text-xs text-fg-subtle">
               {config
                 ? `${config.industry} · ${config.summary_time} (${config.timezone})`
                 : t.newsNoConfig}
             </div>
-            <div className="min-h-[28px] min-w-[120px] justify-self-center">
-              {refreshingExisting ? (
-                <Spinner size={14} label={t.newsCollecting} variant="news" className="text-xs" />
-              ) : null}
-            </div>
+            {refreshingExisting ? (
+              <Spinner size={14} label={t.newsCollecting} variant="news" className="text-xs" />
+            ) : null}
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="btn-ghost px-2.5 py-1.5 text-xs"
+              title={t.newsSettings}
+            >
+              <Settings size={13} />
+              <span>{t.newsSettings}</span>
+            </button>
             <button
               onClick={handleRefresh}
               disabled={refreshing || !config || cancelled}
-              className="btn-accent justify-self-end px-3 py-1.5 text-xs"
+              className="btn-accent px-3 py-1.5 text-xs"
             >
               {refreshing ? <Loader2 size={13} className="animate-spin text-feature-news" /> : <RefreshCw size={13} />}
               <span>{refreshing ? t.newsRefreshing : t.newsRefreshNow}</span>

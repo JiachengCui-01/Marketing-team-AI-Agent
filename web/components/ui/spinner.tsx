@@ -4,6 +4,7 @@
 // at small sizes, where a bare stroke reads as a scratch.
 import {
   ChartBar,
+  ChartLineUp,
   FileArrowUp,
   ImageSquare,
   CircleNotch,
@@ -12,7 +13,15 @@ import {
   type Icon,
 } from "@phosphor-icons/react";
 
-type LoadingVariant = "default" | "account" | "chat" | "upload" | "news" | "image" | "preview";
+type LoadingVariant =
+  | "default"
+  | "account"
+  | "chat"
+  | "upload"
+  | "news"
+  | "selection"
+  | "image"
+  | "preview";
 
 const variantMeta: Record<LoadingVariant, { accent: string; icon: Icon }> = {
   default: { accent: "text-accent", icon: CircleNotch },
@@ -20,6 +29,7 @@ const variantMeta: Record<LoadingVariant, { accent: string; icon: Icon }> = {
   chat: { accent: "text-feature-content", icon: Sparkle },
   upload: { accent: "text-feature-analytics", icon: FileArrowUp },
   news: { accent: "text-feature-news", icon: Newspaper },
+  selection: { accent: "text-feature-selection", icon: ChartLineUp },
   image: { accent: "text-feature-image", icon: ImageSquare },
   preview: { accent: "text-feature-research", icon: ChartBar },
 };

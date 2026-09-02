@@ -47,33 +47,30 @@ class OaHandlerTests(unittest.TestCase):
 
     def test_tool_schemas_present(self) -> None:
         names = {t["name"] for t in OA_TOOLS}
-        self.assertIn("draft_approval", names)
-        self.assertIn("query_approvals", names)
+        # Approvals were removed from the workspace; the write tools that remain are
+        # task and calendar drafts, and both stay human-in-the-loop.
+        self.assertEqual(
+            names,
+            {
+                "draft_task",
+                "query_tasks",
+                "draft_event",
+                "query_calendar",
+                "search_knowledge_base",
+            },
+        )
 
-    def test_draft_approval_emits_event_and_does_not_persist(self) -> None:
+    def test_draft_task_emits_event_and_does_not_persist(self) -> None:
         events: list[tuple[str, dict]] = []
         handlers = build_oa_handlers(on_event=lambda e, p: events.append((e, p)), user_id=self.alice_id)
-        result = handlers["draft_approval"](
-            {"type": "leave", "title": "年假 3 天", "fields": {"days": 3}}
-        )
+        result = handlers["draft_task"]({"title": "跟进餐桌打样", "priority": "high"})
         self.assertTrue(any(e == "oa_draft" for e, _ in events))
         draft = next(p for e, p in events if e == "oa_draft")
-        self.assertEqual(draft["type"], "leave")
-        self.assertEqual(draft["fields"]["days"], 3)
+        self.assertEqual(draft["kind"], "task")
+        self.assertEqual(draft["title"], "跟进餐桌打样")
         self.assertIn("确认", result)
-        # Nothing was written to the approvals table.
-        self.assertEqual(db.list_approvals_created_by(self.alice_id), [])
-
-    def test_query_approvals_reads_db(self) -> None:
-        handlers = build_oa_handlers(user_id=self.alice_id)
-        self.assertIn("暂无", handlers["query_approvals"]({"scope": "mine"}))
-        self.client.post(
-            "/api/approvals",
-            headers=self.alice,
-            json={"type": "leave", "title": "年假 2 天", "fields": {"days": 2}},
-        )
-        listed = handlers["query_approvals"]({"scope": "mine"})
-        self.assertIn("年假 2 天", listed)
+        # Nothing was written until the user confirms the card.
+        self.assertEqual(db.list_tasks(self.alice_id, scope="all"), [])
 
     def test_read_tools_present_and_functional(self) -> None:
         handlers = build_oa_handlers(user_id=self.alice_id)

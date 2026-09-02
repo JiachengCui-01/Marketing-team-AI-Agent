@@ -38,6 +38,7 @@
   --warn: 176 84 8;
   --danger: 199 34 42;
   --feature-news: 21 101 192;
+  --feature-selection: 27 122 46;
   --feature-image: 132 48 200;
   --feature-content: 11 106 199;    /* tracks --accent */
   --feature-analytics: 13 137 122;
@@ -79,6 +80,7 @@
   --warn: 251 191 36;
   --danger: 251 113 133;
   --feature-news: 96 165 250;
+  --feature-selection: 110 231 148;
   --feature-image: 192 132 252;
   --feature-content: 138 152 255;   /* tracks --accent */
   --feature-analytics: 45 212 191;
@@ -118,6 +120,7 @@
   --warn: 171 92 6;
   --danger: 201 24 74;
   --feature-news: 37 99 235;
+  --feature-selection: 15 130 74;
   --feature-image: 201 28 105;
   --feature-content: 104 40 200;    /* tracks --accent */
   --feature-analytics: 7 126 155;
@@ -156,6 +159,7 @@
   --warn: 171 115 7;
   --danger: 201 31 45;
   --feature-news: 6 130 200;
+  --feature-selection: 26 132 72;
   --feature-image: 45 110 225;
   --feature-content: 8 102 214;     /* tracks --accent */
   --feature-analytics: 5 140 166;
@@ -550,6 +554,9 @@ body {
   .skeleton-news {
     background: linear-gradient(90deg, rgb(var(--feature-news) / 0.08), rgb(var(--bg-subtle)), rgb(var(--feature-news) / 0.05));
   }
+  .skeleton-selection {
+    background: linear-gradient(90deg, rgb(var(--feature-selection) / 0.08), rgb(var(--bg-subtle)), rgb(var(--feature-selection) / 0.05));
+  }
   .skeleton-image {
     background: radial-gradient(circle at 18% 50%, rgb(var(--feature-image) / 0.10), transparent 28%), rgb(var(--bg-subtle));
   }
@@ -575,6 +582,9 @@ body {
   .loading-orb-news::before {
     background: radial-gradient(circle, rgb(var(--feature-news) / 0.18), transparent 70%);
   }
+  .loading-orb-selection::before {
+    background: radial-gradient(circle, rgb(var(--feature-selection) / 0.18), transparent 70%);
+  }
   .loading-orb-image::before {
     background: radial-gradient(circle at 35% 35%, rgb(var(--feature-image) / 0.24), transparent 70%);
   }
@@ -591,6 +601,9 @@ body {
   }
   .loading-card-news::before {
     background: linear-gradient(120deg, rgb(var(--feature-news) / 0.12), transparent 55%);
+  }
+  .loading-card-selection::before {
+    background: linear-gradient(120deg, rgb(var(--feature-selection) / 0.12), transparent 55%);
   }
   .loading-card-image::before {
     background: radial-gradient(circle at 50% 20%, rgb(var(--feature-image) / 0.16), transparent 62%);
@@ -619,11 +632,148 @@ body {
   .loading-card-news .loading-rail::after {
     background: linear-gradient(90deg, transparent, rgb(var(--feature-news) / 0.70), transparent);
   }
+  .loading-card-selection .loading-rail::after {
+    background: linear-gradient(90deg, transparent, rgb(var(--feature-selection) / 0.70), transparent);
+  }
   .loading-card-image .loading-rail::after {
     background: linear-gradient(90deg, transparent, rgb(var(--feature-image) / 0.70), transparent);
   }
   .loading-card-upload .loading-rail::after {
     background: linear-gradient(90deg, transparent, rgb(var(--feature-analytics) / 0.70), transparent);
+  }
+
+  /* ---- automation entry: segmented tabs ---- */
+  .seg {
+    @apply inline-flex items-center gap-0.5 rounded-xl border border-border bg-bg-subtle/70 p-0.5;
+  }
+  .seg-item {
+    @apply inline-flex items-center gap-1.5 rounded-[10px] px-3 py-1.5 text-xs font-medium text-fg-muted transition-all duration-200;
+  }
+  .seg-item:hover {
+    @apply text-fg;
+    background: rgb(var(--fg) / 0.05);
+  }
+  .seg-item-active {
+    @apply text-fg shadow-sm;
+    background: rgb(var(--bg-elevated));
+    border: 1px solid rgb(var(--border));
+  }
+
+  /* ---- BI dashboard ---- */
+  .bi-section {
+    @apply mb-6;
+  }
+  .bi-section-title {
+    @apply mb-2.5 flex items-center gap-2 text-sm font-medium text-fg;
+  }
+  .bi-tile {
+    @apply relative overflow-hidden rounded-xl border border-border bg-bg-elevated px-3.5 py-3 transition-all duration-200;
+  }
+  .bi-tile:hover {
+    border-color: rgb(var(--feature-selection) / 0.38);
+    box-shadow: 0 2px 10px rgb(var(--shadow) / 0.08);
+  }
+  .bi-tile::before {
+    content: "";
+    @apply absolute inset-x-0 top-0 h-[2px];
+    background: linear-gradient(90deg, rgb(var(--feature-selection) / 0.85), transparent);
+  }
+  .bi-tile-value {
+    @apply text-lg font-semibold leading-tight text-fg;
+    font-variant-numeric: tabular-nums;
+  }
+  .bi-tile-label {
+    @apply text-[11px] text-fg-muted;
+  }
+  .bi-chip {
+    @apply inline-flex shrink-0 items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium leading-none;
+    color: rgb(var(--fg-muted));
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg-subtle));
+  }
+  .bi-chip-estimated {
+    color: rgb(var(--warn));
+    border-color: rgb(var(--warn) / 0.34);
+    background: rgb(var(--warn) / 0.10);
+  }
+  .bi-chip-observed {
+    color: rgb(var(--feature-selection));
+    border-color: rgb(var(--feature-selection) / 0.34);
+    background: rgb(var(--feature-selection) / 0.10);
+  }
+  .bi-chip-low {
+    color: rgb(var(--success));
+    border-color: rgb(var(--success) / 0.34);
+    background: rgb(var(--success) / 0.10);
+  }
+  .bi-chip-medium {
+    color: rgb(var(--warn));
+    border-color: rgb(var(--warn) / 0.34);
+    background: rgb(var(--warn) / 0.10);
+  }
+  .bi-chip-high {
+    color: rgb(var(--danger));
+    border-color: rgb(var(--danger) / 0.34);
+    background: rgb(var(--danger) / 0.10);
+  }
+  .bi-card {
+    @apply rounded-xl border border-border bg-bg-elevated p-3.5 transition-all duration-200;
+  }
+  .bi-card:hover {
+    border-color: rgb(var(--feature-selection) / 0.34);
+    box-shadow: 0 2px 12px rgb(var(--shadow) / 0.08);
+  }
+  .bi-score-track {
+    @apply h-1.5 w-full overflow-hidden rounded-full;
+    background: rgb(var(--fg) / 0.08);
+  }
+  .bi-score-fill {
+    @apply h-full rounded-full;
+    background: linear-gradient(90deg, rgb(var(--feature-selection) / 0.55), rgb(var(--feature-selection)));
+    transition: width 520ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .bi-bar {
+    @apply w-full rounded-t-[3px];
+    background: linear-gradient(180deg, rgb(var(--feature-selection)), rgb(var(--feature-selection) / 0.42));
+    transition: height 520ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .bi-bar-muted {
+    background: linear-gradient(180deg, rgb(var(--fg-subtle) / 0.5), rgb(var(--fg-subtle) / 0.2));
+  }
+  .bi-grid-line {
+    stroke: rgb(var(--border));
+    stroke-width: 1;
+  }
+  .bi-spark-line {
+    stroke: rgb(var(--feature-selection));
+    stroke-width: 2;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .bi-spark-area {
+    fill: rgb(var(--feature-selection) / 0.14);
+  }
+  .bi-delta-up {
+    color: rgb(var(--success));
+  }
+  .bi-delta-down {
+    color: rgb(var(--danger));
+  }
+  .bi-table {
+    @apply w-full overflow-hidden rounded-xl border border-border text-xs;
+  }
+  .bi-table th {
+    @apply bg-bg-subtle px-3 py-2 text-left font-medium text-fg-muted;
+  }
+  .bi-table td {
+    @apply border-t border-border px-3 py-2 align-top text-fg;
+  }
+  .bi-table tbody tr {
+    @apply transition-colors duration-150;
+  }
+  .bi-table tbody tr:hover td {
+    background: rgb(var(--feature-selection) / 0.05);
   }
 }
 

@@ -24,12 +24,19 @@ from marketing_agent.orchestrator import run_orchestrator
 from marketing_agent.tools import image_gen
 from marketing_agent.tools.pdf_tool import generate_pdf
 
-from . import auth, clarify, db, im_hub, image_processing, image_serve, kb_retrieval, llm, marketing_skills, memory, news, sessions, uploads
+from . import auth, clarify, db, im_hub, image_processing, image_serve, kb_retrieval, llm, marketing_skills, memory, news, selection, sessions, uploads
 from .streaming import HEARTBEAT_INTERVAL_SECONDS, orchestrator_event_stream, to_sse
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
+
+
+def sellersprite_configured() -> bool:
+    """Whether the primary market-data source has a key. No network call."""
+    from marketing_agent.tools import sellersprite
+
+    return sellersprite.is_configured()
 
 # Keep strong references to fire-and-forget background tasks so they are not
 # garbage-collected mid-flight.
@@ -70,7 +77,7 @@ def health() -> dict:
     a rolled-back deploy would hide the reason it failed. ``config`` reports
     booleans only, never key material, so this stays safe to expose.
     """
-    from marketing_agent.tools import code_exec, product_browser, web_search
+    from marketing_agent.tools import code_exec, product_browser, sellersprite, web_search
 
     search = web_search.active_provider()
     return {
@@ -79,6 +86,10 @@ def health() -> dict:
             # Without this the workspace answers nothing: every model call 500s.
             "model_api": bool(os.environ.get("DEEPSEEK_API_KEY", "").strip()),
             "image_generation": bool(os.environ.get("GEMINI_API_KEY", "").strip()),
+            # Primary market-data source. Reports whether a key is present, not
+            # whether the vendor is reachable — health must not make a network
+            # call of its own.
+            "sellersprite": sellersprite.is_configured(),
             "web_search": search[0] if search else None,
             "product_browser": product_browser.enabled(),
             "local_code_execution": code_exec.enabled(),
@@ -415,6 +426,95 @@ async def refresh_news(request: Request) -> dict:
     except news.NewsGenerationError as exc:
         raise HTTPException(502, str(exc)) from exc
     return {"summary": record}
+
+
+# ---------- automation: product-selection analysis ----------
+
+def _validate_selection_payload(payload: dict) -> dict:
+    scope = str(payload.get("scope") or "all").strip()
+    if scope not in {"all", "categories"}:
+        raise HTTPException(400, "关注范围取值不正确。")
+    raw_categories = payload.get("categories") or []
+    if not isinstance(raw_categories, list):
+        raise HTTPException(400, "关注品类格式不正确。")
+    categories = [str(c).strip() for c in raw_categories if str(c).strip()][:12]
+    if scope == "categories" and not categories:
+        raise HTTPException(400, "请至少选择一个关注品类，或改为关注全部品类。")
+    marketplace = str(payload.get("marketplace") or selection.DEFAULT_MARKETPLACE).strip().upper()
+    if marketplace not in selection.MARKETPLACES:
+        raise HTTPException(400, "站点代码不正确。")
+    refresh_time = str(payload.get("refresh_time") or "").strip()
+    if not _TIME_RE.match(refresh_time):
+        raise HTTPException(400, "刷新时间格式应为 HH:MM。")
+    timezone = str(payload.get("timezone") or "UTC").strip()
+    if timezone not in _VALID_TZS:
+        timezone = "UTC"
+    language = str(payload.get("language") or "zh").strip().lower()
+    if language not in {"zh", "en"}:
+        language = "zh"
+    return {
+        "scope": scope,
+        "categories": categories,
+        "marketplace": marketplace,
+        "refresh_time": refresh_time,
+        "timezone": timezone,
+        "language": language,
+    }
+
+
+@router.get("/selection/config")
+def get_selection_config(request: Request) -> dict:
+    user = auth.require_user(request)
+    return {
+        "config": db.get_selection_config(user["id"]),
+        # The UI offers these as the "watch everything" preset and the picker's
+        # suggestions, so they come from the same domain vocabulary the agents use.
+        "default_categories": list(selection.ALL_CATEGORY_KEYWORDS),
+        "marketplaces": list(selection.MARKETPLACES),
+        "available": sellersprite_configured(),
+    }
+
+
+@router.put("/selection/config")
+def save_selection_config(request: Request, payload: dict = Body(...)) -> dict:
+    user = auth.require_user(request)
+    fields = _validate_selection_payload(payload)
+    return {"config": db.upsert_selection_config(user["id"], **fields)}
+
+
+@router.delete("/selection/config")
+def remove_selection_config(request: Request) -> dict:
+    user = auth.require_user(request)
+    db.delete_selection_data(user["id"])
+    return {"ok": True}
+
+
+@router.get("/selection/report")
+def get_selection_report(request: Request) -> dict:
+    user = auth.require_user(request)
+    return {"report": db.get_latest_selection_report(user["id"])}
+
+
+@router.post("/selection/refresh")
+async def refresh_selection(request: Request) -> dict:
+    user = auth.require_user(request)
+    config = db.get_selection_config(user["id"])
+    if config is None:
+        raise HTTPException(400, "请先设置选品分析任务。")
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001 — tolerate a bodyless POST
+        payload = {}
+    language = str(payload.get("language") or config.get("language") or "zh").lower()
+    if language not in {"zh", "en"}:
+        language = "zh"
+    config = {**config, "language": language}
+    client = _client()
+    try:
+        record = await asyncio.to_thread(selection.generate_report, config, client)
+    except selection.SelectionGenerationError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    return {"report": record}
 
 
 # ---------- groups ----------
@@ -1355,7 +1455,7 @@ async def stream_oa(request: Request, prompt: str):
 
     Reuses the orchestrator streaming bridge with the OA runner. Conversation state is
     per-request for this MVP (single-turn); the copilot proposes drafts via ``oa_draft``
-    events that the client confirms through ``POST /api/approvals``.
+    events that the client confirms through the matching ``POST`` endpoint.
     """
     user = auth.require_user(request)
     if not prompt.strip():
@@ -1367,171 +1467,6 @@ async def stream_oa(request: Request, prompt: str):
         client, conversation, prompt, request=request, runner=runner
     )
     return EventSourceResponse(to_sse(_with_current_user(user["id"], event_stream)))
-
-
-# ---------- AI OA: approvals ----------
-
-def _approval_view(appr: dict) -> dict:
-    applicant = db.get_user(appr["applicant_id"])
-    steps = []
-    for s in appr.get("steps", []):
-        approver = db.get_user(s["approver_id"])
-        steps.append({**s, "approver_name": (approver or {}).get("username")})
-    return {
-        "id": appr["id"],
-        "type": appr["type"],
-        "title": appr["title"],
-        "form": appr.get("form", {}),
-        "status": appr["status"],
-        "current_step": appr["current_step"],
-        "created_at": appr["created_at"],
-        "updated_at": appr.get("updated_at"),
-        "applicant_id": appr["applicant_id"],
-        "applicant_name": (applicant or {}).get("username"),
-        "steps": steps,
-    }
-
-
-def _resolve_approvers(org: dict | None, applicant_id: str) -> list[str]:
-    """MVP single-step routing: the org owner approves; if the applicant is the owner,
-    the first other member approves."""
-    if not org:
-        return []
-    owner_id = org.get("owner_id")
-    if owner_id and owner_id != applicant_id:
-        return [owner_id]
-    for member in db.list_org_members(org["id"]):
-        if member["id"] != applicant_id:
-            return [member["id"]]
-    return []
-
-
-@router.get("/approvals")
-def list_approvals(request: Request, scope: str = "mine") -> dict:
-    user = auth.require_user(request)
-    if scope == "pending":
-        rows = db.list_approvals_pending_for(user["id"])
-    elif scope == "acted":
-        rows = db.list_approvals_acted_by(user["id"])
-    else:
-        rows = db.list_approvals_created_by(user["id"])
-    return {"approvals": [_approval_view(r) for r in rows]}
-
-
-@router.get("/approvals/{approval_id}")
-def get_approval(request: Request, approval_id: str) -> dict:
-    user = auth.require_user(request)
-    appr = db.get_approval(approval_id)
-    if appr is None:
-        raise HTTPException(404, "审批单不存在。")
-    approver_ids = {s["approver_id"] for s in appr.get("steps", [])}
-    if user["id"] != appr["applicant_id"] and user["id"] not in approver_ids:
-        raise HTTPException(403, "无权查看该审批。")
-    return {"approval": _approval_view(appr)}
-
-
-@router.post("/approvals")
-async def create_approval(request: Request, payload: dict = Body(...)) -> dict:
-    user = auth.require_user(request)
-    type_ = (str(payload.get("type") or "general").strip()) or "general"
-    title = str(payload.get("title") or "").strip()
-    if not title:
-        raise HTTPException(400, "审批标题不能为空。")
-    fields = payload.get("fields")
-    if fields is None:
-        fields = payload.get("form") or {}
-    if not isinstance(fields, dict):
-        raise HTTPException(400, "表单字段格式不正确。")
-    org = db.get_or_create_default_org(user["id"], user.get("username") or "")
-    approvers = _resolve_approvers(org, user["id"])
-    if not approvers:
-        raise HTTPException(400, "当前组织没有其他成员可作为审批人，请先在通讯录添加同事。")
-    appr = db.create_approval(user["id"], type_, title, fields, approvers, org_id=org.get("id"))
-    for uid in approvers:
-        im_hub.publish(
-            uid,
-            {
-                "event": "oa_notification",
-                "payload": {
-                    "kind": "approval_pending",
-                    "approval_id": appr["id"],
-                    "title": title,
-                    "from": user.get("username"),
-                },
-            },
-        )
-    return {"approval": _approval_view(appr)}
-
-
-@router.post("/approvals/{approval_id}/act")
-async def act_approval(request: Request, approval_id: str, payload: dict = Body(...)) -> dict:
-    user = auth.require_user(request)
-    action = str(payload.get("action") or "").strip()
-    if action not in ("approved", "rejected"):
-        raise HTTPException(400, "action 必须是 approved 或 rejected。")
-    comment = (str(payload.get("comment") or "").strip()) or None
-    updated = db.act_on_approval(approval_id, user["id"], action, comment)
-    if updated is None:
-        raise HTTPException(400, "无法处理该审批（可能不是当前审批人或已处理）。")
-    im_hub.publish(
-        updated["applicant_id"],
-        {
-            "event": "oa_notification",
-            "payload": {
-                "kind": "approval_update",
-                "approval_id": approval_id,
-                "title": updated["title"],
-                "status": updated["status"],
-            },
-        },
-    )
-    if updated["status"] == "pending":
-        for s in updated.get("steps", []):
-            if s["step_index"] == updated["current_step"] and s["action"] == "pending":
-                im_hub.publish(
-                    s["approver_id"],
-                    {
-                        "event": "oa_notification",
-                        "payload": {
-                            "kind": "approval_pending",
-                            "approval_id": approval_id,
-                            "title": updated["title"],
-                        },
-                    },
-                )
-    return {"approval": _approval_view(updated)}
-
-
-@router.patch("/approvals/{approval_id}")
-async def modify_approval(request: Request, approval_id: str, payload: dict = Body(...)) -> dict:
-    user = auth.require_user(request)
-    title = None
-    if "title" in payload:
-        title = str(payload.get("title") or "").strip()
-        if not title:
-            raise HTTPException(400, "审批标题不能为空。")
-    fields = payload.get("fields")
-    if fields is not None and not isinstance(fields, dict):
-        raise HTTPException(400, "表单字段格式不正确。")
-    updated = db.update_approval(approval_id, user["id"], title=title, form=fields)
-    if updated is None:
-        raise HTTPException(400, "无法修改（仅能修改本人待审批的申请）。")
-    return {"approval": _approval_view(updated)}
-
-
-@router.post("/approvals/{approval_id}/withdraw")
-async def withdraw_approval(request: Request, approval_id: str) -> dict:
-    user = auth.require_user(request)
-    updated = db.withdraw_approval(approval_id, user["id"])
-    if updated is None:
-        raise HTTPException(400, "无法撤回（仅能撤回本人待审批的申请）。")
-    for s in updated.get("steps", []):
-        im_hub.publish(
-            s["approver_id"],
-            {"event": "oa_notification", "payload": {"kind": "approval_withdrawn",
-             "approval_id": approval_id, "title": updated["title"]}},
-        )
-    return {"approval": _approval_view(updated)}
 
 
 # ---------- AI OA: tasks ----------

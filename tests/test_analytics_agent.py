@@ -35,7 +35,11 @@ class AnalyticsAgentTests(unittest.TestCase):
                 questions=["Which channel has the most clicks?"],
             )
 
-        self.assertEqual(result, "## Key Metrics\nok")
+        # The analysis body, plus the appended data-source footer naming the file
+        # the numbers actually came from.
+        self.assertIn("## Key Metrics\nok", result)
+        self.assertIn("## Data Sources", result)
+        self.assertIn("campaign.csv", result.split("## Data Sources")[1])
 
         brief = captured["user_message"]
         self.assertIsInstance(brief, str)
@@ -68,7 +72,8 @@ class AnalyticsAgentTests(unittest.TestCase):
         with mock.patch.object(analytics_agent, "run_agent", return_value="ok"):
             result = analytics_agent.run(client=mock.Mock(), task="t", csv_path=str(path))
 
-        self.assertEqual(result, "ok")
+        self.assertTrue(result.startswith("ok"))
+        self.assertIn("data.json", result.split("## Data Sources")[1])
 
     def test_missing_file_returns_error(self) -> None:
         with mock.patch.object(analytics_agent, "run_agent") as run_agent:

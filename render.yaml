@@ -32,9 +32,21 @@ services:
       # check, but every chat request fails with HTTP 500.
       - key: DEEPSEEK_API_KEY
         sync: false
-      # Does double duty: product-image generation, and web search for the
-      # research agent and daily briefing via Google Search grounding (DeepSeek
-      # has no built-in search).
+      # PRIMARY market-data source: SellerSprite (卖家精灵) over its MCP server.
+      # Without it the research and analytics agents fall back to web search plus
+      # the live product browser, and each answer's data-source footer says so.
+      # Key: https://open.sellersprite.com -> 获取密钥
+      - key: SELLERSPRITE_SECRET_KEY
+        sync: false
+      # Only needed if the vendor moves the endpoint.
+      - key: SELLERSPRITE_MCP_URL
+        value: https://mcp.sellersprite.com/mcp
+      # Vendor calls are credit-metered — cap what one request can spend.
+      - key: MARKETING_AGENT_SELLERSPRITE_MAX_CALLS
+        value: "8"
+      # Does double duty: product-image generation, and FALLBACK web search for
+      # the research agent and daily briefing via Google Search grounding
+      # (DeepSeek has no built-in search).
       - key: GEMINI_API_KEY
         sync: false
       # Optional. A dedicated search vendor takes priority over Gemini grounding

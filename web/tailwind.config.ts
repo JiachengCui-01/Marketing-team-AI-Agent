@@ -46,6 +46,7 @@ const config: Config = {
         "feature-content": "rgb(var(--feature-content) / <alpha-value>)",
         "feature-analytics": "rgb(var(--feature-analytics) / <alpha-value>)",
         "feature-research": "rgb(var(--feature-research) / <alpha-value>)",
+        "feature-selection": "rgb(var(--feature-selection) / <alpha-value>)",
       },
       borderRadius: {
         // macOS-softer scale (bumps existing rounded-* usages system-wide).

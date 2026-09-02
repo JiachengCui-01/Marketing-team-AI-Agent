@@ -606,6 +606,147 @@ export async function refreshNews(language: "zh" | "en"): Promise<NewsSummary> {
   return body.summary;
 }
 
+// ---------- automation: product-selection analysis ----------
+
+export type SelectionScope = "all" | "categories";
+
+export type SelectionConfig = {
+  user_id: string;
+  scope: SelectionScope;
+  categories: string[];
+  marketplace: string;
+  refresh_time: string;
+  timezone: string;
+  language: "zh" | "en";
+  enabled: boolean;
+  last_run_at: number | null;
+  created_at: number;
+  updated_at: number;
+};
+
+export type SelectionConfigPayload = {
+  scope: SelectionScope;
+  categories: string[];
+  marketplace: string;
+  refresh_time: string;
+  timezone: string;
+  language: "zh" | "en";
+};
+
+export type SelectionKpi = {
+  label: string;
+  value: string;
+  hint?: string;
+  estimated?: boolean;
+};
+
+export type SelectionRecommendation = {
+  title: string;
+  category: string;
+  asin?: string;
+  price?: string;
+  monthly_sales?: string;
+  monthly_revenue?: string;
+  bsr?: string;
+  rating?: string;
+  reviews?: string;
+  competition?: "low" | "medium" | "high";
+  score: number;
+  reason: string;
+};
+
+export type SelectionTrendPoint = { period: string; value: number };
+
+export type SelectionTrend = {
+  category: string;
+  label: string;
+  unit?: string;
+  change_pct?: number;
+  points: SelectionTrendPoint[];
+};
+
+export type SelectionMarketRow = {
+  category: string;
+  avg_price?: string;
+  avg_revenue?: string;
+  avg_rating?: string;
+  brand_concentration?: string;
+  verdict: string;
+};
+
+export type SelectionDashboard = {
+  kpis?: SelectionKpi[];
+  recommendations?: SelectionRecommendation[];
+  trends?: SelectionTrend[];
+  market?: SelectionMarketRow[];
+  notes?: string[];
+};
+
+export type SelectionReport = {
+  id: string;
+  marketplace: string;
+  scope: SelectionScope;
+  categories: string[];
+  dashboard: SelectionDashboard;
+  summary: string;
+  vendor_tools: string[];
+  generated_at: number;
+  created_at: number;
+};
+
+export type SelectionConfigResponse = {
+  config: SelectionConfig | null;
+  default_categories: string[];
+  marketplaces: string[];
+  /** Whether the SellerSprite key is present on the server. */
+  available: boolean;
+};
+
+export async function getSelectionConfig(): Promise<SelectionConfigResponse> {
+  const res = await fetch(`${API_BASE}/api/selection/config`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return res.json();
+}
+
+export async function saveSelectionConfig(
+  payload: SelectionConfigPayload,
+): Promise<SelectionConfig> {
+  const res = await fetch(`${API_BASE}/api/selection/config`, {
+    method: "PUT",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  const body = await res.json();
+  return body.config;
+}
+
+export async function deleteSelectionConfig(): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/selection/config`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+}
+
+export async function getSelectionReport(): Promise<SelectionReport | null> {
+  const res = await fetch(`${API_BASE}/api/selection/report`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  const body = await res.json();
+  return body.report;
+}
+
+export async function refreshSelection(language: "zh" | "en"): Promise<SelectionReport> {
+  const res = await fetch(`${API_BASE}/api/selection/refresh`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ language }),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  const body = await res.json();
+  return body.report;
+}
+
 // ---------- marketing image ----------
 
 export type ImageStyleKey =
@@ -1162,42 +1303,9 @@ export function streamUrl(
 
 // ---------- AI OA ----------
 
-export type ApprovalStep = {
-  step_index: number;
-  approver_id: string;
-  approver_name: string | null;
-  action: "pending" | "approved" | "rejected";
-  comment: string | null;
-  acted_at: number | null;
-};
-
-export type ApprovalRecord = {
-  id: string;
-  type: string;
-  title: string;
-  form: Record<string, unknown>;
-  status: "pending" | "approved" | "rejected" | "withdrawn";
-  current_step: number;
-  created_at: number;
-  updated_at: number | null;
-  applicant_id: string;
-  applicant_name: string | null;
-  steps: ApprovalStep[];
-};
-
-export type ApprovalDraft = {
-  kind: "approval";
-  type: string;
-  title: string;
-  fields: Record<string, unknown>;
-};
-
-// A human-in-the-loop draft proposed by the AI workspace (approval / task / calendar),
-// emitted as an `oa_draft` stream event and confirmed by the user before it commits.
-export type OaDraft = { kind: "approval" | "task" | "calendar"; title: string } & Record<
-  string,
-  unknown
->;
+// A human-in-the-loop draft proposed by the AI workspace (task / calendar), emitted as
+// an `oa_draft` stream event and confirmed by the user before it commits.
+export type OaDraft = { kind: "task" | "calendar"; title: string } & Record<string, unknown>;
 
 export function oaStreamUrl(prompt: string): string {
   const url = new URL(`${API_BASE}/api/oa/stream`, urlBase());
@@ -1205,64 +1313,6 @@ export function oaStreamUrl(prompt: string): string {
   const token = getAuthToken();
   if (token) url.searchParams.set("token", token);
   return url.toString();
-}
-
-export async function listApprovals(
-  scope: "mine" | "pending" | "acted",
-): Promise<ApprovalRecord[]> {
-  const res = await fetch(`${API_BASE}/api/approvals?scope=${scope}`, { headers: authHeaders() });
-  if (!res.ok) throw new Error(await parseJsonError(res));
-  return (await res.json()).approvals;
-}
-
-export async function createApproval(payload: {
-  type: string;
-  title: string;
-  fields: Record<string, unknown>;
-}): Promise<ApprovalRecord> {
-  const res = await fetch(`${API_BASE}/api/approvals`, {
-    method: "POST",
-    headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error(await parseJsonError(res));
-  return (await res.json()).approval;
-}
-
-export async function actApproval(
-  id: string,
-  action: "approved" | "rejected",
-  comment?: string,
-): Promise<ApprovalRecord> {
-  const res = await fetch(`${API_BASE}/api/approvals/${id}/act`, {
-    method: "POST",
-    headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ action, comment }),
-  });
-  if (!res.ok) throw new Error(await parseJsonError(res));
-  return (await res.json()).approval;
-}
-
-export async function updateApproval(
-  id: string,
-  payload: { title?: string; fields?: Record<string, unknown> },
-): Promise<ApprovalRecord> {
-  const res = await fetch(`${API_BASE}/api/approvals/${id}`, {
-    method: "PATCH",
-    headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error(await parseJsonError(res));
-  return (await res.json()).approval;
-}
-
-export async function withdrawApproval(id: string): Promise<ApprovalRecord> {
-  const res = await fetch(`${API_BASE}/api/approvals/${id}/withdraw`, {
-    method: "POST",
-    headers: authHeaders(),
-  });
-  if (!res.ok) throw new Error(await parseJsonError(res));
-  return (await res.json()).approval;
 }
 
 // ---------- AI OA: tasks ----------

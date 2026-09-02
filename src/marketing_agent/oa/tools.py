@@ -13,39 +13,6 @@ from typing import Callable
 
 OA_TOOLS: list[dict] = [
     {
-        "name": "draft_approval",
-        "description": (
-            "Draft an office approval request (leave/请假, expense/报销, purchase/采购, "
-            "or general) from the user's ask. Does NOT submit — prepares a draft the user "
-            "confirms in the UI. Use for '帮我请3天年假', 'submit an expense claim', etc."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "type": {"type": "string", "enum": ["leave", "expense", "purchase", "general"]},
-                "title": {"type": "string", "description": "Short title, e.g. '年假申请（3 天）'."},
-                "fields": {
-                    "type": "object",
-                    "description": (
-                        "Form fields in the user's language. leave: {leave_type, start_date, "
-                        "end_date, days, reason}; expense: {amount, category, reason}."
-                    ),
-                    "additionalProperties": True,
-                },
-            },
-            "required": ["type", "title", "fields"],
-        },
-    },
-    {
-        "name": "query_approvals",
-        "description": "Look up approvals. scope='mine' = submitted by user; scope='pending' = awaiting user's action.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"scope": {"type": "string", "enum": ["mine", "pending"]}},
-            "required": ["scope"],
-        },
-    },
-    {
         "name": "draft_task",
         "description": (
             "Draft a task / to-do to create or assign to a colleague. Does NOT save — prepares "
@@ -114,13 +81,6 @@ OA_TOOLS: list[dict] = [
     },
 ]
 
-_STATUS_ZH = {"pending": "待审批", "approved": "已通过", "rejected": "已驳回"}
-
-
-def _status_zh(status: str) -> str:
-    return _STATUS_ZH.get(status, status)
-
-
 def build_oa_handlers(
     on_event: Callable[[str, dict], None] | None = None,
     user_id: str | None = None,
@@ -135,33 +95,6 @@ def build_oa_handlers(
     def _emit_draft(draft: dict) -> None:
         if on_event:
             on_event("oa_draft", draft)
-
-    def draft_approval(inp: dict) -> str:
-        fields = inp.get("fields")
-        draft = {
-            "kind": "approval",
-            "type": str(inp.get("type") or "general"),
-            "title": (str(inp.get("title") or "审批申请").strip() or "审批申请"),
-            "fields": fields if isinstance(fields, dict) else {},
-        }
-        _emit_draft(draft)
-        return "已生成审批草稿并展示给用户确认。请一句话提醒用户核对卡片后点击“确认提交”，不要重复罗列字段。"
-
-    def query_approvals(inp: dict) -> str:
-        if not user_id:
-            return "无法确定当前用户身份。"
-        from server import db
-
-        scope = str(inp.get("scope") or "mine")
-        if scope == "pending":
-            rows, label = db.list_approvals_pending_for(user_id), "待你审批"
-        else:
-            rows, label = db.list_approvals_created_by(user_id), "你发起"
-        if not rows:
-            return f"{label}的审批：暂无记录。"
-        lines = [f"{label}的审批共 {len(rows)} 条："]
-        lines += [f"- {r['title']}（{_status_zh(r['status'])}）" for r in rows[:10]]
-        return "\n".join(lines)
 
     def draft_task(inp: dict) -> str:
         draft = {
@@ -253,8 +186,6 @@ def build_oa_handlers(
         return "根据知识库检索到以下资料，请据此回答并标注引用的文档标题：\n\n" + "\n\n".join(blocks)
 
     return {
-        "draft_approval": draft_approval,
-        "query_approvals": query_approvals,
         "draft_task": draft_task,
         "query_tasks": query_tasks,
         "draft_event": draft_event,

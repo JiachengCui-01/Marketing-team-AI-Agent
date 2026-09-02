@@ -7,7 +7,7 @@ export function Skeleton({
   style,
 }: {
   className?: string;
-  variant?: "default" | "news" | "image" | "preview";
+  variant?: "default" | "news" | "selection" | "image" | "preview";
   style?: React.CSSProperties;
 }) {
   return <div className={`skeleton skeleton-${variant} rounded-lg ${className}`} style={style} />;

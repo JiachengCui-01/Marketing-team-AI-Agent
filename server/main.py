@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
-from . import db, news  # noqa: E402 - must load env first
+from . import db, news, selection  # noqa: E402 - must load env first
 from .routes import router  # noqa: E402 - must load env first
 
 logger = logging.getLogger("marketing_agent.news")
@@ -51,8 +51,26 @@ async def _run_due_job(config: dict) -> None:
         logger.warning("News summary failed for user %s: %s", config.get("user_id"), exc)
 
 
-async def _news_scheduler() -> None:
-    """Background loop: generate each user's daily news summary at their configured time.
+def _config_timezone(config: dict) -> ZoneInfo:
+    try:
+        return ZoneInfo(config.get("timezone") or "UTC")
+    except Exception:  # noqa: BLE001
+        return ZoneInfo("UTC")
+
+
+async def _run_due_selection_job(config: dict) -> None:
+    try:
+        await asyncio.to_thread(selection.generate_report, config)
+        logger.info("Generated selection analysis for user %s", config.get("user_id"))
+    except Exception as exc:  # noqa: BLE001 - keep the scheduler alive
+        # Same reasoning as the news job: count the attempt so a persistent vendor
+        # failure does not retry every minute. Manual refresh stays available.
+        db.set_selection_config_last_run(config["user_id"], datetime.now().timestamp())
+        logger.warning("Selection analysis failed for user %s: %s", config.get("user_id"), exc)
+
+
+async def _automation_scheduler() -> None:
+    """Background loop for both automation jobs: daily news digest and selection analysis.
 
     NOTE: assumes a single server worker (Render default). With multiple workers this
     would run per worker; add a DB lock before scaling out.
@@ -60,15 +78,17 @@ async def _news_scheduler() -> None:
     while True:
         try:
             for config in db.list_enabled_news_configs():
-                try:
-                    tz = ZoneInfo(config.get("timezone") or "UTC")
-                except Exception:  # noqa: BLE001
-                    tz = ZoneInfo("UTC")
-                if _is_due(config, datetime.now(tz)):
+                if _is_due(config, datetime.now(_config_timezone(config))):
                     await _run_due_job(config)
             _expire_cancelled_configs()
         except Exception as exc:  # noqa: BLE001 - never let the loop die
             logger.warning("News scheduler tick failed: %s", exc)
+        try:
+            for config in db.list_enabled_selection_configs():
+                if selection.is_due(config, datetime.now(_config_timezone(config))):
+                    await _run_due_selection_job(config)
+        except Exception as exc:  # noqa: BLE001 - never let the loop die
+            logger.warning("Selection scheduler tick failed: %s", exc)
         await asyncio.sleep(_SCHEDULER_INTERVAL_SECONDS)
 
 
@@ -98,20 +118,29 @@ def _warn_on_missing_config() -> None:
             "checks, but every chat request will fail with HTTP 500. Set it in the "
             "host's environment."
         )
-    if not os.environ.get("GEMINI_API_KEY", "").strip():
-        from marketing_agent.tools import web_search
+    from marketing_agent.tools import sellersprite, web_search
 
+    if not sellersprite.is_configured():
+        logger.warning(
+            "SELLERSPRITE_SECRET_KEY is not set — the primary market-data source is "
+            "off, so competitor and market questions fall back to web search plus the "
+            "live product browser. Answers will label the fallback in their data-source "
+            "footer. Get a key at https://open.sellersprite.com and set it in the host's "
+            "environment."
+        )
+    if not os.environ.get("GEMINI_API_KEY", "").strip():
         detail = "product-image generation is disabled"
         if web_search.active_provider() is None:
-            detail += ", and no web-search provider is configured so the research "
-            detail += "agent and the daily briefing will report themselves unavailable"
+            detail += ", and no web-search provider is configured so the fallback "
+            detail += "research path and the daily briefing will report themselves "
+            detail += "unavailable"
         logger.warning("GEMINI_API_KEY is not set — %s.", detail)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _warn_on_missing_config()
-    task = asyncio.create_task(_news_scheduler())
+    task = asyncio.create_task(_automation_scheduler())
     try:
         yield
     finally:
