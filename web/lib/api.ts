@@ -619,6 +619,8 @@ export type SelectionConfig = {
   timezone: string;
   language: "zh" | "en";
   enabled: boolean;
+  cancelled_at: number | null;
+  revert_at?: number | null;
   last_run_at: number | null;
   created_at: number;
   updated_at: number;
@@ -721,12 +723,14 @@ export async function saveSelectionConfig(
   return body.config;
 }
 
-export async function deleteSelectionConfig(): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/selection/config`, {
-    method: "DELETE",
+export async function cancelSelection(): Promise<SelectionConfig> {
+  const res = await fetch(`${API_BASE}/api/selection/cancel`, {
+    method: "POST",
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error(await parseJsonError(res));
+  const body = await res.json();
+  return body.config;
 }
 
 export async function getSelectionReport(): Promise<SelectionReport | null> {

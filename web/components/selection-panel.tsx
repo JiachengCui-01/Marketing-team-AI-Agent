@@ -3,14 +3,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 // Utility marks (settings, refresh, spinner, plus, close) stay on lucide; identity
 // icons use Phosphor duotone — the same split the rest of the workspace uses.
-import { Settings, RefreshCw, Loader2, Plus, X } from "lucide-react";
+import { Settings, RefreshCw, Loader2, Plus, X, AlertTriangle } from "lucide-react";
 import { ChartLineUp, TrendUp, TrendDown, Info } from "@phosphor-icons/react";
 import {
   getSelectionConfig,
   getSelectionReport,
   refreshSelection,
   saveSelectionConfig,
-  deleteSelectionConfig,
+  cancelSelection,
   type SelectionConfig,
   type SelectionConfigResponse,
   type SelectionKpi,
@@ -41,6 +41,7 @@ export function SelectionPanel() {
   const [error, setError] = useState<string | null>(null);
 
   const config = meta?.config ?? null;
+  const cancelled = !!config && config.enabled === false && config.cancelled_at != null;
   const refreshingEmpty = refreshing && !report;
   const refreshingExisting = refreshing && !!report;
 
@@ -90,6 +91,12 @@ export function SelectionPanel() {
               <p>{t.selUnavailable}</p>
             </div>
           ) : null}
+          {cancelled ? (
+            <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-warn/40 bg-warn/10 px-3.5 py-3 text-sm text-warn">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <p>{t.selCancelledNotice}</p>
+            </div>
+          ) : null}
 
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <div className="min-w-0 flex-1 truncate text-xs text-fg-subtle">
@@ -110,7 +117,7 @@ export function SelectionPanel() {
             </button>
             <button
               onClick={handleRefresh}
-              disabled={refreshing || !config || !meta?.available}
+              disabled={refreshing || !config || cancelled || !meta?.available}
               className="btn-accent px-3 py-1.5 text-xs"
             >
               {refreshing ? (
@@ -163,9 +170,8 @@ export function SelectionPanel() {
             setMeta((m) => (m ? { ...m, config: cfg } : m));
             setSettingsOpen(false);
           }}
-          onCleared={() => {
-            setMeta((m) => (m ? { ...m, config: null } : m));
-            setReport(null);
+          onCleared={(cfg) => {
+            setMeta((m) => (m ? { ...m, config: cfg } : m));
             setSettingsOpen(false);
           }}
         />
@@ -545,17 +551,19 @@ function SelectionSettingsDialog({
   meta: SelectionConfigResponse | null;
   onClose: () => void;
   onSaved: (cfg: SelectionConfig) => void;
-  onCleared: () => void;
+  onCleared: (cfg: SelectionConfig) => void;
 }) {
   const { locale, t } = useI18n();
   const config = meta?.config ?? null;
+  const isCancelled = !!config && config.enabled === false && config.cancelled_at != null;
+  const canCancel = !!config && config.enabled !== false;
   const suggestions = useMemo(() => meta?.default_categories ?? [], [meta]);
   const marketplaces = useMemo(() => meta?.marketplaces ?? ["US"], [meta]);
 
-  const [scope, setScope] = useState<SelectionScope>(config?.scope ?? "all");
-  const [categories, setCategories] = useState<string[]>(config?.categories ?? []);
-  const [marketplace, setMarketplace] = useState(config?.marketplace ?? "US");
-  const [refreshTime, setRefreshTime] = useState(config?.refresh_time ?? "09:00");
+  const [scope, setScope] = useState<SelectionScope>(isCancelled ? "all" : config?.scope ?? "all");
+  const [categories, setCategories] = useState<string[]>(isCancelled ? [] : config?.categories ?? []);
+  const [marketplace, setMarketplace] = useState(isCancelled ? "US" : config?.marketplace ?? "US");
+  const [refreshTime, setRefreshTime] = useState(isCancelled ? "09:00" : config?.refresh_time ?? "09:00");
   const [custom, setCustom] = useState("");
   const [saving, setSaving] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -604,8 +612,7 @@ function SelectionSettingsDialog({
     setClearing(true);
     setError(null);
     try {
-      await deleteSelectionConfig();
-      onCleared();
+      onCleared(await cancelSelection());
     } catch (e) {
       setError(localizeError(e, locale));
     } finally {
@@ -728,7 +735,7 @@ function SelectionSettingsDialog({
         {error ? <p className="text-[11px] text-danger">{error}</p> : null}
 
         <div className="flex items-center gap-2 pt-1">
-          {config ? (
+          {canCancel ? (
             <button
               type="button"
               onClick={handleClear}

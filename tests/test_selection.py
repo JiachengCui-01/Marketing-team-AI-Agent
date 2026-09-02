@@ -381,6 +381,53 @@ class SelectionRouteTests(unittest.TestCase):
         after = self.client.get("/api/selection/config", headers=self.headers).json()
         self.assertIsNone(after["config"])
 
+    def test_cancel_keeps_report_and_saving_reactivates_task(self) -> None:
+        saved = self.client.put(
+            "/api/selection/config",
+            headers=self.headers,
+            json={
+                "scope": "categories",
+                "categories": ["sofas"],
+                "marketplace": "US",
+                "refresh_time": "09:00",
+                "timezone": "UTC",
+                "language": "zh",
+            },
+        ).json()["config"]
+        user = self.client.get("/api/auth/me", headers=self.headers).json()["user"]
+        db.add_selection_report(
+            user["id"], "US", "categories", ["sofas"],
+            {"kpis": [{"label": "Revenue", "value": "$1"}]},
+            "retained report", ["market_research"], 1.0,
+        )
+
+        cancelled = self.client.post("/api/selection/cancel", headers=self.headers)
+        self.assertEqual(cancelled.status_code, 200, cancelled.text)
+        cancelled_config = cancelled.json()["config"]
+        self.assertFalse(cancelled_config["enabled"])
+        self.assertIsNotNone(cancelled_config["cancelled_at"])
+        self.assertIn("revert_at", cancelled_config)
+
+        report = self.client.get("/api/selection/report", headers=self.headers).json()["report"]
+        self.assertEqual(report["summary"], "retained report")
+        blocked = self.client.post("/api/selection/refresh", headers=self.headers, json={})
+        self.assertEqual(blocked.status_code, 409)
+
+        reactivated = self.client.put(
+            "/api/selection/config",
+            headers=self.headers,
+            json={
+                "scope": saved["scope"],
+                "categories": saved["categories"],
+                "marketplace": saved["marketplace"],
+                "refresh_time": saved["refresh_time"],
+                "timezone": saved["timezone"],
+                "language": saved["language"],
+            },
+        ).json()["config"]
+        self.assertTrue(reactivated["enabled"])
+        self.assertIsNone(reactivated["cancelled_at"])
+
     def test_refresh_requires_a_configured_task(self) -> None:
         response = self.client.post("/api/selection/refresh", headers=self.headers, json={})
         self.assertEqual(response.status_code, 400)

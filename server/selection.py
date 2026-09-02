@@ -24,7 +24,7 @@ import os
 import re
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, time as dtime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -69,6 +69,26 @@ _TOOL_NAME = "publish_selection_dashboard"
 
 class SelectionGenerationError(RuntimeError):
     """Raised when the analysis could not be produced from vendor data."""
+
+
+def is_cancelled(config_row: dict | None) -> bool:
+    return bool(config_row) and not config_row.get("enabled") and config_row.get("cancelled_at") is not None
+
+
+def cancellation_revert_ts(config_row: dict) -> float:
+    """Match news cancellation: retain results until tomorrow's scheduled run time."""
+    tz = _config_tz(config_row)
+    cancelled_local = datetime.fromtimestamp(float(config_row["cancelled_at"]), tz=tz)
+    try:
+        hh, mm = (int(x) for x in str(config_row["refresh_time"]).split(":"))
+    except (ValueError, KeyError):
+        hh, mm = 9, 0
+    next_day = (cancelled_local + timedelta(days=1)).date()
+    return datetime.combine(next_day, dtime(hour=hh, minute=mm), tzinfo=tz).timestamp()
+
+
+def is_cancel_expired(config_row: dict | None, now_ts: float) -> bool:
+    return bool(is_cancelled(config_row) and now_ts >= cancellation_revert_ts(config_row))
 
 
 def _config_tz(config_row: dict) -> ZoneInfo:

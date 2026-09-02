@@ -103,6 +103,10 @@ def _expire_cancelled_configs() -> None:
         if news.is_cancel_expired(config, now_ts):
             db.delete_news_data(config["user_id"])
             logger.info("Reverted cancelled news task for user %s", config.get("user_id"))
+    for config in db.list_cancelled_selection_configs():
+        if selection.is_cancel_expired(config, now_ts):
+            db.delete_selection_data(config["user_id"])
+            logger.info("Reverted cancelled selection task for user %s", config.get("user_id"))
 
 
 def _warn_on_missing_config() -> None:

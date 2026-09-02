@@ -212,6 +212,7 @@ CREATE TABLE IF NOT EXISTS selection_configs (
     timezone TEXT NOT NULL DEFAULT 'UTC',
     language TEXT NOT NULL DEFAULT 'zh',
     enabled INTEGER NOT NULL DEFAULT 1,
+    cancelled_at REAL,
     last_run_at REAL,
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL,
@@ -431,6 +432,7 @@ def init() -> None:
             conn.executescript(SCHEMA)
             _migrate_news_config_language(conn)
             _migrate_news_config_cancelled_at(conn)
+            _migrate_selection_config_cancelled_at(conn)
             _migrate_news_summary_sources(conn)
             _migrate_image_template_style(conn)
             _migrate_evidence_explicit(conn)
@@ -460,6 +462,11 @@ def _migrate_news_config_language(conn: sqlite3.Connection) -> None:
 def _migrate_news_config_cancelled_at(conn: sqlite3.Connection) -> None:
     if "cancelled_at" not in _table_columns(conn, "news_configs"):
         conn.execute("ALTER TABLE news_configs ADD COLUMN cancelled_at REAL")
+
+
+def _migrate_selection_config_cancelled_at(conn: sqlite3.Connection) -> None:
+    if "cancelled_at" not in _table_columns(conn, "selection_configs"):
+        conn.execute("ALTER TABLE selection_configs ADD COLUMN cancelled_at REAL")
 
 
 def _migrate_kb_scope(conn: sqlite3.Connection) -> None:
@@ -1485,7 +1492,8 @@ def upsert_selection_config(
             "ON CONFLICT(user_id) DO UPDATE SET scope = excluded.scope, "
             "categories_json = excluded.categories_json, marketplace = excluded.marketplace, "
             "refresh_time = excluded.refresh_time, timezone = excluded.timezone, "
-            "language = excluded.language, enabled = 1, updated_at = excluded.updated_at",
+            "language = excluded.language, enabled = 1, cancelled_at = NULL, "
+            "updated_at = excluded.updated_at",
             (user_id, scope, payload, marketplace, refresh_time, timezone, language, now, now),
         )
     return get_selection_config(user_id)  # type: ignore[return-value]
@@ -1506,6 +1514,18 @@ def delete_selection_data(user_id: str) -> None:
         conn.execute("DELETE FROM selection_configs WHERE user_id = ?", (user_id,))
 
 
+def cancel_selection_config(user_id: str, ts: float) -> dict | None:
+    """Soft-cancel a selection task while retaining its latest report."""
+    _ensure()
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE selection_configs SET enabled = 0, cancelled_at = ?, updated_at = ? "
+            "WHERE user_id = ?",
+            (ts, ts, user_id),
+        )
+    return get_selection_config(user_id)
+
+
 def set_selection_config_last_run(user_id: str, ts: float) -> None:
     _ensure()
     with _connect() as conn:
@@ -1520,6 +1540,15 @@ def list_enabled_selection_configs() -> list[dict]:
     with _connect() as conn:
         rows = conn.execute(
             "SELECT * FROM selection_configs WHERE enabled = 1"
+        ).fetchall()
+    return [_selection_config_row(row) for row in rows]  # type: ignore[misc]
+
+
+def list_cancelled_selection_configs() -> list[dict]:
+    _ensure()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM selection_configs WHERE enabled = 0 AND cancelled_at IS NOT NULL"
         ).fetchall()
     return [_selection_config_row(row) for row in rows]  # type: ignore[misc]
 

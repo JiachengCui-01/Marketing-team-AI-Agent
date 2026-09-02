@@ -430,6 +430,17 @@ async def refresh_news(request: Request) -> dict:
 
 # ---------- automation: product-selection analysis ----------
 
+def _resolved_selection_config(user_id: str) -> dict | None:
+    config = db.get_selection_config(user_id)
+    if config is None:
+        return None
+    if selection.is_cancelled(config):
+        if selection.is_cancel_expired(config, time.time()):
+            db.delete_selection_data(user_id)
+            return None
+        config = {**config, "revert_at": selection.cancellation_revert_ts(config)}
+    return config
+
 def _validate_selection_payload(payload: dict) -> dict:
     scope = str(payload.get("scope") or "all").strip()
     if scope not in {"all", "categories"}:
@@ -466,7 +477,7 @@ def _validate_selection_payload(payload: dict) -> dict:
 def get_selection_config(request: Request) -> dict:
     user = auth.require_user(request)
     return {
-        "config": db.get_selection_config(user["id"]),
+        "config": _resolved_selection_config(user["id"]),
         # The UI offers these as the "watch everything" preset and the picker's
         # suggestions, so they come from the same domain vocabulary the agents use.
         "default_categories": list(selection.ALL_CATEGORY_KEYWORDS),
@@ -489,18 +500,32 @@ def remove_selection_config(request: Request) -> dict:
     return {"ok": True}
 
 
+@router.post("/selection/cancel")
+def cancel_selection(request: Request) -> dict:
+    user = auth.require_user(request)
+    if db.get_selection_config(user["id"]) is None:
+        raise HTTPException(400, "尚未设置选品分析任务。")
+    config = db.cancel_selection_config(user["id"], time.time())
+    if config is None:
+        raise HTTPException(404, "Selection task not found.")
+    return {"config": {**config, "revert_at": selection.cancellation_revert_ts(config)}}
+
+
 @router.get("/selection/report")
 def get_selection_report(request: Request) -> dict:
     user = auth.require_user(request)
+    _resolved_selection_config(user["id"])
     return {"report": db.get_latest_selection_report(user["id"])}
 
 
 @router.post("/selection/refresh")
 async def refresh_selection(request: Request) -> dict:
     user = auth.require_user(request)
-    config = db.get_selection_config(user["id"])
+    config = _resolved_selection_config(user["id"])
     if config is None:
         raise HTTPException(400, "请先设置选品分析任务。")
+    if selection.is_cancelled(config):
+        raise HTTPException(409, "选品分析任务已中断，请先设置新任务。")
     try:
         payload = await request.json()
     except Exception:  # noqa: BLE001 — tolerate a bodyless POST
