@@ -20,7 +20,9 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import re
+import threading
 import time
 from datetime import datetime
 from typing import Any
@@ -40,6 +42,17 @@ logger = logging.getLogger(__name__)
 MAX_CATEGORIES = 4
 MAX_VENDOR_CALLS = 16
 MAX_PAYLOAD_CHARS = 9_000
+
+# The model call runs *after* the metered vendor sweep, so a transient upstream blip
+# would otherwise throw away every credit the sweep just spent. Retry it, and cache
+# the sweep so a manual retry after a longer outage does not pay for the data twice.
+_MODEL_RETRY_STATUSES = (429, 500, 502, 503, 504)
+_MODEL_ATTEMPTS = 3
+_MODEL_RETRY_DELAY_SECONDS = 4.0
+SWEEP_CACHE_TTL_SECONDS = float(os.environ.get("MARKETING_AGENT_SELECTION_SWEEP_TTL", "900"))
+
+_SWEEP_LOCK = threading.Lock()
+_SWEEP_CACHE: dict[tuple, tuple[float, list[dict], list[str]]] = {}
 
 DEFAULT_MARKETPLACE = "US"
 # Marketplaces the vendor enumerates; the UI offers these and the API validates them.
@@ -447,6 +460,64 @@ def _as_dicts(value: Any) -> list[dict]:
 # Entry point
 # --------------------------------------------------------------------------
 
+def _sweep_key(user_id: str, marketplace: str, categories: list[str]) -> tuple:
+    return (user_id, marketplace, tuple(categories))
+
+
+def cached_sweep(key: tuple) -> tuple[list[dict], list[str]] | None:
+    with _SWEEP_LOCK:
+        entry = _SWEEP_CACHE.get(key)
+        if entry is None or time.time() - entry[0] > SWEEP_CACHE_TTL_SECONDS:
+            return None
+        return entry[1], entry[2]
+
+
+def store_sweep(key: tuple, observations: list[dict], tools_used: list[str]) -> None:
+    with _SWEEP_LOCK:
+        _SWEEP_CACHE[key] = (time.time(), observations, tools_used)
+
+
+def clear_sweep_cache() -> None:
+    with _SWEEP_LOCK:
+        _SWEEP_CACHE.clear()
+
+
+def _normalize(client, observations: list[dict], categories: list[str],
+               marketplace: str, language: str):
+    """Call the model, retrying a transient upstream failure.
+
+    The vendor sweep has already been paid for by the time we get here, so a 503
+    from the model must not be the thing that discards it.
+    """
+    last: Exception | None = None
+    for attempt in range(_MODEL_ATTEMPTS):
+        try:
+            return client.messages.create(
+                model=config.MODEL_ID,
+                max_tokens=8000,
+                system=_SYSTEM,
+                tools=[_TOOL],
+                tool_choice={"type": "tool", "name": _TOOL_NAME},
+                messages=[{
+                    "role": "user",
+                    "content": _user_content(observations, categories, marketplace, language),
+                }],
+            )
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+            status = getattr(exc, "status_code", None)
+            if status not in _MODEL_RETRY_STATUSES:
+                raise
+            if attempt + 1 < _MODEL_ATTEMPTS:
+                logger.warning(
+                    "selection: model returned %s, retrying (%d/%d)",
+                    status, attempt + 1, _MODEL_ATTEMPTS,
+                )
+                time.sleep(_MODEL_RETRY_DELAY_SECONDS)
+    assert last is not None
+    raise last
+
+
 def generate_report(config_row: dict, client=None) -> dict:
     """Generate and persist one product-selection report. Returns the stored record."""
     if not sellersprite.is_configured():
@@ -462,12 +533,23 @@ def generate_report(config_row: dict, client=None) -> dict:
     language = str(config_row.get("language") or "zh")
     categories = resolve_categories(config_row)
 
-    try:
-        observations, tools_used = collect_vendor_data(categories, marketplace)
-    except McpUnavailable as exc:
-        raise SelectionGenerationError(
-            f"卖家精灵接口暂时不可用：{exc}。上一份选品分析不会被覆盖。"
-        ) from exc
+    # Reuse a recent sweep when there is one: the usual reason a run reaches here
+    # twice is the user retrying after a model outage, and the market data has not
+    # moved in those minutes — but the credits would be spent again.
+    key = _sweep_key(str(config_row.get("user_id") or ""), marketplace, categories)
+    reused = cached_sweep(key)
+    if reused is not None:
+        observations, tools_used = reused
+        logger.info("selection: reusing cached vendor sweep for %s", key[0])
+    else:
+        try:
+            observations, tools_used = collect_vendor_data(categories, marketplace)
+        except McpUnavailable as exc:
+            raise SelectionGenerationError(
+                f"卖家精灵接口暂时不可用：{exc}。上一份选品分析不会被覆盖。"
+            ) from exc
+        if tools_used:
+            store_sweep(key, observations, tools_used)
 
     if not tools_used:
         detail = "; ".join(
@@ -478,18 +560,17 @@ def generate_report(config_row: dict, client=None) -> dict:
         )
 
     try:
-        response = client.messages.create(
-            model=config.MODEL_ID,
-            max_tokens=8000,
-            system=_SYSTEM,
-            tools=[_TOOL],
-            tool_choice={"type": "tool", "name": _TOOL_NAME},
-            messages=[{
-                "role": "user",
-                "content": _user_content(observations, categories, marketplace, language),
-            }],
-        )
+        response = _normalize(client, observations, categories, marketplace, language)
     except Exception as exc:  # noqa: BLE001
+        status = getattr(exc, "status_code", None)
+        if status in _MODEL_RETRY_STATUSES:
+            # Name the culprit: "503" on its own reads as if the market-data vendor
+            # were down, when the data is in fact already collected and cached.
+            raise SelectionGenerationError(
+                f"模型服务（DeepSeek）暂时过载：{exc}。市场数据已从卖家精灵取到并缓存 "
+                f"{int(SWEEP_CACHE_TTL_SECONDS / 60)} 分钟，稍后点「立即刷新」会直接复用，"
+                "不会重复消耗接口额度。"
+            ) from exc
         raise SelectionGenerationError(f"选品分析生成失败：{exc}") from exc
 
     dashboard = _parse(response)

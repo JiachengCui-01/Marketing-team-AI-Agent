@@ -72,6 +72,7 @@ def run_agent(
     client_tool_handlers: dict[str, Callable[[dict], str]] | None = None,
     on_event: Callable[[str, Any], None] | None = None,
     extra_headers: dict[str, str] | None = None,
+    max_rounds: int | None = None,
 ) -> str:
     """Run a single agent turn to completion.
 
@@ -89,7 +90,7 @@ def run_agent(
     tools = tools or []
     handlers = client_tool_handlers or {}
 
-    for _ in range(MAX_TOOL_ROUNDS):
+    for _ in range(max_rounds or MAX_TOOL_ROUNDS):
         response = client.messages.create(
             model=MODEL_ID,
             max_tokens=max_tokens,

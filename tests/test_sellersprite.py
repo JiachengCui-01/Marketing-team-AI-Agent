@@ -288,11 +288,29 @@ class SellerSpriteToolTests(unittest.TestCase):
         vendor = _FakeVendor(_TOOLS)
         _, handlers, _ = self._build(vendor, max_calls=2)
         handler = handlers["sellersprite_product_research"]
-        handler({})
-        handler({})
-        blocked = handler({})
+        handler({"category": "a"})
+        handler({"category": "b"})
+        blocked = handler({"category": "c"})
         # Credit-metered vendor: a chatty model must not be able to drain it.
         self.assertIn("budget for this request is used up", blocked)
+        self.assertEqual(len(vendor.calls), 2)
+
+    def test_an_identical_repeat_call_is_not_paid_for_twice(self) -> None:
+        vendor = _FakeVendor(_TOOLS, payload='{"price": 899}')
+        _, handlers, _ = self._build(vendor, max_calls=2)
+        handler = handlers["sellersprite_product_research"]
+        first = handler({"category": "sofas"})
+        second = handler({"category": "sofas"})
+        # Models re-ask the same question across rounds; every repeat would be a
+        # wasted credit and a wasted round-trip. The payload is replayed from cache
+        # and the model is told not to ask a third time.
+        self.assertIn("BEGIN SELLERSPRITE DATA", first)
+        self.assertIn("BEGIN SELLERSPRITE DATA", second)
+        self.assertIn("Repeat call", second)
+        self.assertEqual(len(vendor.calls), 1)
+        # A cache hit must not consume budget either — the second distinct call
+        # still goes through on a max_calls=2 budget.
+        self.assertNotIn("budget for this request is used up", handler({"category": "desks"}))
         self.assertEqual(len(vendor.calls), 2)
 
     def test_vendor_rejection_comes_back_as_text_not_an_exception(self) -> None:
@@ -327,6 +345,56 @@ class SellerSpriteToolTests(unittest.TestCase):
         # SellerSprite exposes 45 tools. A cap below that silently drops tools, and a
         # question whose tool was dropped becomes unanswerable rather than slow.
         self.assertGreaterEqual(sellersprite.MAX_TOOLS, 45)
+
+    def test_schema_pruning_keeps_scope_params_and_drops_the_filter_tail(self) -> None:
+        # The vendor declares its parameters alphabetically with 50-60 min*/max* filters,
+        # so a plain whitelist let them crowd out nodeIdPath — the one parameter that
+        # keeps a furniture query from coming back with toilet paper.
+        request_props = {
+            "marketplace": {"type": "string", "description": "站点"},
+            "matchType": {"type": "integer"},
+            "nodeIdPath": {"type": "string", "description": "类目节点"},
+            "nodeIdPathEqual": {"type": "string"},
+            "keyword": {"type": "string"},
+        }
+        for i in range(40):  # the long tail of narrowing filters
+            request_props[f"maxThing{i}"] = {"type": "number"}
+            request_props[f"minThing{i}"] = {"type": "number"}
+        tool = McpTool(
+            name="product_research",
+            description="d",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "request": {
+                        "type": "object",
+                        "properties": request_props,
+                        "required": ["marketplace"],
+                    }
+                },
+                "required": ["request"],
+            },
+        )
+        tools, _, _ = self._build(_FakeVendor([tool]))
+        params = tools[0]["input_schema"]["properties"]["request"]["properties"]
+        for essential in ("marketplace", "nodeIdPath", "nodeIdPathEqual", "keyword"):
+            self.assertIn(essential, params)
+        self.assertLessEqual(len(params), sellersprite.MAX_PARAMS_PER_TOOL)
+        self.assertFalse([p for p in params if p.startswith(("maxThing", "minThing"))])
+
+    def test_param_descriptions_are_trimmed(self) -> None:
+        tool = McpTool(
+            name="t",
+            description="d",
+            input_schema={
+                "type": "object",
+                "properties": {"marketplace": {"type": "string", "description": "很长的说明。" * 60}},
+                "required": ["marketplace"],
+            },
+        )
+        tools, _, _ = self._build(_FakeVendor([tool]))
+        described = tools[0]["input_schema"]["properties"]["marketplace"]["description"]
+        self.assertLessEqual(len(described), sellersprite.MAX_PARAM_DESCRIPTION_CHARS + 2)
 
     def test_long_vendor_descriptions_are_trimmed(self) -> None:
         # Vendor descriptions run to several paragraphs; all of them, on every call,
@@ -389,7 +457,7 @@ class ResearchAgentSourceOrderTests(unittest.TestCase):
     def tearDown(self) -> None:
         sellersprite.reset_for_tests()
 
-    def test_vendor_tools_are_offered_before_the_fallback_pair(self) -> None:
+    def test_the_slow_browser_is_off_the_menu_while_the_vendor_is_live(self) -> None:
         captured: dict = {}
 
         def fake_run_agent(**kwargs):
@@ -409,12 +477,108 @@ class ResearchAgentSourceOrderTests(unittest.TestCase):
                 {"category": "sofas"}
             )
 
-        # Primary first, fallback last — the model reads the list in order.
-        self.assertTrue(names[0].startswith("sellersprite_"))
-        self.assertEqual(names[-2:], ["web_search", "browse_product_page"])
+        # Telling the model to "prefer SellerSprite" still let it open Playwright, and a
+        # page load (cold start, 45s timeout, scrolls, review clicks, up to four pages)
+        # turned a 20-second answer into a multi-minute stall. So the gate is structural:
+        # the browser is not offered at all while the vendor is live.
+        self.assertNotIn("browse_product_page", names)
+        self.assertNotIn("browse_product_page", captured["client_tool_handlers"])
+        self.assertTrue(any(n.startswith("sellersprite_") for n in names), names)
+        # Rounds are capped tighter than the global limit so it cannot keep exploring.
+        self.assertEqual(captured["max_rounds"], research_agent.RESEARCH_MAX_ROUNDS)
         self.assertIn("BEGIN SELLERSPRITE DATA", vendor_output)
         # No tool ran during the mocked turn, so nothing is claimed as a source.
         self.assertNotIn("Data Sources", result)
+
+    def test_web_search_is_unlocked_only_for_what_the_vendor_cannot_hold(self) -> None:
+        captured: dict = {}
+
+        def fake_run_agent(**kwargs):
+            captured.update(kwargs)
+            return "## Summary\nFinding."
+
+        vendor = _FakeVendor(_TOOLS)
+        with mock.patch.dict("os.environ", {"SELLERSPRITE_SECRET_KEY": "k"}, clear=False), \
+                mock.patch.object(sellersprite, "_client", return_value=vendor), \
+                mock.patch.object(web_search, "is_available", return_value=True), \
+                mock.patch.object(research_agent, "run_agent", side_effect=fake_run_agent):
+            research_agent.run(
+                mock.Mock(),
+                task="美国家具进口关税最近有什么变化",
+                topics=["tariffs"],
+                response_language="zh",
+            )
+            allowed = captured["client_tool_handlers"]["web_search"]({"query": "furniture tariff"})
+        # Tariffs are not in the vendor's dataset, so search runs — but the slow live
+        # browser is still off the menu.
+        self.assertNotIn("browse_product_page", captured["client_tool_handlers"])
+        self.assertNotIn("not needed for this task", allowed)
+
+    def test_web_search_is_refused_while_the_vendor_is_answering(self) -> None:
+        captured: dict = {}
+
+        def fake_run_agent(**kwargs):
+            captured.update(kwargs)
+            return "## Summary\nFinding."
+
+        vendor = _FakeVendor(_TOOLS, payload='{"price": 899}')
+        with mock.patch.dict("os.environ", {"SELLERSPRITE_SECRET_KEY": "k"}, clear=False), \
+                mock.patch.object(sellersprite, "_client", return_value=vendor), \
+                mock.patch.object(web_search, "is_available", return_value=True), \
+                mock.patch.object(web_search, "search") as search, \
+                mock.patch.object(research_agent, "run_agent", side_effect=fake_run_agent):
+            research_agent.run(
+                mock.Mock(), task="Compare sofas on Amazon", topics=["sofas"],
+                response_language="en",
+            )
+            refused = captured["client_tool_handlers"]["web_search"]({"query": "sofas"})
+        # The vendor is live and this is an Amazon question, so the slow path stays shut.
+        self.assertIn("not needed for this task", refused)
+        search.assert_not_called()
+
+    def test_a_stalled_vendor_reopens_web_search_as_a_late_safety_net(self) -> None:
+        captured: dict = {}
+
+        def fake_run_agent(**kwargs):
+            captured.update(kwargs)
+            return "## Summary\nFinding."
+
+        # Every vendor call comes back empty, so the vendor path stalls.
+        vendor = _FakeVendor(_TOOLS, payload="   ")
+        results = [web_search.SearchResult(title="T", url="https://example.com/a", snippet="s")]
+        with mock.patch.dict("os.environ", {"SELLERSPRITE_SECRET_KEY": "k"}, clear=False), \
+                mock.patch.object(sellersprite, "_client", return_value=vendor), \
+                mock.patch.object(web_search, "is_available", return_value=True), \
+                mock.patch.object(web_search, "search", return_value=results), \
+                mock.patch.object(research_agent, "run_agent", side_effect=fake_run_agent):
+            research_agent.run(
+                mock.Mock(), task="Compare sofas on Amazon", topics=["sofas"],
+                response_language="en",
+            )
+            handlers = captured["client_tool_handlers"]
+            vendor_tool = handlers["sellersprite_product_research"]
+            for i in range(sellersprite.MAX_CONSECUTIVE_MISSES):
+                vendor_tool({"attempt": i})
+            recovered = handlers["web_search"]({"query": "sofas"})
+        # Once the vendor stops producing, the user still deserves an answer.
+        self.assertIn("https://example.com/a", recovered)
+
+    def test_the_browser_returns_only_when_the_vendor_is_down(self) -> None:
+        captured: dict = {}
+
+        def fake_run_agent(**kwargs):
+            captured.update(kwargs)
+            return "## Summary\nFinding."
+
+        with mock.patch.dict("os.environ", {"SELLERSPRITE_SECRET_KEY": ""}, clear=False), \
+                mock.patch.object(web_search, "is_available", return_value=True), \
+                mock.patch.object(research_agent, "run_agent", side_effect=fake_run_agent):
+            research_agent.run(
+                mock.Mock(), task="Compare sofas", topics=["sofas"], response_language="en"
+            )
+        # With no vendor, the fallback path is all there is — browser included.
+        self.assertIn("web_search", captured["client_tool_handlers"])
+        self.assertIn("browse_product_page", captured["client_tool_handlers"])
 
     def test_footer_names_the_source_that_actually_answered(self) -> None:
         vendor = _FakeVendor(_TOOLS, payload='{"price": 899}')

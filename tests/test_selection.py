@@ -410,5 +410,98 @@ class SelectionRouteTests(unittest.TestCase):
             self.assertEqual(response.status_code, 404, f"{method} {path}")
 
 
+class ModelOutageTests(unittest.TestCase):
+    """A 503 from the model must not discard the metered vendor sweep."""
+
+    def setUp(self) -> None:
+        db.reset_for_tests()
+        selection.clear_sweep_cache()
+        self.user = db.create_user(
+            account="outage@example.com", password_hash="hash", username="O",
+            real_name="Test User", id_card="11010519491231002X",
+        )
+        self.config = db.upsert_selection_config(
+            self.user["id"], scope="all", refresh_time="09:00", timezone="UTC", language="zh"
+        )
+
+    def tearDown(self) -> None:
+        selection.clear_sweep_cache()
+        db.reset_for_tests()
+
+    @staticmethod
+    def _overloaded(status=503):
+        exc = RuntimeError("503 Server Overloaded")
+        exc.status_code = status
+        return exc
+
+    def test_transient_status_is_retried(self) -> None:
+        client = mock.Mock()
+        client.messages.create.side_effect = [
+            self._overloaded(), self._overloaded(),
+            _tool_use_response(selection._TOOL_NAME,
+                               {"kpis": [], "recommendations": [], "summary": "ok"}),
+        ]
+        with mock.patch.object(selection.sellersprite, "is_configured", return_value=True),                 mock.patch.object(selection.sellersprite, "call_tool", return_value=_NODE_REPLY),                 mock.patch.object(selection.time, "sleep"):
+            record = selection.generate_report(self.config, client)
+        self.assertEqual(client.messages.create.call_count, 3)
+        self.assertIn("ok", record["summary"])
+
+    def test_a_non_transient_error_is_not_retried(self) -> None:
+        exc = RuntimeError("401 bad key")
+        exc.status_code = 401
+        client = mock.Mock()
+        client.messages.create.side_effect = exc
+        with mock.patch.object(selection.sellersprite, "is_configured", return_value=True),                 mock.patch.object(selection.sellersprite, "call_tool", return_value=_NODE_REPLY):
+            with self.assertRaises(selection.SelectionGenerationError):
+                selection.generate_report(self.config, client)
+        self.assertEqual(client.messages.create.call_count, 1)
+
+    def test_persistent_overload_names_the_model_not_the_vendor(self) -> None:
+        client = mock.Mock()
+        client.messages.create.side_effect = self._overloaded()
+        with mock.patch.object(selection.sellersprite, "is_configured", return_value=True),                 mock.patch.object(selection.sellersprite, "call_tool", return_value=_NODE_REPLY),                 mock.patch.object(selection.time, "sleep"):
+            with self.assertRaises(selection.SelectionGenerationError) as ctx:
+                selection.generate_report(self.config, client)
+        message = str(ctx.exception)
+        # "503" alone reads as if the data vendor were down.
+        self.assertIn("DeepSeek", message)
+        self.assertIn("缓存", message)
+
+    def test_a_retry_after_an_outage_reuses_the_sweep_instead_of_paying_again(self) -> None:
+        client = mock.Mock()
+        client.messages.create.side_effect = self._overloaded()
+        with mock.patch.object(selection.sellersprite, "is_configured", return_value=True),                 mock.patch.object(
+                    selection.sellersprite, "call_tool", return_value=_NODE_REPLY
+                ) as call,                 mock.patch.object(selection.time, "sleep"):
+            with self.assertRaises(selection.SelectionGenerationError):
+                selection.generate_report(self.config, client)
+            first_calls = call.call_count
+            self.assertGreater(first_calls, 0)
+
+            # Second attempt: the model recovers, and the vendor is not touched again.
+            client.messages.create.side_effect = None
+            client.messages.create.return_value = _tool_use_response(
+                selection._TOOL_NAME, {"kpis": [], "recommendations": [], "summary": "ok"}
+            )
+            record = selection.generate_report(self.config, client)
+
+        self.assertEqual(call.call_count, first_calls, "vendor was charged twice")
+        self.assertIn("ok", record["summary"])
+
+    def test_an_expired_cache_re_runs_the_sweep(self) -> None:
+        client = mock.Mock()
+        client.messages.create.return_value = _tool_use_response(
+            selection._TOOL_NAME, {"kpis": [], "recommendations": [], "summary": "ok"}
+        )
+        with mock.patch.object(selection.sellersprite, "is_configured", return_value=True),                 mock.patch.object(
+                    selection.sellersprite, "call_tool", return_value=_NODE_REPLY
+                ) as call:
+            selection.generate_report(self.config, client)
+            first = call.call_count
+            with mock.patch.object(selection, "SWEEP_CACHE_TTL_SECONDS", -1):
+                selection.generate_report(self.config, client)
+        self.assertGreater(call.call_count, first)
+
+
 if __name__ == "__main__":
     unittest.main()

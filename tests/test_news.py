@@ -45,12 +45,17 @@ class NewsTests(unittest.TestCase):
     def test_research_prompt_ranks_sellersprite_as_the_primary_source(self) -> None:
         system = research_agent.SYSTEM
         self.assertIn("SellerSprite (卖家精灵) is the primary source", system)
-        self.assertIn("web_search is the fallback", system)
-        self.assertIn("browse_product_page is the fallback", system)
+        self.assertIn("web_search, when it is in your tool list", system)
+        self.assertIn("browse_product_page is a true fallback", system)
+        # Latency and credits are both spent per call, so the prompt must say stop.
+        self.assertIn("Stop calling the moment you can answer", system)
+        # Almost all of the wait is the model writing, so the report is length-capped.
+        self.assertIn("never exceed 800", system)
+        self.assertIn("Batch.", system)
         # Estimated vendor figures must never be presented as measurements.
         self.assertIn("MODELED ESTIMATES", system)
         # The primary source must sort before the fallbacks in the hierarchy.
-        self.assertLess(system.find("primary source"), system.find("is the fallback"))
+        self.assertLess(system.find("primary source"), system.find("true fallback"))
 
     def test_research_unavailable_without_a_search_provider(self) -> None:
         with mock.patch.object(web_search, "is_available", return_value=False):
