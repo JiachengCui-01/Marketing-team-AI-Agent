@@ -66,7 +66,7 @@ export function AutomationPanel({ onBack }: { onBack: () => void }) {
       </header>
 
       {/* Keyed so switching tabs replays the same enter animation both ways. */}
-      <div key={tab} className="flex min-h-0 flex-1 animate-bounce-in flex-col">
+      <div key={tab} className="flex min-h-0 flex-1 animate-automation-switch flex-col">
         {tab === "news" ? <NewsPanel /> : <SelectionPanel />}
       </div>
     </div>

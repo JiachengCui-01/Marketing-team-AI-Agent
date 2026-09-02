@@ -227,6 +227,29 @@ body {
   }
 }
 
+/* Automation tabs should feel like one workspace flowing into another, not a
+   card bouncing toward the user.  A tiny overshoot keeps the change perceptible
+   while avoiding the 0.95 -> 1.05 scale swing of the shared bounce animation. */
+@keyframes automation-switch-in {
+  0% {
+    opacity: 0.68;
+    transform: translateY(5px) scale(0.992);
+  }
+  68% {
+    opacity: 1;
+    transform: translateY(-1px) scale(1.002);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-automation-switch {
+  animation: automation-switch-in 300ms cubic-bezier(.32,.72,0,1);
+  transform-origin: 50% 18%;
+}
+
 /* Keyboard focus ring for everything that is NOT a form field.
    `outline` follows border-radius natively, so unlike the previous box-shadow
    version this no longer forces `border-radius: 8px` and squares off
@@ -1437,7 +1460,8 @@ select.field:focus {
   .animate-pulse,
   .animate-fade-in,
   .animate-scale-in,
-  .animate-bounce-in {
+  .animate-bounce-in,
+  .animate-automation-switch {
     animation: none;
   }
 

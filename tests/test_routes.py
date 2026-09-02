@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import os
+import io
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+
+import openpyxl
 
 from fastapi.testclient import TestClient
 
@@ -176,6 +179,43 @@ class RouteTests(unittest.TestCase):
     def test_business_routes_require_auth(self) -> None:
         response = self.client.get("/api/sessions")
         self.assertEqual(response.status_code, 401)
+
+    def test_excel_upload_can_be_ingested_into_personal_knowledge_base(self) -> None:
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = "退货流程"
+        sheet.append(["环节", "时限", "负责人"])
+        sheet.append(["登记退货", "24 小时", "客服"])
+        sheet.append(["质检", "48 小时", "仓库"])
+        payload = io.BytesIO()
+        workbook.save(payload)
+
+        uploaded = self.client.post(
+            "/api/upload",
+            headers=self.headers,
+            files={
+                "file": (
+                    "退货流程.xlsx",
+                    payload.getvalue(),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+        self.assertEqual(uploaded.status_code, 200, uploaded.text)
+        created = self.client.post(
+            "/api/kb/documents",
+            headers=self.headers,
+            json={"upload_id": uploaded.json()["file_id"]},
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+
+        found = self.client.post(
+            "/api/kb/search", headers=self.headers, json={"q": "质检 仓库 48 小时"}
+        )
+        self.assertEqual(found.status_code, 200, found.text)
+        results = found.json()["results"]
+        self.assertTrue(results)
+        self.assertIn("工作表/Sheet: 退货流程", results[0]["text"])
 
     def test_marketing_memory_can_be_managed(self) -> None:
         empty = self.client.get("/api/memory/marketing", headers=self.headers)

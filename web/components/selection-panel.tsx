@@ -203,7 +203,7 @@ function Dashboard({ report }: { report: SelectionReport }) {
     report.dashboard ?? {};
 
   return (
-    <div className="animate-bounce-in">
+    <div>
       {kpis.length ? (
         <section className="bi-section">
           <h3 className="bi-section-title">

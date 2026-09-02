@@ -1751,7 +1751,7 @@ async def create_kb_doc(request: Request, payload: dict = Body(...)) -> dict:
 
         info = extract(Path(rec["path"]))
         if info["kind"] != "text":
-            raise HTTPException(400, "仅支持文本类文档（pdf/docx/txt/md/csv）。")
+            raise HTTPException(400, "仅支持文档与表格文件（pdf/docx/txt/md/csv/xlsx/xls）。")
         text = info["text"]
         title = title or rec["original_name"]
         source_upload_id = upload_id
@@ -1760,7 +1760,13 @@ async def create_kb_doc(request: Request, payload: dict = Body(...)) -> dict:
         raise HTTPException(400, "文档内容为空。")
     if not title:
         title = "未命名文档"
-    chunks = _chunk_text(text)
+    # Excel extraction supplies structure-aware chunks: sheet + contiguous data
+    # region, with diagrams kept separate. Other document types retain the
+    # existing bounded text chunks.
+    extracted_chunks = info.get("chunks") if upload_id else None
+    chunks = [str(chunk).strip() for chunk in (extracted_chunks or []) if str(chunk).strip()]
+    if not chunks:
+        chunks = _chunk_text(text)
     # Embed chunks for semantic search (None when embeddings are unavailable → lexical only).
     embeddings_vecs = await asyncio.to_thread(kb_retrieval.embed_chunks, chunks)
     # Uploads here go into the user's PERSONAL knowledge base (private to them). The

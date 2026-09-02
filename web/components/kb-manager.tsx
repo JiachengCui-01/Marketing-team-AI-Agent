@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Upload, Trash2, Loader2, FileText } from "lucide-react";
+import { Upload, Trash2, Loader2, FileText, FileSpreadsheet } from "lucide-react";
 import {
   createKbDocument,
   deleteKbDocument,
@@ -73,8 +73,8 @@ export function KbManager() {
       <div className="flex items-center justify-between">
         <p className="text-xs text-fg-muted max-w-md">
           {zh
-            ? "这里维护的是你个人账号的知识库，仅你自己的 AI 工作台会调用，不影响企业共享知识库。"
-            : "Your personal knowledge base — only your own AI workspace uses it. It does not affect the shared enterprise KB."}
+            ? "这里维护个人知识库，支持 PDF、Word、文本及 Excel；Excel 会按工作表、数据区域和流程图结构切分。"
+            : "Your personal KB supports PDF, Word, text, and Excel. Workbooks are chunked by sheet, data region, and flow-diagram structure."}
         </p>
         <button
           onClick={() => fileRef.current?.click()}
@@ -82,12 +82,12 @@ export function KbManager() {
           className="btn-accent h-8 px-3 text-sm shrink-0 disabled:opacity-50"
         >
           {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-          {zh ? "上传文档" : "Upload"}
+          {zh ? "上传文档 / Excel" : "Upload document / Excel"}
         </button>
         <input
           ref={fileRef}
           type="file"
-          accept=".pdf,.docx,.txt,.md,.csv"
+          accept=".pdf,.docx,.txt,.md,.csv,.xlsx,.xls"
           className="hidden"
           onChange={(e) => {
             const f = e.target.files?.[0];
@@ -107,8 +107,8 @@ export function KbManager() {
         ) : docs.length === 0 ? (
           <p className="text-sm text-fg-subtle text-center py-8">
             {zh
-              ? "还没有文档。上传 PDF / Word / 文本后，AI 工作台即可基于这些内容回答。"
-              : "No documents yet. Upload PDF / Word / text and the AI workspace can answer from them."}
+              ? "还没有文档。可上传 PDF、Word、文本或 Excel；表格区域和流程图会按结构切分后用于问答。"
+              : "No documents yet. Upload PDF, Word, text, or Excel; table regions and flow diagrams are chunked by structure for retrieval."}
           </p>
         ) : (
           docs.map((d) => (
@@ -116,7 +116,11 @@ export function KbManager() {
               key={d.id}
               className="border border-border rounded-xl p-3 bg-bg-subtle flex items-center gap-3"
             >
-              <FileText size={16} className="text-fg-muted shrink-0" />
+              {d.title.toLowerCase().match(/\.xlsx?$/) ? (
+                <FileSpreadsheet size={16} className="shrink-0 text-feature-analytics" />
+              ) : (
+                <FileText size={16} className="text-fg-muted shrink-0" />
+              )}
               <div className="min-w-0 flex-1">
                 <div className="text-sm text-fg truncate">{d.title}</div>
                 <div className="text-[11px] text-fg-subtle">
