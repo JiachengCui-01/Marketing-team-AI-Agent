@@ -357,7 +357,7 @@ class SelectionRouteTests(unittest.TestCase):
         )
         self.assertEqual(bad_market.status_code, 400)
 
-    def test_config_round_trips_and_can_be_cleared(self) -> None:
+    def test_legacy_delete_soft_cancels_without_erasing_reports(self) -> None:
         saved = self.client.put(
             "/api/selection/config",
             headers=self.headers,
@@ -375,11 +375,18 @@ class SelectionRouteTests(unittest.TestCase):
         self.assertEqual(config["categories"], ["sofas", "desks"])
         self.assertEqual(config["refresh_time"], "07:30")
 
-        self.assertEqual(
-            self.client.delete("/api/selection/config", headers=self.headers).status_code, 200
+        user = self.client.get("/api/auth/me", headers=self.headers).json()["user"]
+        db.add_selection_report(
+            user["id"], "US", "categories", ["sofas", "desks"],
+            {}, "legacy retained report", [], 1.0,
         )
+
+        deleted = self.client.delete("/api/selection/config", headers=self.headers)
+        self.assertEqual(deleted.status_code, 200)
         after = self.client.get("/api/selection/config", headers=self.headers).json()
-        self.assertIsNone(after["config"])
+        self.assertFalse(after["config"]["enabled"])
+        report = self.client.get("/api/selection/report", headers=self.headers).json()["report"]
+        self.assertEqual(report["summary"], "legacy retained report")
 
     def test_cancel_keeps_report_and_saving_reactivates_task(self) -> None:
         saved = self.client.put(

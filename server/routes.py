@@ -495,9 +495,19 @@ def save_selection_config(request: Request, payload: dict = Body(...)) -> dict:
 
 @router.delete("/selection/config")
 def remove_selection_config(request: Request) -> dict:
+    """Backward-compatible soft cancellation for older cached web clients.
+
+    Older bundles called DELETE when the user clicked "关闭任务". Keeping this
+    endpoint non-destructive prevents those clients from erasing saved reports.
+    """
     user = auth.require_user(request)
-    db.delete_selection_data(user["id"])
-    return {"ok": True}
+    config = db.cancel_selection_config(user["id"], time.time())
+    if config is None:
+        return {"ok": True, "config": None}
+    return {
+        "ok": True,
+        "config": {**config, "revert_at": selection.cancellation_revert_ts(config)},
+    }
 
 
 @router.post("/selection/cancel")
