@@ -1,22 +1,49 @@
-# Launch Checklist
+# 新品业务执行计划模板
 
-Inputs to confirm before building the plan:
+## A. 决策摘要
 
-- Product name, category, and one-sentence description
-- Price band and target margin after landed cost
-- Confirmed specs: dimensions, materials, weight capacity, carton count, assembly time
-- Target buyer situation and the room the piece is for
-- Inbound timing: sample sign-off date, production lead time, container ETA, warehouse ready date
-- Channels live at launch, and which are gated behind inventory
-- Budget and resource constraints
+决策：进入验证 / 暂缓 / 数据不足。列出支持决策的 E 编号、适用范围、尚不能证明的事项；不要给超出证据的“必爆”“蓝海”标签。
 
-Launch objective: cold-start orders, review accumulation, volume scaling, margin
-improvement, or category entry.
+任务约束单列：用户指定的 SKU、人员/预算/时间；没有给的标“未提供”。市场证据单列：卖家精灵站点、类目、实际数据月份、采集时间、样本数、筛选条件。两者不能混成供应商事实。
 
-Proof assets needed: dimensioned drawing, material and finish samples, white-background
-hero shots, room-set photography, scale reference image, assembly instructions, packaging
-and carton photos, early reviews and customer UGC.
+## B. 证据与定位
 
-Required deliverables: marketplace listing (title, bullets, A+ content, backend keywords),
-own-store product page, room-set social content, Pinterest pins, launch email, ad copy per
-platform, and a spec sheet for internal and partner use.
+观察事实｜采集值/估算值/推导｜E 编号｜业务解释（推断）｜定位方向｜需要验证的产品能力。
+
+- 需求：供应商原始搜索量或估算销量；说明时间窗和单位，不跨词简单加总，不把类目销量当作我方可获得销量。
+- 竞争：可比 ASIN、价格、评分、评论、实际返回的竞争字段；品牌、父体、子体分别去重，关系未知则声明。
+- 趋势：仅比较完整、等长、同口径周期；没有历史数据就写“尚不能判断季节性”，不能写家具行业通常的旺季来补充。
+- 可比价格仅用于提出待验证价格方向。没有我方成本与经营数据，本流程不计算盈利售价或回本预算。
+
+推导必须展示输入、有效样本数及公式；价格中位数注明样本，增长率使用 (本期/可比上期 - 1)×100%，上期为零不计算百分比。样本估算销量占比不得称整个类目市场份额。原始缺失值不能当 0，异常值处理需说明理由。
+
+## C. 关键词与内容映射
+
+关键词｜站点/月份｜原始指标及单位｜意图分类（推断）｜相关性依据｜建议用途｜待确认产品属性｜E 编号。
+
+按功能/材质/尺寸/场景等实际意图组织，具体分类取决于返回词。保留去重规则和品牌词处理理由，不把关键词排名当自然流量，不把搜索量当点击或订单。CPC 若有，标注供应商建议/估算口径，不能当我方实际点击成本。
+
+## D. 阶段执行与决策门槛
+
+阶段｜任务｜输入及 E 编号｜负责人角色｜交付物｜前置依赖｜相对完成节点｜验收条件｜继续/暂停条件。
+
+1. 证据准备：确认站点、样本、周期、关键字段与缺口。进入下一阶段的条件是用于定位的证据可比且可追溯；不规定虚构的销量或搜索量阈值。
+2. 定位与素材：形成定位备选、关键词映射、Listing 草稿和图片拍摄需求。产品参数必须有证据才能写进最终文案；仅用户提供的参数应标“用户提供，尚未经本数据源验证”，未经确认不对外发布。
+3. 上架验证：列出运营需要确认的可售状态、素材审核、库存和投放试验设计。它们是执行依赖，不是本次已验证事实。样本量、预算、时间、通过线由负责人预先设定；没有依据则保留待定，不编造常用行业标准。
+4. 复盘决策：列出需另行取得的我方曝光、点击、订单、广告花费、利润、库存和退货实绩。仅凭卖家精灵竞品估算不得批准扩大投放或补货。本 skill 可复核市场证据变化，并明确哪些经营判断暂停。
+
+不把目标当预测。没有用户日期时使用 T0（范围与依赖确认）后的相对节点，不承诺任意 7/14/30 天结果。负责人用产品/运营/内容/供应链等角色，具体姓名未提供则待定。
+
+## E. 内容任务单
+
+任务｜页面/资产类型｜对应关键词与证据｜要回答的问题｜所需产品证据｜交付格式｜负责人角色｜验收标准。
+
+优先与 Amazon 计划相关的标题、五点描述、主图/尺寸图需求和 FAQ；不强制输出与数据无关的全渠道文案。图片拍摄需求是建议，不能冒充对竞品图片的实际审查。规格、认证、材质、组装、运输和保修没有证据时保留待确认项。
+
+## F. 风险、缺口与证据台账
+
+风险/缺口｜受影响结论｜当前能否决策｜下一步需要的字段/能力｜负责人角色。
+
+E 编号｜工具原名｜ASIN/关键词/类目｜站点和筛选条件｜字段/原值/单位｜所属周期｜工具报告的取数时间｜采集/估算/推导/口径未知｜分页/截断/覆盖限制。
+
+正文逐项引用 E 编号。供应商未给数据更新时间时不要用本次调用时间冒充；不创建虚构来源 URL。多来源要求超出本 skill 范围时明确另开分析需求，不能暗中用网页补数。

@@ -1,39 +1,28 @@
+---
+name: competitive-positioning-brief
+description: 基于卖家精灵数据生成 Amazon 家具竞品定位决策简报，支持选品、价格带选择与 Listing 改版，交付可追溯分析和 PDF。
+---
+
 # Competitive Positioning Brief
 
-Use this skill when the user needs to compare competing furniture products or listings,
-build a differentiation narrative, or write a positioning memo for a category or SKU.
+把卖家精灵证据转为产品、运营和负责人可执行的竞品决策；回答“与谁竞争、凭什么竞争、先改什么、哪些结论尚不能成立”。完整报告在聊天展示，并生成内容一致的 PDF。数据不足时交付明确标记的数据缺口简报，不能把空模板称为已完成竞品分析。
 
-## What This Skill Produces
+## 数据边界
 
-- A PDF competitive positioning brief as the final deliverable
-- Competitive landscape for the category and price band
-- Listing-level comparison: price, dimensions, materials, delivery, ratings, content quality
-- Our differentiation pillars and the proof points behind them
-- Copy and listing angles that act on the gaps found
-- Risks, caveats, and research gaps
+- 唯一分析来源是本轮卖家精灵工具实际返回的数据。禁止网页搜索、商品页浏览、模型记忆、企业知识库或未经验证的附件补数。卖家精灵无权限、超时、空结果或字段缺失时保留缺口，不能更换来源。
+- 默认研究对象为用户指定的 Amazon 站点。未指定站点时标注“研究范围暂定 Amazon US，待确认”；没有可识别的类目、ASIN 或关键词时先确认范围。不得把 Amazon 样本推断成美国全渠道或 Wayfair/独立站的事实。
+- 用户给出的 SKU、预算、团队和目标只能作为“用户提供的任务约束”，不能标成卖家精灵证据。自有 SKU 未被卖家精灵覆盖时，不得宣布我方优于竞品，只给出待验证的差异化方向。
+- 价格、BSR、评分等是平台记录/采集值，必须带时间；销量、销售额等按卖家精灵原始口径标记估算。搜索量、流量及趋势指标保留供应商口径，未知则标记“口径未确认”。方案建议不是数据事实，不承诺销量或收益。
 
-## Workflow
+## 执行流程
 
-1. Clarify the product or category, the competitor set, the marketplace or channel, and
-   the decision this brief has to support (assortment, pricing, or listing rework).
-2. Compare competitors on what actually decides a furniture purchase: price band,
-   overall dimensions and footprint, materials and construction, delivery method
-   (LTL curbside, threshold, white-glove), assembly burden, review volume and rating,
-   listing image and copy quality, and return policy.
-3. Read the negative reviews on competing products. Recurring complaints — sagging
-   cushions, wobble, damaged-in-transit, "smaller than expected" — are the most
-   actionable differentiation input available and are usually free to obtain.
-4. Turn each difference into a concrete move: a listing bullet, an image type to add,
-   a spec to confirm with the supplier, or a price position to hold.
+1. **确认决策范围。** 记录站点、币种、类目节点、目标 SKU/ASIN、价位或关键词范围、分析时间窗、需要支持的决策。时间窗未提供则优先使用最近一个可获得的完整月，明确实际返回月份；月中快照不能当作整月数据。
+2. **先查能力再取数。** 依据本次已注册的 `sellersprite_*` 工具描述与参数选择商品、关键词或历史数据能力，不虚构接口。一次规划关键字段，优先批量调用，遵守现有调用预算；达到预算或无有效数据时缩小结论范围。先完成研究，再把证据表与本 SOP 交给内容专家。
+3. **建立可比竞品池。** 目标为少量直接可比商品，通常 5–10 个独立产品；以实际返回数量为准，不凑数。按产品类型、用途/尺寸（仅当字段存在）、站点、币种和观察期筛选；保留纳入/排除理由。相同父体的变体不得重复计为独立竞品，父体关系未知须披露。头部商品与新进入者分组展示，避免只挑支持预设结论的样本。
+4. **建立证据台账。** 按 [comparison-template.md](references/comparison-template.md) 登记 E01 等证据编号、ASIN/关键词、工具、请求范围、采集时间、数据月份、字段、原值和口径。识别分页未取完、返回截断、历史缺失和异常值；不知道覆盖率就写未知。
+5. **分析决策差异。** 只分析确有数据的价格分布、估算需求、竞争集中度、评分/评论门槛、关键词意图及可验证的产品属性。历史趋势需要同口径历史数据，单次快照不能说明上涨/下跌。缺少原始评论正文时，不分析投诉主题；有评论时报告实际样本数，至少两条独立样本才称重复出现，不外推全市场。
+6. **转为动作并检查证据。** 每条发现接“业务影响 → 建议动作 → 对应 E 编号 → 验证条件”。将机会区分为证据支持、条件性建议、当前不可判断。不要生成没有依据的综合机会分或高精度排名。负责人用职能角色、完成时点用相对节点，未确认的人员与日期标待定。
 
-## Output Rules
+## 交付要求
 
-- Always produce a downloadable PDF document, and never respond only with a
-  PDF-generated notice — the in-chat answer must contain the full analysis.
-- Do not invent competitor facts. Every price, dimension, material, or rating must come
-  from a cited listing or page the research step actually read.
-- Do not invent our own specs either. Mark anything unconfirmed as [confirm ...].
-- Mark unverifiable claims as assumptions.
-- Prefer decision-useful comparisons over broad market summaries. "Their 84-inch sofa
-  undercuts ours by $200 but ships knocked-down in three cartons" beats "the market is
-  competitive."
+遵循参考模板，保留决策摘要、可比表、证据与公式、机会及风险、行动清单、数据缺口。结论强度不得超过证据；样本内份额不能叫市场份额。所有关键数字和结论紧邻 E 编号，不只在文末笼统写“来源：卖家精灵”。PDF 保留估算标签、表头单位和限制条件，不因篇幅压缩而丢弃。无法核实的产品文案保留待确认项，不输出虚构尺寸、材质、认证、配送或保修承诺。

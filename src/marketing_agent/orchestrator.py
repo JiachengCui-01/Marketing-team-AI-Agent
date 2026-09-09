@@ -19,6 +19,7 @@ from .config import (
 from .conversation import Conversation
 from .source_scoring import annotate_markdown_with_source_tiers
 from .tools.delegation_tools import DELEGATION_TOOLS
+from .source_policy import SELLERSPRITE_ONLY_RULES
 
 SYSTEM = f"""You are the head of marketing at {BRAND}. Your job is to understand the
 request, decompose it into specialist tasks, dispatch those tasks to the right
@@ -77,10 +78,17 @@ Be decisive. Don't ask clarifying questions unless the request is genuinely ambi
 """
 
 
-def _dispatch(client: llm_client.DeepSeek, name: str, payload: dict, on_event=None) -> str:
+def _dispatch(client: llm_client.DeepSeek, name: str, payload: dict, on_event=None,
+              sellersprite_only: bool = False, evidence_ledger=None) -> str:
     # Specialists reuse the orchestrator's client: it is stateless per call and its
     # underlying HTTP connection pool is thread-safe, so per-dispatch clients would
     # only add TLS handshakes.
+    if sellersprite_only:
+        payload = {**payload, "task": str(payload.get("task", "")) + "\n" + SELLERSPRITE_ONLY_RULES}
+        if name == "delegate_to_research_agent":
+            payload.update(sellersprite_only=True, evidence_ledger=evidence_ledger)
+        elif name != "delegate_to_content_agent":
+            return "This skill permits only SellerSprite research and evidence-based content."
     if name == "delegate_to_content_agent":
         return content_agent.run(client, on_event=on_event, **payload)
     if name == "delegate_to_analytics_agent":

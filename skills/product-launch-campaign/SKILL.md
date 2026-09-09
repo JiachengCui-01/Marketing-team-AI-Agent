@@ -1,35 +1,30 @@
+---
+name: product-launch-campaign
+description: 基于卖家精灵数据制定 Amazon 家具新品验证与上架计划，输出定位、关键词、阶段任务、证据门槛及未决事项。
+---
+
 # Product Launch Campaign
 
-Use this skill when the user needs a plan to bring a new furniture SKU or collection to
-market in the United States, from sample sign-off through to scaling paid traffic.
+为产品、运营、内容和管理负责人交付可以分工执行的 Amazon 新品计划。重点是“是否值得验证、验证什么、先准备什么、何时继续或停止”，不能将市场估算写成我方销售预测。用 [checklist.md](references/checklist.md) 组织交付和阶段检查。
 
-## What This Skill Produces
+## 来源与适用边界
 
-- Launch positioning and the buyer situation the piece is aimed at
-- Channel plan across marketplaces (Amazon, Wayfair), the own store, and visual social
-- A phased timeline: sample sign-off, first container landed, listing go-live and cold
-  start, review accumulation, then scaling ads
-- Asset checklist per phase, core messages, CTA options, and the metric that gates each phase
+- 所有分析事实仅来自本轮卖家精灵工具实际返回的数据；不使用网页、实时商品页、知识库、模型记忆或非卖家精灵附件补齐分析。若服务不可用、无数据、字段缺失或调用预算耗尽，输出缺口和受限计划，不能伪造完整方案。
+- 用户提供的目标、产品、预算上限、团队、交付日期作为任务约束单列，不是卖家精灵验证事实；不得据此在本流程中计算经营绩效或利润。
+- 仅对供应商实际覆盖的 Amazon 站点、类目、关键词和时间范围作判断。不从 Amazon 数据推断 Wayfair、独立站、Meta、TikTok 或邮件的需求、投放回报和最佳预算比例。相关渠道只能列为“待独立验证”，不虚构多渠道定量方案。
+- 价格/排名/评分/评论数按采集记录标注日期；销量、销售额等按供应商口径标记估算。搜索量、CPC、竞争度等仅在实际返回时使用，未知口径不得自行解释。建议、试验目标、阶段门槛均须与历史事实分开。
 
-## Workflow
+## 工作流程
 
-1. Clarify the product, its price band, the target buyer situation, the launch window,
-   inbound inventory timing, and which channels are available at launch.
-2. Identify the primary promise, the proof points behind it, the objections that will
-   surface (will it fit, how does it ship, how hard is assembly), and the conversion path.
-3. Build the phased plan. Sequence matters in this category: a listing with no reviews
-   converts poorly, so plan review accumulation before scaling ad spend, and hold budget
-   back until the first cohort of orders confirms the return rate is acceptable.
-4. Name the assets each phase needs and who has to produce them, including anything that
-   depends on the supplier (dimensioned drawings, material samples, packaging photos).
-5. Provide copy-ready message blocks and the next actions.
+1. **定义业务问题。** 确认站点、类目/种子关键词或 ASIN、上新目标、观察期。未指定站点暂定 Amazon US 并标注；未给观察期优先最近可得完整月，并披露实际月份。只追问阻碍取数的范围信息；没有库存/交期时采用相对阶段，不编造到仓日。
+2. **形成最小证据包。** 研究专家先使用当前可调用的 `sellersprite_*` 能力获取可比商品、需求/竞争信息、相关关键词；历史数据可得时再判断季节性。按现有调用预算批量取关键字段，不虚构接口或保证某字段一定存在。记录站点、ASIN/关键词、时间窗、筛选与去重规则、有效样本数、取数时间、指标定义与缺口。
+3. **定义目标场景与定位。** 由实际商品属性、关键词及需求证据提出使用场景假设。关键词不能证明人群年龄、收入或购买动机；缺少人口统计证据时不写虚构画像。定位必须说明证据、竞争对照、我方待验证能力，不能宣布未经证实的领先优势。
+4. **形成关键词与内容工作包。** 按产品相关性、搜索意图及已返回的流量/竞争指标分组，而非只追大词。每组给主词、辅助词、意图、依据、适用页面位置、待确认属性和验证方式。关键词自然相关不等于实际转化；缺少转化数据不能承诺订单。内容专家接收完整证据和 SOP 后才起草标题、卖点、图片需求及 FAQ。
+5. **构建分阶段执行表。** 使用参考中的证据准备、定位与素材、上架验证、复盘决策四阶段。每个动作写负责人角色、输入、交付物、依赖、相对时间、验收条件、继续/停止条件；条件缺依据则标“待负责人设定”，不预填行业经验数字。
+6. **形成管理层决策。** 交付证据支持的机会、最大不确定性、先做的小范围验证及暂不承诺的指标。只有同口径历史数据能支持趋势/季节性；单月热度不证明未来旺季。价格带是市场观察，不能直接当成可盈利售价。
 
-## Output Rules
+## 输出规则
 
-- Keep recommendations practical for a small team to execute.
-- Separate assumptions from confirmed user inputs.
-- Never state a dimension, material, assembly time, or delivery window that was not given.
-  Mark it [confirm ...] and list it under the specs the supplier still has to confirm.
-- Include the metric that gates each phase — e.g. do not scale ads until the return rate
-  on the first 50 orders is known.
-- When information is missing, ask for the smallest set of high-impact clarifications.
+按参考交付：一页决策摘要、证据与定位、关键词表、阶段执行表、内容任务单、风险与数据缺口、证据台账。数据不足时保留有证据的部分并写明哪些建议被暂停。正文每项关键数字和结论带 E 编号，台账列出原始字段及采集/估算/推导标签；如需 PDF，保留相同来源和限制。
+
+禁止捏造广告预算、销量承诺、补货量、利润率、转化率、获客成本、评论增长目标、退货率门槛或“前 50 单即可放量”等规则。卖家精灵市场数据不能替代我方投放与经营实绩；不能据此自动批准放量、采购或发布。用户若需要这些经营决策，明确指出还需另行授权使用实际经营数据，而不是在本 skill 中偷换数据来源。

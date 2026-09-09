@@ -1421,7 +1421,8 @@ async def stream_session(
             auto_competitive_pdf=marketing_skills.requires_pdf_deliverable(selected_skills),
             output_language=output_language,
         ),
-        runner=functools.partial(run_oa_copilot, user_id=user["id"]),
+        runner=functools.partial(run_oa_copilot, user_id=user["id"],
+                                 sellersprite_only=marketing_skills.requires_sellersprite_only(selected_skills)),
     )
     return EventSourceResponse(to_sse(_with_current_user(user["id"], event_stream)))
 
@@ -1476,7 +1477,8 @@ async def complete_session(request: Request, session_id: str, payload: dict = Bo
     token = db.CURRENT_USER_ID.set(user["id"])
     try:
         await asyncio.to_thread(
-            run_oa_copilot, client, conversation, user_message, recorder, user_id=user["id"]
+            run_oa_copilot, client, conversation, user_message, recorder, user_id=user["id"],
+            sellersprite_only=marketing_skills.requires_sellersprite_only(selected_skills),
         )
     except Exception as exc:  # noqa: BLE001
         recorder("error", {"message": str(exc)})

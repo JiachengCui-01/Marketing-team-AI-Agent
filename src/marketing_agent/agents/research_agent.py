@@ -26,6 +26,7 @@ from .. import llm_client
 from ..config import SUBAGENT_EFFORT, SUBAGENT_MAX_TOKENS
 from ..domain import BRAND
 from ..tools import product_browser, sellersprite, web_search
+from ..source_policy import SELLERSPRITE_ONLY_RULES, data_gap_message
 from .base import run_agent, unavailable_markdown
 
 SYSTEM = f"""You are the market research analyst for {BRAND}, a design-led
@@ -256,15 +257,21 @@ def run(
     topics: list[str],
     competitors: list[str] | None = None,
     response_language: str | None = None,
+    sellersprite_only: bool = False,
+    evidence_ledger: provenance.SourceLedger | None = None,
 ) -> str:
     ledger = provenance.SourceLedger()
     # Shared with the vendor handlers so this function can see when the vendor path
     # has stopped paying off (budget spent, clock out, or a run of empty answers).
     budget = sellersprite.CallBudget(time_budget_seconds=VENDOR_TIME_BUDGET_SECONDS)
-    vendor_tools, vendor_handlers = sellersprite.build_tools(ledger, budget=budget)
-    search_available = web_search.is_available()
+    vendor_tools, vendor_handlers = sellersprite.build_tools(
+        ledger, budget=budget, **({"reject_empty_payloads": True} if sellersprite_only else {})
+    )
+    search_available = not sellersprite_only and web_search.is_available()
     web_is_warranted = search_available and needs_web(task, topics)
 
+    if sellersprite_only and not vendor_tools:
+        return data_gap_message(response_language or provenance.language_for_text(task))
     if not vendor_tools and not search_available:
         return _sources_unconfigured()
 
@@ -301,6 +308,9 @@ def run(
             )
 
     system = SYSTEM
+    if sellersprite_only:
+        system += "\n" + SELLERSPRITE_ONLY_RULES
+        parts.append("SellerSprite-only mode: no fallback tools are available, even on errors or empty data.")
     if response_language == "zh":
         system += (
             "\n\nLANGUAGE REQUIREMENT: Write every part of the final response in "
@@ -402,6 +412,11 @@ def run(
         ).strip()
     except llm_client.APIError as exc:
         return _research_unavailable(exc)
+
+    if sellersprite_only and provenance.SELLERSPRITE not in ledger.used:
+        return data_gap_message(response_language or provenance.language_for_text(task))
+    if evidence_ledger is not None and text:
+        evidence_ledger.merge(ledger)
 
     if not text:
         return (

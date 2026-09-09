@@ -17,6 +17,7 @@ from ..domain import BRAND
 from ..orchestrator import _dispatch, _final_text, _stream_text, _task_text
 from ..tools.delegation_tools import DELEGATION_TOOLS
 from .tools import OA_TOOLS, build_oa_handlers
+from ..source_policy import SELLERSPRITE_ONLY_RULES, data_gap_message
 
 # Friendly Agent-Trace labels for each OA tool so users can see what the workspace did.
 _TOOL_STEPS: dict[str, tuple[str, str]] = {
@@ -84,6 +85,7 @@ def run_oa_copilot(
     on_event: Callable[[str, dict], None] | None = None,
     *,
     user_id: str | None = None,
+    sellersprite_only: bool = False,
 ) -> str:
     """Process one OA copilot turn end-to-end, mutating ``conversation``."""
     history = _history_from(conversation)
@@ -97,6 +99,21 @@ def run_oa_copilot(
     )
     # Rebuilt from the tools actually called, so the footer cannot drift from reality.
     ledger = provenance.SourceLedger()
+    evidence_ledger = provenance.SourceLedger()
+    research_evidence: list[str] = []
+    if sellersprite_only:
+        handlers = {}
+        tools = [t for t in DELEGATION_TOOLS if t["name"] in
+                 {"delegate_to_research_agent", "delegate_to_content_agent"}]
+        system += "\n" + SELLERSPRITE_ONLY_RULES
+
+    def finalize(text: str) -> str:
+        language = provenance.language_for_text(text)
+        if sellersprite_only:
+            if provenance.SELLERSPRITE not in evidence_ledger.used:
+                return data_gap_message(language)
+            return provenance.append_section(text, evidence_ledger, language)
+        return provenance.append_section(text, ledger, language)
 
     if on_event:
         on_event(
@@ -127,9 +144,7 @@ def run_oa_copilot(
             if stop == "refusal" and not final:
                 final = "（助手拒绝了本次请求。）"
             else:
-                final = provenance.append_section(
-                    final, ledger, provenance.language_for_text(final)
-                )
+                final = finalize(final)
             if on_event:
                 on_event(
                     "orchestrator_step",
@@ -170,7 +185,17 @@ def run_oa_copilot(
                             {"specialist": block.name, "task": _task_text(block.input), "method": ""},
                         )
                     try:
-                        result = _dispatch(client, block.name, block.input, on_event=on_event)
+                        if sellersprite_only and block.name == "delegate_to_content_agent" and not evidence_ledger:
+                            result = "Collect usable SellerSprite research evidence before drafting content or a PDF."
+                        else:
+                            policy = {"sellersprite_only": True, "evidence_ledger": evidence_ledger} if sellersprite_only else {}
+                            brief = block.input
+                            if sellersprite_only and block.name == "delegate_to_content_agent":
+                                brief = {**brief, "task": str(brief.get("task", "")) +
+                                         "\n\nCollected SellerSprite research:\n" + "\n\n".join(research_evidence)}
+                            result = _dispatch(client, block.name, brief, on_event=on_event, **policy)
+                            if sellersprite_only and block.name == "delegate_to_research_agent":
+                                research_evidence.append(result)
                     except Exception as exc:  # noqa: BLE001
                         result = f"专家调用失败：{exc}"
                     ledger.merge(provenance.detect_sources(result))
@@ -195,7 +220,7 @@ def run_oa_copilot(
 
         # Fallback for any unhandled stop reason.
         final = _final_text(response.content)
-        final = provenance.append_section(final, ledger, provenance.language_for_text(final))
+        final = finalize(final)
         if on_event:
             _stream_text(on_event, final)
             on_event("result", {"text": final})

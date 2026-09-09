@@ -1,16 +1,46 @@
-# Comparison Template
+# 竞品定位简报交付模板与计算口径
 
-Recommended sections for a furniture competitive positioning brief.
+## 1. 决策摘要
 
-- PDF cover title, the SKU or category, and the marketplace in scope
-- Who the buyer is and what situation they are buying in (new home, replacement, small space)
-- Competitor set, with the listing or page each entry was read from
-- Comparison table: price, dimensions (L x W x H, seat height), materials and construction,
-  delivery method and carton count, assembly time, rating and review count, return window
-- What competitors' negative reviews complain about most, and which of those we beat
-- Our strongest differentiation pillars, each with the proof point that supports it
-- Listing angles: title keywords to claim, bullets to rewrite, image types to add
-- Objection handling for the questions buyers ask in reviews and Q&A
-- Pricing and assortment implications
-- Specs we still need the supplier to confirm
-- Recommended research follow-ups
+- 决策问题、当前建议：推进验证 / 暂缓 / 证据不足。
+- 最关键的 2–3 条证据，逐条引用 E 编号；明确是采集值、估算值还是推导。
+- 哪些未知项可能改变建议。不要把“评分更高”直接等同于“产品质量更好”。
+
+## 2. 研究范围与样本
+
+站点｜币种｜类目/关键词｜观察期｜取数时间及时区｜筛选条件｜排序/分页｜返回数｜去重后有效数。
+
+列出样本纳入与排除标准；若只取前 N 个结果，说明“当前筛选样本，不代表类目总体”。不同关键词搜索量可能重叠，不直接相加作为市场需求。
+
+## 3. 可比竞品表
+
+ASIN/父体｜品牌/型号｜纳入原因｜采集价格与日期｜估算月销量及月份｜估算销售额及月份｜BSR及类目｜评分｜评论数｜数据中确有的属性｜E 编号。
+
+- 没有字段用“未返回”，不得填 0；父子体关系、优惠券、运费、含税口径未知时分别披露。
+- 不混用日/周/月销量；不把不同币种并列比较，不虚构汇率。
+- 材质、尺寸、组装、配送、退货政策、图片质量仅在卖家精灵返回了对应原始证据时讨论。没有图片素材不能声称已审图，没有评论正文不能声称已阅读差评。
+
+## 4. 分析与可复算公式
+
+只在输入完整且同口径时使用下列计算，并列出参与计算的 ASIN、原值、有效样本数、公式和舍入规则：
+
+- 样本价格中位数/四分位：同一币种、可比产品、同类价格口径；说明四分位算法。有效样本过少时展示原值，不包装成稳定区间。
+- 相对价格差 = (目标价格 / 可比样本价格中位数 - 1) × 100%。中位数为 0 或目标价格缺失则不算；差价不等于溢价被消费者接受。
+- 样本销量占比 = 某独立产品估算销量 / 样本可比估算销量之和。CR3 = 样本前三独立产品估算销量之和 / 同一分母；分母必须大于 0。明确“样本估算占比/集中度”，除非供应商提供可靠总体分母，否则不称市场份额。
+- 同比/环比 = (本期 / 可比上期 - 1) × 100%。要求同指标、同周期长度、同样本口径；上期为 0 则不计算百分比。品牌份额按同一品牌归并，不能混作 ASIN 份额。
+- 不用价格 × 估算销量冒充卖家精灵原始销售额；需要该推导时标记“简化推导”，披露未考虑折扣、税费和价格变化，保留供应商原值及差异。
+- 没有成本、广告花费、点击、订单或库存数据时，不能推算毛利、ACOS、CVR、ROAS、退货率、补货量或广告回本线。
+
+## 5. 差异化与行动表
+
+证据发现｜E 编号｜业务含义（推断）｜建议动作｜优先级及理由｜负责人角色｜前置条件｜完成节点｜验证指标/决策条件。
+
+优先级根据证据强度、业务影响和执行依赖解释，不虚构量化评分。关键词出现只能支持搜索意图假设，不能证明我方产品具备该属性。每个差异化文案必须对应我方可证实属性；没有证据时改为“建议验证的方向”。
+
+## 6. 证据台账与缺口
+
+E 编号｜供应商工具原名｜站点｜ASIN/关键词/类目｜请求条件与分页｜返回字段/原值/单位｜数据所属期｜工具报告的取数时间｜采集/估算/推导/口径未知｜限制。
+
+数据缺口｜影响哪项决策｜能否继续局部分析｜下一步需要的卖家精灵能力或字段。
+
+正文与 PDF 使用同一台账。不得编造工具调用、取数时间或源链接；调用时间不等于数据更新时间。返回被截断、无完整月份或仅覆盖少量样本，必须在相关结论旁说明。

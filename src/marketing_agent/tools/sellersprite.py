@@ -430,11 +430,37 @@ class CallBudget:
 # Handlers
 # --------------------------------------------------------------------------
 
+def _has_data(payload: str) -> bool:
+    """Reject empty JSON envelopes; this is not a metric-quality validator."""
+    def populated(value):
+        if value is None or value == "":
+            return False
+        if isinstance(value, list):
+            return any(populated(item) for item in value)
+        if isinstance(value, dict):
+            if value.get("success") is False or value.get("error"):
+                return False
+            containers = ("data", "items", "rows", "records", "list", "result", "results", "content")
+            present = [key for key in containers if key in value]
+            if present:
+                return any(populated(value[key]) for key in present)
+            metadata = {"code", "status", "success", "message", "msg", "total", "page", "size", "pages", "requestId"}
+            return any(populated(item) for key, item in value.items() if key not in metadata)
+        return True  # Zero is a valid observed metric, not a missing value.
+    if not payload.strip():
+        return False
+    try:
+        return populated(json.loads(payload))
+    except ValueError:
+        return True  # Vendor text remains evidence for the agent to assess.
+
+
 def build_tools(
     ledger: provenance.SourceLedger | None = None,
     max_calls: int = MAX_CALLS_PER_RUN,
     *,
     budget: CallBudget | None = None,
+    reject_empty_payloads: bool = False,
 ) -> tuple[list[dict], dict[str, Callable[[dict], str]]]:
     """Build the SellerSprite tool schemas and handlers for one agent run.
 
@@ -506,7 +532,7 @@ def build_tools(
                 spend.record_miss()
                 logger.exception("SellerSprite tool call failed")
                 return f"Error: the SellerSprite call failed — {exc}"
-            if not result.strip():
+            if not result.strip() or (reject_empty_payloads and not _has_data(result)):
                 # An empty result is not data. Crediting the vendor here would make
                 # the answer's footer claim a source that supplied nothing.
                 spend.record_miss()

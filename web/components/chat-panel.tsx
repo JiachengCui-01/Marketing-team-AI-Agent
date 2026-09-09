@@ -1812,11 +1812,11 @@ function localizedSkill(skill: WorkflowSkill, locale: "zh" | "en") {
   const zh: Record<string, { name: string; description: string }> = {
     "competitive-positioning-brief": {
       name: "竞品 Listing 对比简报",
-      description: "用于对比同品类竞品或平台头部 listing：价格带、尺寸与材质、配送方式、评分与评论、图文质量、退货政策，输出差异化机会与 PDF 简报。",
+      description: "仅用卖家精灵证据比较 Amazon 竞品、价格与需求，输出可追溯的差异化建议、行动清单和 PDF；缺失数据明确列出。",
     },
     "product-launch-campaign": {
       name: "新品上架战役",
-      description: "用于新品从打样确认到上架放量：分阶段拆解首批到仓、listing 冷启动、评论积累、广告放量，并给出各阶段素材需求与衡量指标。",
+      description: "仅用卖家精灵证据制定 Amazon 新品定位、关键词和阶段执行计划，明确验收条件与数据缺口，不虚构销量或投放回报。",
     },
   };
 

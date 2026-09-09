@@ -9,6 +9,7 @@ import tempfile
 import zipfile
 
 from marketing_agent.config import PROJECT_ROOT
+from marketing_agent.source_policy import SELLERSPRITE_ONLY_SKILLS
 
 SKILLS_DIR = PROJECT_ROOT / "skills"
 MAX_SKILL_TEXT_CHARS = 18_000
@@ -160,6 +161,10 @@ def selected_skill_names(skill_ids: list[str]) -> list[str]:
 
 def requires_pdf_deliverable(skill_ids: list[str]) -> bool:
     return any(sid in PDF_DELIVERABLE_SKILLS for sid in skill_ids)
+
+
+def requires_sellersprite_only(skill_ids: list[str]) -> bool:
+    return bool(SELLERSPRITE_ONLY_SKILLS.intersection(skill_ids))
 
 
 def build_skill_addendum(skill_ids: list[str], output_language: str | None = None) -> str:
