@@ -15,7 +15,7 @@ import { createPortal } from "react-dom";
 import { useEffect, useRef, useState } from "react";
 import { MessageBubble, type ChatMessage, type MessageArtifact } from "./message";
 import { FileUploader } from "./file-uploader";
-import { getMarketingMemory, getWorkflowSkills, requestClarification, uploadFile, type ClarifyPlan, type ClarifyQuestion, type MarketingMemoryProfile, type UploadResponse, type WorkflowSkill } from "@/lib/api";
+import { getMarketingMemory, getWorkflowSkills, uploadWorkflowSkill, requestClarification, uploadFile, type ClarifyPlan, type ClarifyQuestion, type MarketingMemoryProfile, type UploadResponse, type WorkflowSkill } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
 type DirectoryHandle = FileSystemDirectoryHandle & {
@@ -566,6 +566,9 @@ export function ChatPanel({
                   selectedSkillIds={selectedSkillIds}
                   locale={locale}
                   onToggleSkill={toggleSkill}
+                  onImported={(skill) => {
+                    setSkills((current) => [...current.filter((s) => s.id !== skill.id), skill]);
+                  }}
                   onClose={() => setSkillsOpen(false)}
                 />
               </div>
@@ -1617,6 +1620,7 @@ function SkillPickerPopover({
   selectedSkillIds,
   locale,
   onToggleSkill,
+  onImported,
   onClose,
 }: {
   open: boolean;
@@ -1625,9 +1629,46 @@ function SkillPickerPopover({
   selectedSkillIds: string[];
   locale: "zh" | "en";
   onToggleSkill: (skillId: string) => void;
+  onImported: (skill: WorkflowSkill) => void;
   onClose: () => void;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const uploadRef = useRef<HTMLInputElement>(null);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [uploadNote, setUploadNote] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState(false);
+  const [search, setSearch] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
+  const query = search.trim().toLocaleLowerCase();
+  const filteredSkills = skills.filter((skill) => {
+    const display = localizedSkill(skill, locale);
+    return [skill.id, skill.name, skill.description, display.name, display.description]
+      .some((value) => value.toLocaleLowerCase().includes(query));
+  });
+
+  useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = 0;
+  }, [search]);
+
+  async function importSkill(file: File) {
+    setUploadNote(null);
+    setUploadError(false);
+    setUploadBusy(true);
+    try {
+      if (!file.name.toLowerCase().endsWith(".zip") || file.size > 10 * 1024 * 1024) {
+        throw new Error(locale === "zh" ? "请选择不超过 10 MB 的 ZIP 文件。" : "Choose a ZIP file up to 10 MB.");
+      }
+      const skill = await uploadWorkflowSkill(file);
+      onImported(skill);
+      setSearch("");
+      setUploadNote(locale === "zh" ? `已添加：${skill.name}，可在列表中手动选择。` : `Added: ${skill.name}. Select it from the list to use it.`);
+    } catch (error) {
+      setUploadError(true);
+      setUploadNote(error instanceof Error ? error.message : (locale === "zh" ? "上传失败，请重试。" : "Upload failed. Please retry."));
+    } finally {
+      setUploadBusy(false);
+    }
+  }
   const [position, setPosition] = useState({ left: 16, bottom: 88, width: 448 });
 
   useEffect(() => {
@@ -1678,14 +1719,15 @@ function SkillPickerPopover({
   return createPortal(
     <div
       ref={panelRef}
-      className="fixed z-[70] max-h-[44vh] overflow-hidden rounded-2xl border border-border bg-bg-elevated/95 shadow-2xl backdrop-blur-xl"
+      className="fixed z-[70] flex h-[60vh] flex-col overflow-hidden rounded-2xl border border-border bg-bg-elevated/95 shadow-2xl backdrop-blur-xl"
       style={{
         left: position.left,
         bottom: position.bottom,
         width: position.width,
+        maxHeight: `calc(100vh - ${position.bottom + 12}px)`,
       }}
     >
-      <div className="border-b border-border/70 px-4 py-3">
+      <div className="shrink-0 border-b border-border/70 px-4 py-3">
         <div className="flex items-center gap-2 text-xs font-semibold text-fg">
           <Sparkles size={14} className="text-accent" />
           <span>{locale === "zh" ? "选择 skill" : "Choose skill"}</span>
@@ -1696,8 +1738,41 @@ function SkillPickerPopover({
             : "Pick a business SOP to guide the response workflow."}
         </p>
       </div>
-      <div className="max-h-[calc(44vh-4.75rem)] space-y-2 overflow-y-auto p-2">
-        {skills.map((skill) => {
+      <div className="shrink-0 border-b border-border/70 px-4 py-3">
+        <input ref={uploadRef} type="file" accept=".zip,application/zip" className="hidden"
+          aria-label={locale === "zh" ? "上传 skill ZIP" : "Upload skill ZIP"}
+          disabled={uploadBusy}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) void importSkill(file);
+          }} />
+        <button type="button" disabled={uploadBusy} onClick={() => uploadRef.current?.click()}
+          className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs text-fg hover:bg-bg-subtle disabled:opacity-50">
+          {uploadBusy ? <Loader2 size={13} className="animate-spin" /> : <FolderOpen size={13} />}
+          {locale === "zh" ? (uploadBusy ? "正在导入…" : "上传 skill 压缩包") : (uploadBusy ? "Importing…" : "Upload skill ZIP")}
+        </button>
+        <p className="mt-2 text-[11px] leading-snug text-fg-subtle">
+          {locale === "zh"
+            ? "ZIP ≤ 10 MB，包含一个 SKILL.md。导入到项目共享 skills，规则与参考文档会用于生成；脚本和素材会保存，脚本不会自动执行。"
+            : "ZIP up to 10 MB with one SKILL.md. Imported into shared project skills. Instructions and references guide generation; scripts and assets are stored, scripts are not auto-executed."}
+        </p>
+        <p role={uploadError ? "alert" : "status"} title={uploadNote ?? undefined} className={`mt-2 h-8 overflow-y-auto text-xs ${uploadError ? "text-red-500" : "text-fg-muted"}`}>{uploadNote}</p>
+      </div>
+      <div className="shrink-0 border-b border-border/70 px-4 py-2">
+        <input type="search" value={search} onChange={(event) => setSearch(event.target.value)}
+          aria-label={locale === "zh" ? "搜索 skills" : "Search skills"}
+          placeholder={locale === "zh" ? "搜索名称、描述或 ID…" : "Search name, description or ID…"}
+          className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-xs text-fg outline-none focus:border-accent" />
+        <p className="mt-1 text-[11px] text-fg-subtle" role="status">
+          {locale === "zh" ? `${filteredSkills.length} / ${skills.length} 个 skill` : `${filteredSkills.length} / ${skills.length} skills`}
+        </p>
+      </div>
+      <div ref={listRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-2">
+        {filteredSkills.length === 0 && <p className="px-3 py-6 text-center text-xs text-fg-subtle">
+          {locale === "zh" ? (skills.length ? "没有匹配的 skill，请尝试其他关键词。" : "暂无 skill，可上传压缩包添加。") : (skills.length ? "No matching skills. Try another search." : "No skills yet. Upload a ZIP to add one.")}
+        </p>}
+        {filteredSkills.map((skill) => {
           const active = selectedSkillIds.includes(skill.id);
           const display = localizedSkill(skill, locale);
           return (

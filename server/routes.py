@@ -1136,6 +1136,23 @@ def content_workflow_skills(request: Request) -> dict:
     return {"skills": marketing_skills.list_skills()}
 
 
+@router.post("/skills/upload", status_code=201)
+async def upload_workflow_skill(request: Request, file: UploadFile = File(...)) -> dict:
+    auth.require_user(request)
+    try:
+        data = await file.read(marketing_skills.MAX_ARCHIVE_BYTES + 1)
+        if len(data) > marketing_skills.MAX_ARCHIVE_BYTES:
+            raise HTTPException(413, "ZIP exceeds the 10 MB upload limit.")
+        skill = await asyncio.to_thread(marketing_skills.install_skill_archive, data, file.filename or "")
+        return {"skill": skill}
+    except FileExistsError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    finally:
+        await file.close()
+
+
 def _attached_ids(file_ids: str | list[str] | None, csv_id: str | None = None) -> list[str]:
     ids: list[str] = []
     if isinstance(file_ids, str):

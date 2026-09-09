@@ -781,6 +781,16 @@ export async function getWorkflowSkills(): Promise<WorkflowSkill[]> {
   return (await res.json()).skills;
 }
 
+export async function uploadWorkflowSkill(file: File): Promise<WorkflowSkill> {
+  const body = new FormData();
+  body.append("file", file);
+  const res = await fetch(`${API_BASE}/api/skills/upload`, {
+    method: "POST", headers: authHeaders(), body,
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).skill;
+}
+
 export type ImageSkill = {
   id: ImageStyleKey;
   name: string;

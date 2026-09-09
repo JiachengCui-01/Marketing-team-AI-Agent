@@ -254,6 +254,19 @@ render.yaml · vercel.json     部署配置
 - 传输层可选 WebSocket 替代 SSE（双向、断线更平滑）；多 worker 时用 Redis 做 IM pub/sub
 - 移动端适配与更多平台图像模板
 
+## 自定义营销 Skills
+
+在聊天输入框的 skill 选择器中点击“上传 skill 压缩包”，选择 ZIP 文件。导入成功后加入列表，不默认选中；手动勾选后，下一次发送任务时会加载其 SOP 和参考文档，无需重启。选择器大小固定，列表内部滚动，支持按名称、描述或 ID 搜索。
+
+- 每个 ZIP 包含一个 UTF-8 编码、非空的 `SKILL.md`，可以直接放在压缩包根目录，也可以放在一层或多层包装目录中；其他文件必须位于该 skill 目录内。
+- 推荐目录为 `SKILL.md`、`references/`、`scripts/`、`assets/`。缺失的三个资源目录会自动创建。支持 Markdown 标题，也支持常见的 `name` / `description` frontmatter 字段。
+- 服务端将文件安装到项目 `skills/<skill-id>/`；ID 来自 skill 文件夹名，根目录打包时来自 ZIP 文件名，请使用英文名称。同名导入返回冲突，不覆盖现有内容。
+- ZIP 上限 10 MB、解压后上限 30 MB、最多 200 个条目。拒绝路径穿越、链接、加密包及冲突路径。失败的临时文件会清理。
+- `SKILL.md` 和 `references/` 中按路径排序的前 4 个 Markdown 文档参与提示词构建，每份参考文档最多 6,000 字符，总注入上限为 18,000 字符。`scripts/`、`assets/` 会原样保存；当前不会自动执行上传的脚本或加载二进制素材。
+- 导入需要登录，导入内容属于项目共享 skill 列表。部署环境需保证项目 `skills/` 可写；如需跨容器重建保留，需为该目录配置持久化存储。
+
+接口：`POST /api/skills/upload`，multipart 字段 `file`；成功返回 `201 {"skill": ...}`，通过现有 `GET /api/skills` 查询。
+
 ## 13. 项目复盘
 
 - **收获**：跑通了"编排器 + 多专家"的多智能体协作、SSE 流式与 Agent Trace、human-in-the-loop 的草稿-确认范式、RAG 检索与来源分级，以及一套"AI Coding + 浏览器实测"的开发闭环。
