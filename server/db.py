@@ -1657,10 +1657,10 @@ _IMAGE_TEMPLATE_SEED = [
     # --- Pinterest: tall, searchable room inspiration.
     ("tpl_pin_inspiration", "pinterest", "pinterest", "inspiration", "房间灵感",
      "Tall room-inspiration image: an aspirational but reproducible interior in a clearly "
-     "identifiable style, with the piece central to the look.", "3:4", 10),
+     "identifiable style, with the piece central to the look.", "2:3", 10),
     ("tpl_pin_roomset", "pinterest", "pinterest", "roomset", "风格搭配",
      "Styled vignette showing how to pair the piece — palette, materials, and companion "
-     "furniture visible.", "3:4", 20),
+     "furniture visible.", "2:3", 20),
     # --- Fallback.
     ("tpl_generic_clean", "generic", "generic", "clean", "干净背景",
      "Versatile composition on a simple neutral background.", "1:1", 10),

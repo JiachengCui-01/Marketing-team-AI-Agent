@@ -120,8 +120,10 @@ export function MarketingImagePanel({
   }
 
   async function handleGenerate() {
-    if (!prompt.trim()) {
-      setError(t.imagePromptPlaceholder);
+    // An empty box is only an error with nothing else to go on. With a channel style
+    // or an uploaded photo the backend runs that style's default brief.
+    if (!prompt.trim() && !activeStyle && !upload) {
+      setError(t.imageNeedBrief);
       return;
     }
     const source: ImageSource = upload
@@ -352,6 +354,15 @@ export function MarketingImagePanel({
             </div>
 
             {/* prompt input — at the very bottom */}
+            {!prompt.trim() && (activeSkill || upload) ? (
+              <p className="px-3 pb-2 text-[11px] leading-snug text-fg-subtle">
+                {activeSkill
+                  ? `${t.imageDefaultBriefHint}${activeSkill.name}${
+                      activeSkill.usage_note ? ` · ${activeSkill.usage_note}` : ""
+                    }`
+                  : t.imageDefaultBriefGeneric}
+              </p>
+            ) : null}
           </div>
         </div>
       </div>

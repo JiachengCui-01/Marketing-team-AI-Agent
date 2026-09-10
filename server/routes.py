@@ -828,6 +828,7 @@ def image_skills(request: Request) -> dict:
                 "description": s.description,
                 "platform": s.key,
                 "aspect_ratio": s.aspect_ratio,
+                "usage_note": s.usage_note,
             }
             for s in IMAGE_SKILLS.values()
         ]
@@ -936,6 +937,7 @@ def _run_generate(
     aspect_ratio: str | None,
     session_id: str | None,
     parent_history_id: str | None = None,
+    reference_kind: str = image_gen.REFERENCE_PRODUCT,
 ) -> dict:
     skill = select_image_skill(style_key, prompt, platform)
     effective_prompt = prompt
@@ -952,6 +954,7 @@ def _run_generate(
         skill=skill,
         reference_images=reference_images,
         aspect_ratio=effective_ratio,
+        reference_kind=reference_kind,
     )
     if not result.get("ok"):
         return {"ok": False, "unavailable": True, "message": result.get("message", "")}
@@ -967,9 +970,14 @@ def _run_generate(
     params = {"aspect_ratio": effective_ratio, "template_id": template_id}
     if parent_history_id:
         params["parent_history_id"] = parent_history_id
+    # With no typed request and no template, the skill's own brief ran; label the
+    # history entry with the skill blurb so the card is not blank, and flag it so
+    # the UI can explain where the brief came from.
+    if not prompt and not template_id:
+        params["default_brief"] = True
     hist = db.add_image_history(
         user_id,
-        prompt=prompt,
+        prompt=prompt or skill.description,
         style_key=skill.key,
         artifact_id=art["id"],
         source_upload_id=source_upload_id,
@@ -982,7 +990,7 @@ def _run_generate(
         "filename": art["filename"],
         "mime": art["mime"],
         "style_key": skill.key,
-        "prompt": prompt,
+        "prompt": hist["prompt"],
         "created_at": hist["created_at"],
         "preview_url": f"/api/artifacts/{art['id']}/preview",
     }
@@ -992,18 +1000,25 @@ def _run_generate(
 async def image_generate(request: Request, payload: dict = Body(...)) -> dict:
     user = auth.require_user(request)
     prompt = str(payload.get("prompt") or "").strip()
-    if not prompt:
-        raise HTTPException(400, "描述不能为空。")
+    style_key = payload.get("style_key")
+    platform = payload.get("platform")
+    template_id = payload.get("template_id")
     reference_images, source_upload_id = _resolve_image_source(user["id"], payload.get("source"))
+    # An empty description is not an error when something else already defines the
+    # deliverable: a channel skill, a template, or an attached product photo each
+    # carry their own default brief (see ``ImageSkill.default_request``). Only a
+    # request with nothing at all to work from is rejected.
+    if not prompt and not (style_key or platform or template_id or reference_images):
+        raise HTTPException(400, "请描述你想要的图片，或选择渠道风格 / 模板 / 上传参考图。")
     return await asyncio.to_thread(
         _run_generate,
         user["id"],
         prompt=prompt,
-        style_key=payload.get("style_key"),
-        platform=payload.get("platform"),
+        style_key=style_key,
+        platform=platform,
         reference_images=reference_images,
         source_upload_id=source_upload_id,
-        template_id=payload.get("template_id"),
+        template_id=template_id,
         aspect_ratio=payload.get("aspect_ratio"),
         session_id=payload.get("session_id"),
     )
@@ -1090,6 +1105,9 @@ async def image_reedit(request: Request, payload: dict = Body(...)) -> dict:
         aspect_ratio=payload.get("aspect_ratio"),
         session_id=payload.get("session_id"),
         parent_history_id=history_id,
+        # The attachment here is our own previous render, not the real product photo:
+        # the point of the turn is to change it, so fidelity rules would fight the edit.
+        reference_kind=image_gen.REFERENCE_PRIOR_RENDER,
     )
 
 

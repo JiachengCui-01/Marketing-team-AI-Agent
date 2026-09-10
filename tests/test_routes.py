@@ -702,6 +702,40 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(len(hist), 1)
         self.assertEqual(hist[0]["artifact_id"], aid)
 
+    def test_image_generate_without_prompt_runs_the_skill_default(self) -> None:
+        """Style picked + photo attached is already a complete brief; an empty box
+        must not be rejected."""
+        from server import routes
+
+        file_id = self._upload_png()
+        fake = {"ok": True, "filename": "g.png", "mime": "image/png",
+                "path": str(Path(self.upload_tmp.name) / "default_brief.png")}
+        Path(fake["path"]).write_bytes(b"\x89PNG\r\n\x1a\n")
+        with mock.patch.object(routes.image_gen, "generate_image", return_value=fake) as gen:
+            res = self.client.post(
+                "/api/image/generate",
+                headers=self.headers,
+                json={"prompt": "", "style_key": "amazon",
+                      "source": {"type": "upload", "id": file_id}},
+            )
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertTrue(res.json()["ok"])
+        # The empty request reaches image_gen, which substitutes the skill's brief.
+        self.assertEqual(gen.call_args.args[0], "")
+        self.assertEqual(gen.call_args.kwargs["skill"].key, "amazon")
+        hist = self.client.get("/api/image/history", headers=self.headers).json()["history"]
+        self.assertTrue(hist[0]["params"].get("default_brief"))
+        self.assertTrue(hist[0]["prompt"])  # labelled with the skill blurb, not blank
+
+    def test_image_generate_needs_prompt_skill_or_reference(self) -> None:
+        res = self.client.post("/api/image/generate", headers=self.headers, json={"prompt": "  "})
+        self.assertEqual(res.status_code, 400)
+
+    def test_image_skills_expose_usage_note(self) -> None:
+        skills = self.client.get("/api/image/skills", headers=self.headers).json()["skills"]
+        amazon = next(s for s in skills if s["id"] == "amazon")
+        self.assertTrue(amazon["usage_note"])
+
     def test_image_generate_unavailable_returns_graceful_200(self) -> None:
         from server import routes
 

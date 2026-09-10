@@ -804,6 +804,7 @@ export type ImageSkill = {
   description: string;
   platform: string;
   aspect_ratio: string;
+  usage_note?: string;
 };
 
 export type ImageProcessResult = {

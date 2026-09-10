@@ -20,7 +20,7 @@ export type TemplateDef = {
   platform: "amazon" | "wayfair" | "dtc_site" | "instagram" | "pinterest" | "generic";
   style: string;
   label: string;
-  aspectRatio: "1:1" | "3:4" | "4:5" | "16:9";
+  aspectRatio: "1:1" | "2:3" | "4:5" | "16:9";
   background: { kind: "gradient" | "solid"; colors: string[]; angle?: number };
   // Product placement — center-based, fractions of canvas.
   productBox: { xPct: number; yPct: number; wPct: number; hPct: number };
@@ -168,7 +168,7 @@ export const TEMPLATES: TemplateDef[] = [
     platform: "pinterest",
     style: "inspiration",
     label: "房间灵感",
-    aspectRatio: "3:4",
+    aspectRatio: "2:3",
     background: { kind: "gradient", colors: ["#fdfaf5", "#efe3d3"], angle: 150 },
     productBox: { xPct: 0.5, yPct: 0.56, wPct: 0.76, hPct: 0.58 },
     texts: [
@@ -181,7 +181,7 @@ export const TEMPLATES: TemplateDef[] = [
     platform: "pinterest",
     style: "roomset",
     label: "风格搭配",
-    aspectRatio: "3:4",
+    aspectRatio: "2:3",
     background: { kind: "gradient", colors: ["#f2f4f1", "#dde3dc"], angle: 140 },
     productBox: { xPct: 0.5, yPct: 0.55, wPct: 0.74, hPct: 0.6 },
     texts: [t("title", "How to style warm minimalism", 0.5, 0.12, 0.046, "#33403a", "center", 700)],

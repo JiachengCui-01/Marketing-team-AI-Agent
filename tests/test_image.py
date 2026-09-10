@@ -33,6 +33,82 @@ class ImageSkillTests(unittest.TestCase):
         self.assertIn(skill.label, prefix)
         self.assertIn(skill.aspect_ratio, prefix)
 
+    def test_every_skill_is_publishable_on_its_own(self) -> None:
+        """A style has to fully specify a deliverable — that is what makes an empty
+        prompt runnable instead of an error."""
+        for key, skill in IMAGE_SKILLS.items():
+            with self.subTest(skill=key):
+                self.assertTrue(skill.default_request.strip())
+                self.assertTrue(skill.platform_rules)
+                self.assertTrue(skill.art_direction)
+                self.assertTrue(skill.pixel_target.strip())
+                self.assertTrue(skill.usage_note.strip())
+                # Ratios the image model actually accepts.
+                self.assertIn(skill.aspect_ratio, {"1:1", "2:3", "3:2", "4:5", "5:4", "16:9", "9:16"})
+                self.assertIn(skill.aspect_ratio, skill.render())
+
+    def test_amazon_main_image_rules_are_compliance_not_taste(self) -> None:
+        rules = " ".join(IMAGE_SKILLS["amazon"].platform_rules).lower()
+        self.assertIn("255,255,255", rules)
+        self.assertIn("no props", rules)
+        self.assertIn("no text", rules)
+
+    def test_pinterest_uses_recommended_pin_ratio(self) -> None:
+        self.assertEqual(IMAGE_SKILLS["pinterest"].aspect_ratio, "2:3")
+
+    def test_style_rules_alias_still_reads_art_direction(self) -> None:
+        skill = IMAGE_SKILLS["instagram"]
+        self.assertEqual(skill.style_rules, skill.art_direction)
+
+
+class BuildPromptTests(unittest.TestCase):
+    def test_empty_request_runs_the_skill_default_brief(self) -> None:
+        skill = IMAGE_SKILLS["amazon"]
+        text = image_gen.build_prompt("", skill, reference=image_gen.REFERENCE_PRODUCT)
+        self.assertIn(skill.default_request, text)
+        self.assertIn("None given", text)
+
+    def test_user_request_is_carried_verbatim(self) -> None:
+        text = image_gen.build_prompt("放在暖色调餐厅里", IMAGE_SKILLS["instagram"])
+        self.assertIn("放在暖色调餐厅里", text)
+        self.assertNotIn("None given", text)
+        self.assertNotIn(IMAGE_SKILLS["instagram"].default_request, text)
+
+    def test_platform_rules_survive_a_conflicting_request(self) -> None:
+        """The request stays in the prompt, but the compliance rule outranks it."""
+        text = image_gen.build_prompt("把它放进客厅场景，加上尺寸文字", IMAGE_SKILLS["amazon"])
+        self.assertIn("把它放进客厅场景", text)
+        self.assertIn("255,255,255", text)
+        self.assertIn("PRECEDENCE", text)
+        self.assertIn("satisfy the platform rule", text)
+
+    def test_subject_fidelity_only_when_a_photo_is_attached(self) -> None:
+        skill = IMAGE_SKILLS["wayfair"]
+        with_photo = image_gen.build_prompt("x", skill, reference=image_gen.REFERENCE_PRODUCT)
+        self.assertIn("SUBJECT FIDELITY", with_photo)
+        self.assertIn("may not redesign", with_photo)
+        self.assertNotIn("SUBJECT FIDELITY", image_gen.build_prompt("x", skill))
+
+    def test_re_edit_gets_edit_scope_not_product_fidelity(self) -> None:
+        """A re-edit attachment is our own render and the request is to change it;
+        the product-fidelity wording would refuse the edit just asked for."""
+        text = image_gen.build_prompt(
+            "把木色改成深胡桃色", IMAGE_SKILLS["amazon"],
+            reference=image_gen.REFERENCE_PRIOR_RENDER,
+        )
+        self.assertIn("EDIT SCOPE", text)
+        self.assertNotIn("SUBJECT FIDELITY", text)
+        self.assertIn("unless the request explicitly asks", text)
+
+    def test_explicit_ratio_overrides_the_skill_default(self) -> None:
+        text = image_gen.build_prompt("x", IMAGE_SKILLS["amazon"], "16:9")
+        self.assertIn("Aspect ratio: 16:9", text)
+
+    def test_delivery_rules_include_the_shared_baseline(self) -> None:
+        text = image_gen.build_prompt("x", IMAGE_SKILLS["generic"])
+        self.assertIn("Photographic realism", text)
+        self.assertIn("DELIVERY QUALITY", text)
+
 
 class ImageGenTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -72,6 +148,26 @@ class ImageGenTests(unittest.TestCase):
         self.assertTrue(os.path.exists(result["path"]))
         raw.assert_called_once()
         os.remove(result["path"])
+
+    def test_ratio_is_passed_to_the_sdk_seam(self) -> None:
+        """Prompt text alone does not control the ratio; a 16:9 hero returned square
+        is unusable as a banner."""
+        os.environ["GEMINI_API_KEY"] = "test-key"
+        with mock.patch.object(image_gen, "_generate_raw", return_value=_PNG_1x1) as raw:
+            result = image_gen.generate_image("hero", skill=IMAGE_SKILLS["dtc_site"])
+        self.assertEqual(raw.call_args.args[3], "16:9")
+        os.remove(result["path"])
+
+    def test_image_config_carries_the_requested_ratio(self) -> None:
+        config = image_gen._image_config("4:5")
+        if config is None:  # older google-genai without ImageConfig
+            self.skipTest("SDK has no ImageConfig")
+        self.assertEqual(config.image_config.aspect_ratio, "4:5")
+
+    def test_only_ratio_rejections_trigger_the_bare_retry(self) -> None:
+        self.assertTrue(image_gen._is_image_config_rejection(RuntimeError("image_config unsupported")))
+        self.assertTrue(image_gen._is_image_config_rejection(RuntimeError("bad aspect ratio")))
+        self.assertFalse(image_gen._is_image_config_rejection(RuntimeError("RESOURCE_EXHAUSTED")))
 
     def test_empty_model_response_is_unavailable(self) -> None:
         os.environ["GEMINI_API_KEY"] = "test-key"
