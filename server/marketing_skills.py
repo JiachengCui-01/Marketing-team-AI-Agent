@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path, PurePosixPath
 import io
 import re
+import shutil
 import stat
 import tempfile
 import zipfile
@@ -17,6 +18,23 @@ PDF_DELIVERABLE_SKILLS = {"competitive-positioning-brief"}
 MAX_ARCHIVE_BYTES = 10 * 1024 * 1024
 MAX_EXTRACTED_BYTES = 30 * 1024 * 1024
 MAX_ARCHIVE_FILES = 200
+
+
+def delete_skill(skill_id: str) -> None:
+    """Delete only a discovered direct child of the skill directory."""
+    if not skill_id or skill_id.startswith(".") or any(c in skill_id for c in "/\\:"):
+        raise ValueError("Invalid skill ID.")
+    root = SKILLS_DIR.resolve()
+    target = SKILLS_DIR / skill_id
+    if target.is_symlink() or target.resolve().parent != root:
+        raise ValueError("Invalid skill directory.")
+    if skill_id not in {s["id"] for s in list_skills()}:
+        raise FileNotFoundError("Skill not found.")
+    # Hide the complete folder first so the list never exposes partial deletion.
+    with tempfile.TemporaryDirectory(prefix=".skill-delete-", dir=root) as staging:
+        hidden = Path(staging) / "removed"
+        target.rename(hidden)
+        shutil.rmtree(hidden)
 
 
 def install_skill_archive(data: bytes, filename: str) -> dict:

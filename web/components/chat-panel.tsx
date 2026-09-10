@@ -8,6 +8,7 @@ import {
   MessageSquare,
   Send,
   Sparkles,
+  Trash2,
   Square,
   X,
 } from "lucide-react";
@@ -15,7 +16,7 @@ import { createPortal } from "react-dom";
 import { useEffect, useRef, useState } from "react";
 import { MessageBubble, type ChatMessage, type MessageArtifact } from "./message";
 import { FileUploader } from "./file-uploader";
-import { getMarketingMemory, getWorkflowSkills, uploadWorkflowSkill, requestClarification, uploadFile, type ClarifyPlan, type ClarifyQuestion, type MarketingMemoryProfile, type UploadResponse, type WorkflowSkill } from "@/lib/api";
+import { getMarketingMemory, getWorkflowSkills, uploadWorkflowSkill, deleteWorkflowSkill, requestClarification, uploadFile, type ClarifyPlan, type ClarifyQuestion, type MarketingMemoryProfile, type UploadResponse, type WorkflowSkill } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
 type DirectoryHandle = FileSystemDirectoryHandle & {
@@ -568,6 +569,10 @@ export function ChatPanel({
                   onToggleSkill={toggleSkill}
                   onImported={(skill) => {
                     setSkills((current) => [...current.filter((s) => s.id !== skill.id), skill]);
+                  }}
+                  onDeleted={(skillId) => {
+                    setSkills((current) => current.filter((s) => s.id !== skillId));
+                    setSelectedSkillIds(selectedSkillIds.filter((id) => id !== skillId));
                   }}
                   onClose={() => setSkillsOpen(false)}
                 />
@@ -1621,6 +1626,7 @@ function SkillPickerPopover({
   locale,
   onToggleSkill,
   onImported,
+  onDeleted,
   onClose,
 }: {
   open: boolean;
@@ -1630,9 +1636,36 @@ function SkillPickerPopover({
   locale: "zh" | "en";
   onToggleSkill: (skillId: string) => void;
   onImported: (skill: WorkflowSkill) => void;
+  onDeleted: (skillId: string) => void;
   onClose: () => void;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [deleteTarget, setDeleteTarget] = useState<WorkflowSkill | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (open && deleteTarget && dialog && !dialog.open) dialog.showModal();
+    if (!deleteTarget && dialog?.open) dialog.close();
+  }, [deleteTarget, open]);
+
+  async function confirmDelete() {
+    if (!deleteTarget || deleteBusy) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await deleteWorkflowSkill(deleteTarget.id);
+      onDeleted(deleteTarget.id);
+      setUploadError(false);
+      setUploadNote(locale === "zh" ? "Skill 已删除。" : "Skill deleted.");
+      setDeleteTarget(null);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : (locale === "zh" ? "删除失败，请重试。" : "Deletion failed. Please retry."));
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
   const uploadRef = useRef<HTMLInputElement>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadNote, setUploadNote] = useState<string | null>(null);
@@ -1688,6 +1721,7 @@ function SkillPickerPopover({
     }
 
     function onPointerDown(event: MouseEvent | TouchEvent) {
+      if (deleteTarget) return;
       const target = event.target as Node | null;
       if (!target) return;
       if (panelRef.current?.contains(target)) return;
@@ -1696,7 +1730,7 @@ function SkillPickerPopover({
     }
 
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape" && !deleteTarget) onClose();
     }
 
     updatePosition();
@@ -1712,7 +1746,7 @@ function SkillPickerPopover({
       document.removeEventListener("touchstart", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [anchorRef, onClose, open]);
+  }, [anchorRef, onClose, open, deleteTarget]);
 
   if (!open || typeof document === "undefined") return null;
 
@@ -1738,35 +1772,31 @@ function SkillPickerPopover({
             : "Pick a business SOP to guide the response workflow."}
         </p>
       </div>
-      <div className="shrink-0 border-b border-border/70 px-4 py-3">
+      <div className="shrink-0 border-b border-border/70 px-4 py-2">
         <input ref={uploadRef} type="file" accept=".zip,application/zip" className="hidden"
-          aria-label={locale === "zh" ? "上传 skill ZIP" : "Upload skill ZIP"}
-          disabled={uploadBusy}
+          aria-label={locale === "zh" ? "上传 skill ZIP" : "Upload skill ZIP"} disabled={uploadBusy}
           onChange={(event) => {
             const file = event.target.files?.[0];
             event.target.value = "";
             if (file) void importSkill(file);
           }} />
-        <button type="button" disabled={uploadBusy} onClick={() => uploadRef.current?.click()}
-          className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs text-fg hover:bg-bg-subtle disabled:opacity-50">
-          {uploadBusy ? <Loader2 size={13} className="animate-spin" /> : <FolderOpen size={13} />}
-          {locale === "zh" ? (uploadBusy ? "正在导入…" : "上传 skill 压缩包") : (uploadBusy ? "Importing…" : "Upload skill ZIP")}
-        </button>
-        <p className="mt-2 text-[11px] leading-snug text-fg-subtle">
-          {locale === "zh"
-            ? "ZIP ≤ 10 MB，包含一个 SKILL.md。导入到项目共享 skills，规则与参考文档会用于生成；脚本和素材会保存，脚本不会自动执行。"
-            : "ZIP up to 10 MB with one SKILL.md. Imported into shared project skills. Instructions and references guide generation; scripts and assets are stored, scripts are not auto-executed."}
-        </p>
-        <p role={uploadError ? "alert" : "status"} title={uploadNote ?? undefined} className={`mt-2 h-8 overflow-y-auto text-xs ${uploadError ? "text-red-500" : "text-fg-muted"}`}>{uploadNote}</p>
-      </div>
-      <div className="shrink-0 border-b border-border/70 px-4 py-2">
-        <input type="search" value={search} onChange={(event) => setSearch(event.target.value)}
-          aria-label={locale === "zh" ? "搜索 skills" : "Search skills"}
-          placeholder={locale === "zh" ? "搜索名称、描述或 ID…" : "Search name, description or ID…"}
-          className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-xs text-fg outline-none focus:border-accent" />
-        <p className="mt-1 text-[11px] text-fg-subtle" role="status">
-          {locale === "zh" ? `${filteredSkills.length} / ${skills.length} 个 skill` : `${filteredSkills.length} / ${skills.length} skills`}
-        </p>
+        <div className="flex items-center gap-2">
+          <input type="search" value={search} onChange={(event) => setSearch(event.target.value)}
+            aria-label={locale === "zh" ? "搜索 skills" : "Search skills"}
+            placeholder={locale === "zh" ? "搜索名称、描述或 ID…" : "Search name, description or ID…"}
+            className="min-w-0 flex-1 rounded-lg border border-border bg-bg px-3 py-2 text-xs text-fg outline-none focus:border-accent" />
+          <button type="button" disabled={uploadBusy} onClick={() => uploadRef.current?.click()}
+            title={locale === "zh" ? "上传包含 SKILL.md 的 ZIP 压缩包，最大 10 MB" : "Upload a ZIP containing SKILL.md, up to 10 MB"}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs text-fg hover:bg-bg-subtle disabled:opacity-50">
+            {uploadBusy ? <Loader2 size={13} className="animate-spin" /> : <FolderOpen size={13} />}
+            {locale === "zh" ? (uploadBusy ? "导入中…" : "上传") : (uploadBusy ? "Importing…" : "Upload")}
+          </button>
+        </div>
+        <div className="mt-1 flex justify-between gap-2 text-[11px] text-fg-subtle">
+          <span role="status">{locale === "zh" ? `${filteredSkills.length} / ${skills.length} 个 skill` : `${filteredSkills.length} / ${skills.length} skills`}</span>
+          <span>ZIP ≤ 10 MB · SKILL.md</span>
+        </div>
+        {uploadNote && <p role={uploadError ? "alert" : "status"} className={`mt-1 text-xs ${uploadError ? "text-red-500" : "text-fg-muted"}`}>{uploadNote}</p>}
       </div>
       <div ref={listRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-2">
         {filteredSkills.length === 0 && <p className="px-3 py-6 text-center text-xs text-fg-subtle">
@@ -1776,16 +1806,16 @@ function SkillPickerPopover({
           const active = selectedSkillIds.includes(skill.id);
           const display = localizedSkill(skill, locale);
           return (
-            <button
+            <div
               key={skill.id}
-              type="button"
-              onClick={() => onToggleSkill(skill.id)}
               className={`group flex w-full items-start gap-3 rounded-xl border px-3 py-3 text-left transition ${
                 active
                   ? "border-accent/45 bg-accent/10 text-fg shadow-sm"
                   : "border-border/70 bg-bg-elevated/55 text-fg-muted hover:border-accent/30 hover:bg-bg-subtle/70"
               }`}
             >
+              <button type="button" onClick={() => onToggleSkill(skill.id)} aria-pressed={active}
+                className="flex min-w-0 flex-1 items-start gap-3 text-left">
               <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition ${
                 active
                   ? "border-accent bg-accent text-accent-fg shadow-sm shadow-accent/25"
@@ -1797,10 +1827,37 @@ function SkillPickerPopover({
                 <span className="block text-sm font-semibold leading-tight text-fg">{display.name}</span>
                 <span className="mt-1 block text-xs leading-relaxed text-fg-muted">{display.description}</span>
               </span>
-            </button>
+              </button>
+              <button type="button" aria-label={locale === "zh" ? `删除 ${display.name}` : `Delete ${display.name}`}
+                title={locale === "zh" ? "删除 skill" : "Delete skill"}
+                onClick={() => { setDeleteError(null); setDeleteTarget(skill); }}
+                className="shrink-0 rounded-md p-1.5 text-fg-subtle transition hover:bg-red-500/10 hover:text-red-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
+                <Trash2 size={15} />
+              </button>
+            </div>
           );
         })}
       </div>
+      <dialog ref={dialogRef} aria-labelledby="skill-delete-title" aria-describedby="skill-delete-description"
+        className="fixed inset-0 m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-bg-elevated p-5 text-fg shadow-2xl backdrop:bg-black/40"
+        onCancel={(event) => { event.preventDefault(); if (!deleteBusy) setDeleteTarget(null); }}>
+        <h3 id="skill-delete-title" className="text-sm font-semibold">{locale === "zh" ? "确认删除 skill？" : "Delete this skill?"}</h3>
+        <p id="skill-delete-description" className="mt-2 break-words text-xs leading-relaxed text-fg-muted">
+          {locale === "zh"
+            ? `将删除「${deleteTarget ? localizedSkill(deleteTarget, locale).name : ""}」及其文件，并从项目共享列表移除。其他用户也将无法选择此 skill，历史对话保留。`
+            : `Delete “${deleteTarget?.name ?? ""}” and its files from the shared project list? Other users will no longer be able to select it. Existing conversations are kept.`}
+        </p>
+        {deleteError && <p role="alert" className="mt-2 text-xs text-red-500">{deleteError}</p>}
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" autoFocus disabled={deleteBusy} onClick={() => setDeleteTarget(null)}
+            className="rounded-lg border border-border px-3 py-2 text-xs disabled:opacity-50">{locale === "zh" ? "取消" : "Cancel"}</button>
+          <button type="button" disabled={deleteBusy} onClick={() => void confirmDelete()}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-2 text-xs text-white hover:bg-red-700 disabled:opacity-50">
+            {deleteBusy && <Loader2 size={13} className="animate-spin" />}
+            {locale === "zh" ? (deleteBusy ? "删除中…" : "确认删除") : (deleteBusy ? "Deleting…" : "Delete")}
+          </button>
+        </div>
+      </dialog>
     </div>,
     document.body,
   );

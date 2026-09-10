@@ -119,6 +119,39 @@ class SkillUploadTests(unittest.TestCase):
             with mock.patch.object(skills, "MAX_ARCHIVE_BYTES", 1):
                 self.assertEqual(client.post("/api/skills/upload", files={"file": ("big.zip", data)}).status_code, 413)
 
+    def test_delete_removes_files_and_prompt_without_touching_other_skills(self):
+        data = archive({"SKILL.md": "# Custom\nUnique SOP.", "references/a.md": "Evidence"})
+        skills.install_skill_archive(data, "remove-me.zip")
+        skills.install_skill_archive(data, "keep-me.zip")
+        skills.delete_skill("remove-me")
+        self.assertFalse((self.root / "remove-me").exists())
+        self.assertEqual(skills.build_skill_addendum(["remove-me"]), "")
+        self.assertEqual([s["id"] for s in skills.list_skills()], ["keep-me"])
+        with self.assertRaises(FileNotFoundError):
+            skills.delete_skill("remove-me")
+        for invalid in ("..", "../keep-me", "..\\keep-me", str(self.root), ".hidden"):
+            with self.assertRaises(ValueError):
+                skills.delete_skill(invalid)
+        self.assertTrue((self.root / "keep-me/SKILL.md").exists())
+
+    def test_delete_api_requires_login_and_reports_missing_skill(self):
+        from fastapi import FastAPI, HTTPException
+        from fastapi.testclient import TestClient
+        from server import routes
+
+        app = FastAPI()
+        app.include_router(routes.router)
+        client = TestClient(app)
+        skills.install_skill_archive(archive({"SKILL.md": "# Test\nSOP"}), "delete-me.zip")
+        with mock.patch.object(routes.auth, "require_user", side_effect=HTTPException(401, "Unauthorized")):
+            self.assertEqual(client.delete("/api/skills/delete-me").status_code, 401)
+        self.assertTrue((self.root / "delete-me").exists())
+        with mock.patch.object(routes.auth, "require_user", return_value={"id": "test"}):
+            response = client.delete("/api/skills/delete-me")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json(), {"deleted": "delete-me"})
+            self.assertEqual(client.delete("/api/skills/delete-me").status_code, 404)
+
 
 if __name__ == "__main__":
     unittest.main()

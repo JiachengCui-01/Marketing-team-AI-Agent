@@ -791,6 +791,13 @@ export async function uploadWorkflowSkill(file: File): Promise<WorkflowSkill> {
   return (await res.json()).skill;
 }
 
+export async function deleteWorkflowSkill(skillId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/skills/${encodeURIComponent(skillId)}`, {
+    method: "DELETE", headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+}
+
 export type ImageSkill = {
   id: ImageStyleKey;
   name: string;

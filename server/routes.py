@@ -1153,6 +1153,18 @@ async def upload_workflow_skill(request: Request, file: UploadFile = File(...)) 
         await file.close()
 
 
+@router.delete("/skills/{skill_id}")
+async def delete_workflow_skill(request: Request, skill_id: str) -> dict:
+    auth.require_user(request)
+    try:
+        await asyncio.to_thread(marketing_skills.delete_skill, skill_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Skill not found.") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"deleted": skill_id}
+
+
 def _attached_ids(file_ids: str | list[str] | None, csv_id: str | None = None) -> list[str]:
     ids: list[str] = []
     if isinstance(file_ids, str):
