@@ -10,7 +10,6 @@ import {
   refreshMarketOverview,
   type MarketBoardRow,
   type MarketConfigResponse,
-  type MarketPersona,
   type MarketReport,
 } from "@/lib/api";
 import { CitationMarkdown } from "@/components/citation-markdown";
@@ -22,29 +21,36 @@ import {
   DeltaBullet,
   Quadrant,
   ScoreBar,
+  Sparkline,
+  StackedRows,
+  Treemap,
   fmtMoney,
   fmtPct,
 } from "@/components/market/charts";
 import {
   BiTable,
   ConfidenceNote,
+  CoverageStrip,
   DataGapCard,
   EvidenceChip,
   GapList,
   KpiRow,
-  PersonaToggle,
+  MonitorBoard,
   Section,
-  SectionGate,
   VerdictChip,
-  usePersona,
   useScoreLabels,
 } from "@/components/market/shared";
 
 /** 全盘发现 — the furniture department, ranked.
  *
  * No category picking here: the system sweeps every tracked node itself and the
- * board is the answer to "where should we be looking". Every row drills into the
- * deep dive, which is the whole point of splitting the two surfaces.
+ * board is the answer to "where should we be looking". Every row drills into
+ * the deep dive, which is the whole point of splitting the two surfaces.
+ *
+ * One view, everything on it. The three-role switch this panel used to carry
+ * was hiding sections from people who then could not tell whether a number was
+ * missing or merely withheld — and the sections it hid (concentration, supply,
+ * the vendor spend) are exactly the ones that explain the headline.
  */
 export function MarketOverviewPanel({
   onDrill,
@@ -54,45 +60,34 @@ export function MarketOverviewPanel({
   const { t, locale } = useI18n();
   const labels = useScoreLabels();
   const [meta, setMeta] = useState<MarketConfigResponse | null>(null);
-  const [persona, setPersona] = usePersona();
   const [report, setReport] = useState<MarketReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<"" | "render" | "collect">("");
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(
-    async (who: MarketPersona) => {
-      setLoading(true);
-      setError(null);
-      try {
-        const [config, overview] = await Promise.all([
-          getMarketConfig(who),
-          getMarketOverview(who),
-        ]);
-        setMeta(config);
-        setReport(overview.report);
-        if (config.config?.persona && config.config.persona !== who) {
-          setPersona(config.config.persona as MarketPersona);
-        }
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setLoading(false);
-      }
-    },
-    [],
-  );
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [config, overview] = await Promise.all([getMarketConfig(), getMarketOverview()]);
+      setMeta(config);
+      setReport(overview.report);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    void load(persona);
-  }, [load, persona]);
+    void load();
+  }, [load]);
 
   async function refresh(collect: boolean) {
     setBusy(collect ? "collect" : "render");
     setError(null);
     try {
-      const next = await refreshMarketOverview({ persona, collect, language: locale });
-      setReport(next);
+      setReport(await refreshMarketOverview({ collect, language: locale }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -101,8 +96,12 @@ export function MarketOverviewPanel({
   }
 
   const dashboard = report?.dashboard;
-  const sections = dashboard?.sections ?? meta?.sections.overview ?? [];
-  const weights = dashboard?.score_model?.category_weights ?? meta?.score_model.category_weights ?? {};
+  const weights =
+    dashboard?.score_model?.category_weights ?? meta?.score_model.category_weights ?? {};
+  const pick = (nodeKey: string) => {
+    const row = dashboard?.board?.find((b) => b.node_key === nodeKey);
+    if (row) onDrill({ nodeKey, label: row.label });
+  };
 
   if (loading) return <LoadingCard label={t.gmTitle} variant="selection" />;
 
@@ -113,9 +112,6 @@ export function MarketOverviewPanel({
         <span className="text-sm font-medium">{t.gmTitle}</span>
         <span className="text-[11px] text-fg-subtle">{t.gmSubtitle}</span>
         <div className="ml-auto flex items-center gap-2">
-          {meta ? (
-            <PersonaToggle personas={meta.personas} value={persona} onChange={setPersona} />
-          ) : null}
           <button onClick={() => refresh(false)} disabled={busy !== ""}
                   className="btn-ghost h-8 px-2 text-xs">
             <ArrowsClockwise size={14} weight="duotone" />
@@ -146,135 +142,184 @@ export function MarketOverviewPanel({
           <DataGapCard summary={report.summary} onRetry={() => refresh(true)} />
         ) : (
           <>
-            <SectionGate id="overview.headline" sections={sections}>
-              {() => (
-                <Section title={t.gmTitle}
-                         right={<span className="text-[10px] text-fg-subtle">
-                           {t.gmPeriod} {report.period}
-                         </span>}>
-                  <KpiRow kpis={dashboard?.headline?.kpis ?? []} />
-                </Section>
-              )}
-            </SectionGate>
+            <Section title={t.gmTitle}
+                     right={<span className="text-[10px] text-fg-subtle">
+                       {t.gmPeriod} {report.period}
+                     </span>}>
+              <KpiRow kpis={dashboard?.headline?.kpis ?? []} />
+            </Section>
 
-            <SectionGate id="overview.thesis" sections={sections}>
-              {() =>
-                dashboard?.thesis ? (
-                  <Section title={t.gmThesis}>
-                    <div className="text-sm leading-relaxed">
-                      <CitationMarkdown content={dashboard.thesis} />
-                    </div>
-                  </Section>
-                ) : null
-              }
-            </SectionGate>
+            {dashboard?.thesis ? (
+              <Section title={t.gmThesis}>
+                <div className="text-sm leading-relaxed">
+                  <CitationMarkdown content={dashboard.thesis} />
+                </div>
+              </Section>
+            ) : null}
 
-            <SectionGate id="overview.board" sections={sections}>
-              {(detail) => (
-                <Section title={t.gmBoard} hint={t.gmBoardHint}>
-                  <div className="space-y-2">
-                    {(dashboard?.board ?? [])
-                      .slice(0, detail === "headline" ? 5 : undefined)
-                      .map((row, index) => (
-                        <BoardRow key={row.node_key} row={row} rank={index + 1}
-                                  compact={detail === "headline"} weights={weights}
-                                  labels={labels}
-                                  verdict={dashboard?.verdicts?.[row.node_key]}
-                                  onDrill={onDrill} />
-                      ))}
-                  </div>
-                </Section>
-              )}
-            </SectionGate>
+            <MonitorBoard monitor={dashboard?.monitor}
+                          summary={dashboard?.monitor_summary}
+                          onDrill={onDrill} />
 
-            <SectionGate id="overview.movers" sections={sections}>
-              {() => <Movers dashboard={dashboard} onDrill={onDrill} />}
-            </SectionGate>
+            <Section title={t.gmBoard} hint={t.gmBoardHint}>
+              <div className="space-y-2">
+                {(dashboard?.board ?? []).map((row, index) => (
+                  <BoardRow key={row.node_key} row={row} rank={index + 1} weights={weights}
+                            labels={labels} verdict={dashboard?.verdicts?.[row.node_key]}
+                            onDrill={onDrill} />
+                ))}
+              </div>
+            </Section>
 
-            <SectionGate id="overview.returnrisk" sections={sections}>
-              {() => (
-                <Section title={t.gmReturnRisk}>
-                  <BiTable
-                    rows={dashboard?.returnrisk ?? []}
-                    columns={[
-                      { key: "label", label: t.gmBoard },
-                      { key: "rate", label: t.gmReturnRate, numeric: true,
-                        render: (row: any) => fmtPct(row.return_ratio_pct, 2) },
-                      { key: "bench", label: t.gmReturnBenchmark, numeric: true,
-                        render: (row: any) => fmtPct(row.return_ratio_avg_pct, 2) },
-                      { key: "bar", label: "", render: (row: any) => (
-                        <Bullet value={row.return_ratio_pct ?? 0}
-                                benchmark={row.return_ratio_avg_pct}
-                                max={Math.max(4, row.return_ratio_avg_pct ?? 0)} />
-                      ) },
-                    ]}
-                  />
-                </Section>
-              )}
-            </SectionGate>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Section title={t.gmTreemap} hint={t.gmTreemapHint}>
+                <Treemap items={dashboard?.treemap ?? []} onPick={pick} />
+              </Section>
+              <Section title={t.gmTrend}>
+                <Sparkline points={(dashboard?.trend ?? []).map((p) => ({
+                  period: p.period, value: p.value,
+                }))} height={96} />
+                <div className="mt-3">
+                  <Movers dashboard={dashboard} onDrill={onDrill} inline />
+                </div>
+              </Section>
+            </div>
 
-            <SectionGate id="overview.map" sections={sections}>
-              {() => (
-                <Section title={t.gmMap}>
-                  <Quadrant points={dashboard?.map ?? []} xLabel={t.gmMapX} yLabel={t.gmMapY}
-                            onPick={(nodeKey) => {
-                              const row = dashboard?.board?.find((b) => b.node_key === nodeKey);
-                              if (row) onDrill({ nodeKey, label: row.label });
-                            }} />
-                </Section>
-              )}
-            </SectionGate>
+            <Section title={t.gmMap}>
+              <Quadrant points={dashboard?.map ?? []} xLabel={t.gmMapX} yLabel={t.gmMapY}
+                        onPick={pick} />
+            </Section>
 
-            <SectionGate id="overview.newproduct" sections={sections}>
-              {() => (
-                <Section title={t.gmNewProduct}>
-                  <BiTable
-                    rows={dashboard?.newproduct ?? []}
-                    onPick={(row: any) => onDrill({ nodeKey: row.node_key, label: row.label })}
-                    columns={[
-                      { key: "label", label: t.gmBoard },
-                      { key: "share", label: t.gmNewShare, numeric: true,
-                        render: (row: any) => fmtPct(row.new_revenue_share_pct) },
-                      { key: "completeness", label: t.cdCompleteness, numeric: true,
-                        render: (row: any) => fmtPct((row.completeness ?? 0) * 100, 0) },
-                    ]}
-                  />
-                </Section>
-              )}
-            </SectionGate>
+            <Section title={t.gmReturnRisk}>
+              <BiTable
+                rows={dashboard?.returnrisk ?? []}
+                onPick={(row: any) => onDrill({ nodeKey: row.node_key, label: row.label })}
+                columns={[
+                  { key: "label", label: t.gmBoard },
+                  { key: "rate", label: t.gmReturnRate, numeric: true,
+                    render: (row: any) => fmtPct(row.return_ratio_pct, 2) },
+                  { key: "bench", label: t.gmReturnBenchmark, numeric: true,
+                    render: (row: any) => fmtPct(row.return_ratio_avg_pct, 2) },
+                  { key: "bar", label: "", render: (row: any) => (
+                    <Bullet value={row.return_ratio_pct ?? 0}
+                            benchmark={row.return_ratio_avg_pct}
+                            max={Math.max(4, row.return_ratio_avg_pct ?? 0)} />
+                  ) },
+                ]}
+              />
+            </Section>
 
-            <SectionGate id="overview.price" sections={sections}>
-              {() => (
-                <Section title={t.gmPrice}>
-                  <BandHistogram bands={dashboard?.price ?? []}
-                                 listingLabel={t.gmPriceListings}
-                                 revenueLabel={t.gmPriceRevenue} />
-                </Section>
-              )}
-            </SectionGate>
+            <Section title={t.gmPrice}>
+              <BandHistogram bands={dashboard?.price ?? []}
+                             listingLabel={t.gmPriceListings}
+                             revenueLabel={t.gmPriceRevenue} />
+            </Section>
 
-            <SectionGate id="overview.concentration" sections={sections}>
-              {() => (
-                <Section title={t.gmConcentration}>
-                  <BiTable
-                    rows={dashboard?.concentration ?? []}
-                    columns={[
-                      { key: "label", label: t.gmBoard },
-                      { key: "share", label: t.gmConcentration, numeric: true,
-                        render: (row: any) => fmtPct(row.top5_brand_share_pct) },
-                    ]}
-                  />
-                </Section>
-              )}
-            </SectionGate>
+            <Section title={t.gmNewProduct}>
+              <BiTable
+                rows={dashboard?.newproduct ?? []}
+                onPick={(row: any) => onDrill({ nodeKey: row.node_key, label: row.label })}
+                columns={[
+                  { key: "label", label: t.gmBoard },
+                  { key: "share", label: t.gmNewShare, numeric: true,
+                    render: (row: any) => fmtPct(row.new_revenue_share_pct) },
+                  { key: "count", label: t.gmNewCount, numeric: true,
+                    render: (row: any) => row.new_count_l12 ?? "—" },
+                  { key: "reviews", label: t.gmNewReviews, numeric: true,
+                    render: (row: any) => row.new_avg_reviews_l12 != null
+                      ? Math.round(row.new_avg_reviews_l12).toLocaleString() : "—" },
+                  { key: "completeness", label: t.cdCompleteness, numeric: true,
+                    render: (row: any) => fmtPct((row.completeness ?? 0) * 100, 0) },
+                ]}
+              />
+            </Section>
 
-            <SectionGate id="overview.budget" sections={sections}>
-              {() => <BudgetSection />}
-            </SectionGate>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Section title={t.gmSupply}>
+                <BiTable
+                  rows={dashboard?.supply ?? []}
+                  onPick={(row: any) => onDrill({ nodeKey: row.node_key, label: row.label })}
+                  columns={[
+                    { key: "label", label: "" },
+                    { key: "products", label: t.gmSupplyProducts, numeric: true },
+                    { key: "sellers", label: t.gmSupplySellers, numeric: true },
+                    { key: "brands", label: t.gmSupplyBrands, numeric: true },
+                    { key: "per", label: t.gmSupplyPerListing, numeric: true,
+                      render: (row: any) => fmtMoney(row.revenue_per_listing) },
+                  ]}
+                />
+              </Section>
+              <Section title={t.gmQuality}>
+                <BiTable
+                  rows={dashboard?.quality ?? []}
+                  onPick={(row: any) => onDrill({ nodeKey: row.node_key, label: row.label })}
+                  columns={[
+                    { key: "label", label: "" },
+                    { key: "avg_rating", label: t.gmQualityRating, numeric: true },
+                    { key: "avg_ratings", label: t.gmQualityRatings, numeric: true,
+                      render: (row: any) => row.avg_ratings != null
+                        ? Math.round(row.avg_ratings).toLocaleString() : "—" },
+                    { key: "head", label: t.gmQualityHead, numeric: true,
+                      render: (row: any) => row.head_avg_ratings != null
+                        ? Math.round(row.head_avg_ratings).toLocaleString() : "—" },
+                    { key: "headprice", label: t.gmQualityHeadPrice, numeric: true,
+                      render: (row: any) => fmtMoney(row.head_avg_price) },
+                  ]}
+                />
+              </Section>
+            </div>
 
-            <SectionGate id="overview.gaps" sections={sections}>
-              {() => <GapList gaps={dashboard?.gaps} />}
-            </SectionGate>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Section title={t.gmFulfilment}>
+                <StackedRows
+                  rows={dashboard?.fulfilment ?? []}
+                  onPick={pick}
+                  series={[
+                    { key: "fba_pct", label: t.gmFulfilmentFba },
+                    { key: "fbm_pct", label: t.gmFulfilmentFbm },
+                    { key: "amazon_self_pct", label: t.gmFulfilmentAmazon },
+                  ]}
+                />
+              </Section>
+              <Section title={t.gmConversion}>
+                <BiTable
+                  rows={dashboard?.conversion ?? []}
+                  onPick={(row: any) => onDrill({ nodeKey: row.node_key, label: row.label })}
+                  columns={[
+                    { key: "label", label: "" },
+                    { key: "rate", label: t.gmConversionRate, numeric: true,
+                      render: (row: any) => row.search_purchase_ratio?.toFixed?.(2) ?? "—" },
+                    { key: "peer", label: t.gmConversionPeer, numeric: true,
+                      render: (row: any) => row.search_purchase_ratio_avg?.toFixed?.(2) ?? "—" },
+                    { key: "views", label: t.gmConversionViews, numeric: true,
+                      render: (row: any) => row.glance_views != null
+                        ? Math.round(row.glance_views).toLocaleString() : "—" },
+                  ]}
+                />
+              </Section>
+            </div>
+
+            <Section title={t.gmConcentration}>
+              <BiTable
+                rows={dashboard?.concentration ?? []}
+                onPick={(row: any) => onDrill({ nodeKey: row.node_key, label: row.label })}
+                columns={[
+                  { key: "label", label: t.gmBoard },
+                  { key: "b5", label: "Top5 brand", numeric: true,
+                    render: (row: any) => fmtPct(row.top5_brand_share_pct) },
+                  { key: "b10", label: "Top10 brand", numeric: true,
+                    render: (row: any) => fmtPct(row.top10_brand_share_pct) },
+                  { key: "s5", label: "Top5 seller", numeric: true,
+                    render: (row: any) => fmtPct(row.top5_seller_share_pct) },
+                  { key: "p5", label: "Top5 ASIN", numeric: true,
+                    render: (row: any) => fmtPct(row.top5_product_share_pct) },
+                ]}
+              />
+            </Section>
+
+            <CoverageStrip coverage={dashboard?.coverage} />
+            <BudgetSection />
+            <GapList gaps={dashboard?.gaps} />
 
             <footer className="mt-4 border-t border-border pt-2 text-[10px] text-fg-subtle">
               {report.generated_at
@@ -282,9 +327,6 @@ export function MarketOverviewPanel({
                     locale === "zh" ? "zh-CN" : "en-US")
                 : null}
               {report.vendor_tools?.length ? ` · ${report.vendor_tools.join(", ")}` : null}
-              {dashboard?.hidden_sections
-                ? ` · ${t.pvHidden} (${dashboard.hidden_sections})`
-                : null}
             </footer>
           </>
         )}
@@ -296,7 +338,6 @@ export function MarketOverviewPanel({
 function BoardRow({
   row,
   rank,
-  compact,
   weights,
   labels,
   verdict,
@@ -304,7 +345,6 @@ function BoardRow({
 }: {
   row: MarketBoardRow;
   rank: number;
-  compact: boolean;
   weights: Record<string, number>;
   labels: Record<string, string>;
   verdict?: { verdict: string; rationale: string; evidence_ids: string[] };
@@ -333,21 +373,19 @@ function BoardRow({
           {verdict?.rationale ? (
             <p className="mt-0.5 text-[11px] text-fg-muted">{verdict.rationale}</p>
           ) : null}
-          {compact ? null : (
-            <div className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px] text-fg-muted sm:grid-cols-4">
-              <span>{fmtMoney(row.revenue_est)}*</span>
-              <span>{fmtPct(row.growth_pct)}</span>
-              <span>{fmtMoney(row.median_price)}</span>
-              <span>{fmtPct(row.top5_brand_share_pct)}</span>
-            </div>
-          )}
+          <div className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px] text-fg-muted sm:grid-cols-4">
+            <span>{fmtMoney(row.revenue_est)}*</span>
+            <span>{fmtPct(row.growth_pct)}</span>
+            <span>{fmtMoney(row.median_price)}</span>
+            <span>{fmtPct(row.top5_brand_share_pct)}</span>
+          </div>
         </div>
         <div className="w-28 shrink-0 text-right">
           <div className="text-lg font-semibold" style={{ fontVariantNumeric: "tabular-nums" }}>
             {row.category_score}
           </div>
           <ScoreBar score={row.category_score} breakdown={row.score_breakdown}
-                    weights={weights} labels={labels} compact={compact} />
+                    weights={weights} labels={labels} />
           <ConfidenceNote value={row.score_confidence} />
         </div>
       </div>
@@ -358,9 +396,11 @@ function BoardRow({
 function Movers({
   dashboard,
   onDrill,
+  inline = false,
 }: {
   dashboard: any;
   onDrill: (node: { nodeKey: string; label: string }) => void;
+  inline?: boolean;
 }) {
   const { t } = useI18n();
   const rising = dashboard?.movers?.rising ?? [];
@@ -378,7 +418,7 @@ function Movers({
           <button key={row.node_key}
                   onClick={() => onDrill({ nodeKey: row.node_key, label: row.label })}
                   className="flex w-full items-center gap-2 text-left text-xs hover:text-accent">
-            <span className="w-28 shrink-0 truncate">{row.label}</span>
+            <span className="w-24 shrink-0 truncate">{row.label}</span>
             <DeltaBullet value={row.growth_pct ?? 0} max={max} />
             <span className="w-14 shrink-0 text-right"
                   style={{ fontVariantNumeric: "tabular-nums" }}>
@@ -389,14 +429,21 @@ function Movers({
       </div>
     </div>
   );
-  return (
-    <Section title={t.gmMovers}>
-      <div className="flex flex-col gap-4 sm:flex-row">
-        {column(rising, t.gmMoversRising)}
-        {column(declining, t.gmMoversDeclining)}
-      </div>
-    </Section>
+  const body = (
+    <div className="flex flex-col gap-4 sm:flex-row">
+      {column(rising, t.gmMoversRising)}
+      {column(declining, t.gmMoversDeclining)}
+    </div>
   );
+  if (inline) {
+    return (
+      <>
+        <div className="mb-1 text-[11px] text-fg-muted">{t.gmMovers}</div>
+        {body}
+      </>
+    );
+  }
+  return <Section title={t.gmMovers}>{body}</Section>;
 }
 
 function BudgetSection() {

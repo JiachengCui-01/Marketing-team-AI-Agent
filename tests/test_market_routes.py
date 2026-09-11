@@ -45,36 +45,23 @@ class MarketRouteTests(unittest.TestCase):
 
     # ----- config ---------------------------------------------------------
 
-    def test_config_ships_personas_sections_nodes_and_weights(self) -> None:
+    def test_config_ships_nodes_and_weights(self) -> None:
         body = self.client.get("/api/market/config", headers=self.headers).json()
-        self.assertEqual({p["id"] for p in body["personas"]}, {"boss", "pm", "analyst"})
-        self.assertTrue(body["sections"]["overview"])
-        self.assertTrue(body["sections"]["category"])
         self.assertTrue(any(n["node_key"] == BUFFETS for n in body["nodes"]))
         self.assertEqual(body["score_model"]["version"], "v2")
 
-    def test_sections_narrow_for_the_boss(self) -> None:
-        boss = self.client.get("/api/market/config?persona=boss",
-                               headers=self.headers).json()
-        analyst = self.client.get("/api/market/config?persona=analyst",
-                                  headers=self.headers).json()
-        self.assertLess(len(boss["sections"]["overview"]),
-                        len(analyst["sections"]["overview"]))
+    def test_config_no_longer_ships_a_view_switch(self) -> None:
+        """Both surfaces show every section; nothing is gated by role."""
+        body = self.client.get("/api/market/config", headers=self.headers).json()
+        self.assertNotIn("personas", body)
+        self.assertNotIn("sections", body)
 
-    def test_saving_a_config_persists_the_persona(self) -> None:
+    def test_saving_a_config_persists_the_overview_flag(self) -> None:
         response = self.client.put("/api/market/config", headers=self.headers, json={
             "scope": "all", "marketplace": "US", "refresh_time": "09:00",
-            "persona": "analyst", "overview_enabled": False})
+            "overview_enabled": False})
         self.assertEqual(response.status_code, 200, response.text)
-        config = response.json()["config"]
-        self.assertEqual(config["persona"], "analyst")
-        self.assertFalse(config["overview_enabled"])
-
-    def test_an_unknown_persona_falls_back_rather_than_erroring(self) -> None:
-        response = self.client.put("/api/market/config", headers=self.headers, json={
-            "scope": "all", "marketplace": "US", "refresh_time": "09:00",
-            "persona": "ceo"})
-        self.assertEqual(response.json()["config"]["persona"], "pm")
+        self.assertFalse(response.json()["config"]["overview_enabled"])
 
     def test_config_still_validates_like_the_selection_form(self) -> None:
         bad = self.client.put("/api/market/config", headers=self.headers, json={
@@ -87,7 +74,7 @@ class MarketRouteTests(unittest.TestCase):
     def test_overview_is_null_before_anything_is_rendered(self) -> None:
         body = self.client.get("/api/market/overview", headers=self.headers).json()
         self.assertIsNone(body["report"])
-        self.assertTrue(body["sections"])
+        self.assertIn("available", body)
 
     def test_a_refresh_without_collect_spends_nothing(self) -> None:
         """Re-rendering is free; only an explicit collect can touch the vendor."""
@@ -111,22 +98,32 @@ class MarketRouteTests(unittest.TestCase):
                              json={"period": PERIOD})
         body = self.client.get("/api/market/overview", headers=self.headers).json()
         self.assertIsNotNone(body["report"])
-        self.assertTrue(body["report"]["dashboard"]["sections"])
+        self.assertTrue(body["report"]["dashboard"]["board"])
 
-    def test_switching_persona_costs_no_model_call(self) -> None:
+    def test_re_reading_the_board_costs_no_model_call(self) -> None:
         fake = FakeClient({"publish_market_overview": {"thesis": "ok",
                                                        "category_verdicts": []}})
         with mock.patch.object(routes.llm, "get_client", return_value=fake):
             self.client.post("/api/market/overview/refresh", headers=self.headers,
                              json={"period": PERIOD})
         calls = len(fake.prompts)
-        boss = self.client.get("/api/market/overview?persona=boss",
-                               headers=self.headers).json()
+        body = self.client.get("/api/market/overview", headers=self.headers).json()
         self.assertEqual(len(fake.prompts), calls)
-        self.assertLess(len(boss["report"]["dashboard"]["sections"]),
-                        len(store.latest_dashboard(marketplace="US", scope="overview",
-                                                   language="zh")["dashboard"]["sections"])
-                        + 99)   # sections are re-gated on read
+        self.assertTrue(body["report"]["dashboard"]["board"])
+
+    def test_the_board_ships_the_monitor_and_the_coverage_panel(self) -> None:
+        with mock.patch.object(routes.llm, "get_client",
+                               return_value=FakeClient({"publish_market_overview": {
+                                   "thesis": "ok", "category_verdicts": []}})):
+            response = self.client.post("/api/market/overview/refresh",
+                                        headers=self.headers, json={"period": PERIOD})
+        dashboard = response.json()["report"]["dashboard"]
+        self.assertIn("monitor", dashboard)
+        self.assertIn("risks", dashboard["monitor"])
+        self.assertIn("opportunities", dashboard["monitor"])
+        self.assertTrue(dashboard["coverage"]["families"])
+        self.assertLessEqual(dashboard["coverage"]["present"],
+                             dashboard["coverage"]["total"])
 
     def test_collect_without_a_vendor_key_is_a_502(self) -> None:
         with mock.patch.object(routes, "sellersprite_configured", return_value=False):

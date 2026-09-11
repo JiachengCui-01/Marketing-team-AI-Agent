@@ -296,6 +296,26 @@ def get_distribution(marketplace: str, node_id_path: str, period: str, kind: str
         ))
 
 
+def all_distributions(marketplace: str, node_id_path: str, period: str) -> dict[str, list[dict]]:
+    """Every distribution kind held for one node-month, keyed by kind.
+
+    The rotating collector buys a different distribution each month, so which
+    kinds exist is data, not a constant — the caller renders what came back
+    rather than asking for a fixed five and drawing four empty charts.
+    """
+    db._ensure()
+    with db.connect() as conn:
+        rows = _rows(conn.execute(
+            "SELECT * FROM market_distributions WHERE marketplace = ? AND node_id_path = ? "
+            "AND period = ? ORDER BY kind ASC, bucket_order ASC",
+            (marketplace, node_id_path, period),
+        ))
+    out: dict[str, list[dict]] = {}
+    for row in rows:
+        out.setdefault(row["kind"], []).append(row)
+    return out
+
+
 def replace_concentration(
     marketplace: str, node_id_path: str, period: str, kind: str, entities: Iterable[dict]
 ) -> int:
@@ -338,6 +358,25 @@ def get_concentration(
             "AND period = ? AND kind = ? ORDER BY rank ASC LIMIT ?",
             (marketplace, node_id_path, period, kind, limit),
         ))
+
+
+def all_concentration(
+    marketplace: str, node_id_path: str, period: str, *, limit: int = 15
+) -> dict[str, list[dict]]:
+    """Every concentration kind held for one node-month, keyed by kind."""
+    db._ensure()
+    with db.connect() as conn:
+        rows = _rows(conn.execute(
+            "SELECT * FROM market_concentration WHERE marketplace = ? AND node_id_path = ? "
+            "AND period = ? ORDER BY kind ASC, rank ASC",
+            (marketplace, node_id_path, period),
+        ))
+    out: dict[str, list[dict]] = {}
+    for row in rows:
+        bucket = out.setdefault(row["kind"], [])
+        if len(bucket) < limit:
+            bucket.append(row)
+    return out
 
 
 # ---------------------------------------------------------------- products ----
@@ -504,6 +543,29 @@ def top_keywords(
         return _rows(conn.execute(sql, params))
 
 
+def keyword_series(
+    marketplace: str, node_id_path: str, column: str = "google_trend_index",
+    *, limit: int = 24,
+) -> list[dict]:
+    """One keyword column as a monthly series for a node, oldest first.
+
+    Off-Amazon demand is collected against the node's own label, so the series
+    is addressed by node rather than by keyword: the caller charting it does not
+    need to know which seed phrase the collector happened to use.
+    """
+    if column not in {"google_trend_index", "searches", "supply_demand_ratio"}:
+        raise ValueError(f"unsupported keyword series column: {column}")
+    db._ensure()
+    with db.connect() as conn:
+        rows = _rows(conn.execute(
+            f"SELECT period, keyword, {column} AS value FROM market_keyword_metrics "
+            "WHERE marketplace = ? AND node_id_path = ? AND grain = 'month' "
+            f"AND {column} IS NOT NULL ORDER BY period DESC LIMIT ?",
+            (marketplace, node_id_path, limit),
+        ))
+    return list(reversed(rows))
+
+
 def upsert_keyword_edges(rows: Iterable[dict]) -> int:
     db._ensure()
     now = _now()
@@ -648,6 +710,31 @@ def get_evidence(ids: Sequence[str]) -> list[dict]:
     return rows
 
 
+def evidence_ids_by_metric(
+    marketplace: str, subject_kind: str, subject_id: str, period: str,
+    metrics: Sequence[str],
+) -> dict[str, str]:
+    """Map metric name -> evidence id for one subject-period.
+
+    Deterministic ids are minted from the tool that produced the number, and the
+    monitor does not know which tool that was, so it names the metric and looks
+    the id up here rather than trying to reconstruct it.
+    """
+    if not metrics:
+        return {}
+    db._ensure()
+    marks = ", ".join("?" for _ in metrics)
+    params: list[Any] = [marketplace, subject_kind, subject_id, period, *metrics]
+    with db.connect() as conn:
+        rows = _rows(conn.execute(
+            f"SELECT metric, id FROM market_evidence WHERE marketplace = ? "
+            f"AND subject_kind = ? AND subject_id = ? AND period = ? "
+            f"AND metric IN ({marks})",
+            params,
+        ))
+    return {row["metric"]: row["id"] for row in rows}
+
+
 def evidence_for(
     marketplace: str, subjects: Sequence[tuple[str, str]], period: str, *, limit: int = 600,
 ) -> list[dict]:
@@ -670,6 +757,66 @@ def evidence_for(
         row["arguments"] = _json_load(row.pop("arguments_json", "{}"), {})
         row["observed"] = bool(row.get("observed"))
     return rows
+
+
+def coverage_counts(marketplace: str, period: str) -> dict[str, int]:
+    """How many rows of each vendor data family landed for one period.
+
+    The panel that reports "we are using 19 of the vendor's data types" has to
+    read it off the warehouse rather than off the job catalog: a job can be
+    marked done and still have written nothing, and a family nobody notices is
+    missing is a family nobody notices we stopped paying for.
+    """
+    db._ensure()
+    counts: dict[str, int] = {}
+    with db.connect() as conn:
+        def scalar(sql: str, params: Sequence[Any]) -> int:
+            row = conn.execute(sql, params).fetchone()
+            return int(row[0] or 0)
+
+        for family, column in (("category_structure", "total_revenue"),
+                               ("category_statistics", "hl_avg_ratings"),
+                               ("demand_trend", "return_ratio"),
+                               ("fulfilment_mix", "fba_proportion"),
+                               ("newcomer_metrics", "new_ratio_l12")):
+            counts[family] = scalar(
+                f"SELECT COUNT(*) FROM market_node_snapshots WHERE marketplace = ? "
+                f"AND period = ? AND {column} IS NOT NULL", (marketplace, period))
+
+        for row in conn.execute(
+                "SELECT kind, COUNT(*) AS n FROM market_distributions "
+                "WHERE marketplace = ? AND period = ? GROUP BY kind",
+                (marketplace, period)):
+            counts[f"distribution_{row['kind']}"] = int(row["n"])
+
+        for row in conn.execute(
+                "SELECT kind, COUNT(*) AS n FROM market_concentration "
+                "WHERE marketplace = ? AND period = ? GROUP BY kind",
+                (marketplace, period)):
+            counts[f"concentration_{row['kind']}"] = int(row["n"])
+
+        counts["product_research"] = scalar(
+            "SELECT COUNT(*) FROM market_product_metrics WHERE marketplace = ? "
+            "AND period = ?", (marketplace, period))
+        counts["traffic_source"] = scalar(
+            "SELECT COUNT(*) FROM market_product_metrics WHERE marketplace = ? "
+            "AND period = ? AND natural_proportion IS NOT NULL", (marketplace, period))
+        counts["keyword_research"] = scalar(
+            "SELECT COUNT(*) FROM market_keyword_metrics WHERE marketplace = ? "
+            "AND period = ? AND searches IS NOT NULL", (marketplace, period))
+        counts["google_trend"] = scalar(
+            "SELECT COUNT(*) FROM market_keyword_metrics WHERE marketplace = ? "
+            "AND google_trend_index IS NOT NULL", (marketplace,))
+        counts["traffic_keyword"] = scalar(
+            "SELECT COUNT(*) FROM market_keyword_asin_edges WHERE marketplace = ? "
+            "AND period = ?", (marketplace, period))
+        counts["asin_prediction"] = scalar(
+            "SELECT COUNT(*) FROM market_product_history WHERE marketplace = ?",
+            (marketplace,))
+        counts["review"] = scalar(
+            "SELECT COUNT(*) FROM market_review_themes WHERE marketplace = ? "
+            "AND period = ?", (marketplace, period))
+    return counts
 
 
 # ------------------------------------------------------------ call logging ----

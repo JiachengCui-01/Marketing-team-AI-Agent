@@ -20,7 +20,6 @@ from marketing_agent.agents.image_skills import IMAGE_SKILLS, select_image_skill
 from marketing_agent.tools.mcp_client import McpUnavailable
 from server.market import deepdive as market_deepdive
 from server.market import gateway as market_gateway
-from server.market import personas as market_personas
 from server.market import prd as market_prd
 from server.market import render as market_render
 from server.market import scoring as market_scoring
@@ -578,11 +577,6 @@ def _market_language(payload: dict, config: dict | None) -> str:
     return language if language in {"zh", "en"} else "zh"
 
 
-def _market_persona(request: Request, config: dict | None) -> str:
-    return market_personas.normalize(
-        request.query_params.get("persona") or (config or {}).get("persona"))
-
-
 def _market_period(request: Request) -> str:
     raw = (request.query_params.get("period") or "").strip()
     digits = "".join(ch for ch in raw if ch.isdigit())
@@ -593,16 +587,10 @@ def _market_period(request: Request) -> str:
 def market_config(request: Request) -> dict:
     user = auth.require_user(request)
     config = _resolved_selection_config(user["id"])
-    persona = _market_persona(request, config)
     return {
         "config": config,
         "available": sellersprite_configured(),
         "marketplaces": list(selection.MARKETPLACES),
-        "personas": market_personas.describe(),
-        "sections": {
-            "overview": market_personas.sections_for(persona, "overview"),
-            "category": market_personas.sections_for(persona, "category"),
-        },
         "score_model": market_scoring.score_model(),
         "nodes": [
             {
@@ -622,9 +610,8 @@ async def save_market_config(request: Request) -> dict:
     user = auth.require_user(request)
     payload = await request.json()
     fields = _validate_selection_payload(payload)
-    persona = market_personas.normalize(payload.get("persona"))
     overview_enabled = bool(payload.get("overview_enabled", True))
-    config = db.upsert_selection_config(user["id"], persona=persona,
+    config = db.upsert_selection_config(user["id"],
                                         overview_enabled=overview_enabled, **fields)
     return {"config": config}
 
@@ -634,17 +621,11 @@ def market_overview(request: Request) -> dict:
     user = auth.require_user(request)
     config = _resolved_selection_config(user["id"])
     language = str((config or {}).get("language") or "zh")
-    persona = _market_persona(request, config)
     record = market_store.latest_dashboard(marketplace="US", scope="overview",
                                            language=language)
     if record is None:
-        return {"report": None, "persona": persona,
-                "sections": market_personas.sections_for(persona, "overview"),
-                "available": sellersprite_configured()}
-    # Persona gating is applied on read, so switching view costs no model call.
-    record["dashboard"]["sections"] = market_personas.sections_for(persona, "overview")
-    record["dashboard"]["hidden_sections"] = market_personas.hidden_count(persona, "overview")
-    return {"report": record, "persona": persona, "available": sellersprite_configured()}
+        return {"report": None, "available": sellersprite_configured()}
+    return {"report": record, "available": sellersprite_configured()}
 
 
 @router.post("/market/overview/refresh")
@@ -657,8 +638,6 @@ async def refresh_market_overview(request: Request) -> dict:
     except Exception:  # noqa: BLE001 — tolerate a bodyless POST
         payload = {}
     language = _market_language(payload, config)
-    persona = market_personas.normalize(
-        payload.get("persona") or (config or {}).get("persona"))
     period = str(payload.get("period") or "") or None
 
     if payload.get("collect"):
@@ -674,8 +653,8 @@ async def refresh_market_overview(request: Request) -> dict:
     client = llm.get_client()
     record = await asyncio.to_thread(
         market_render.render_overview, marketplace="US", period=period,
-        language=language, client=client, persona=persona)
-    return {"report": record, "persona": persona}
+        language=language, client=client)
+    return {"report": record}
 
 
 @router.get("/market/categories")
@@ -712,17 +691,11 @@ def market_category(request: Request) -> dict:
     if not node:
         raise HTTPException(400, "缺少类目节点参数。")
     language = str((config or {}).get("language") or "zh")
-    persona = _market_persona(request, config)
     record = market_store.latest_dashboard(marketplace="US", scope="category",
                                            language=language, node_id_path=node)
     if record is None:
-        return {"report": None, "persona": persona,
-                "sections": market_personas.sections_for(persona, "category"),
-                "available": sellersprite_configured()}
-    record["dashboard"]["sections"] = market_personas.sections_for(persona, "category")
-    record["dashboard"]["hidden_sections"] = market_personas.hidden_count(
-        persona, "category")
-    return {"report": record, "persona": persona, "available": sellersprite_configured()}
+        return {"report": None, "available": sellersprite_configured()}
+    return {"report": record, "available": sellersprite_configured()}
 
 
 @router.post("/market/category/refresh")
@@ -738,8 +711,6 @@ async def refresh_market_category(request: Request) -> dict:
     if not node:
         raise HTTPException(400, "缺少类目节点参数。")
     language = _market_language(payload, config)
-    persona = market_personas.normalize(
-        payload.get("persona") or (config or {}).get("persona"))
     period = str(payload.get("period") or "") or None
 
     if payload.get("collect", True):
@@ -759,9 +730,9 @@ async def refresh_market_category(request: Request) -> dict:
     client = llm.get_client()
     record = await asyncio.to_thread(
         market_render.render_category, node_id_path=node, marketplace="US",
-        period=period, language=language, client=client, persona=persona,
+        period=period, language=language, client=client,
         user_id=user["id"])
-    return {"report": record, "persona": persona}
+    return {"report": record}
 
 
 @router.get("/market/evidence")

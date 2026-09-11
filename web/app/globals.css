@@ -1653,6 +1653,89 @@ select.field:focus {
     border-color: rgb(var(--danger) / 0.34);
     background: rgb(var(--danger) / 0.1);
   }
+  /* Treemap: area carries the share, opacity carries it again for anyone who
+     reads size poorly, and a declining tile is outlined rather than recoloured
+     so colour is never the only channel. */
+  .bi-tree-tile {
+    fill: rgb(var(--feature-selection));
+    stroke: rgb(var(--bg));
+    stroke-width: 0.3;
+  }
+  .bi-tree-down {
+    stroke: rgb(var(--danger) / 0.7);
+    stroke-width: 0.5;
+  }
+  .bi-tree-label {
+    fill: rgb(var(--fg));
+    font-size: 3.1px;
+    font-weight: 600;
+  }
+  .bi-tree-sub {
+    fill: rgb(var(--fg-muted));
+    font-size: 2.6px;
+  }
+  .bi-radar-shape {
+    fill: rgb(var(--feature-selection) / 0.22);
+    stroke: rgb(var(--feature-selection));
+    stroke-width: 1.5;
+  }
+  .bi-radar-parity {
+    fill: none;
+    stroke: rgb(var(--fg-muted) / 0.5);
+    stroke-width: 1;
+    stroke-dasharray: 2 3;
+  }
+  .bi-spark-alt {
+    stroke: rgb(var(--feature-selection) / 0.45);
+    stroke-dasharray: 4 3;
+  }
+  /* Monitoring. Severity is a left border plus a chip, never colour alone, and
+     a risk and an opportunity differ in shape as well as hue so the two columns
+     stay distinguishable in a screenshot. */
+  .bi-alert {
+    @apply rounded-lg border border-l-[3px] border-border bg-bg-elevated px-3 py-2 transition-colors;
+  }
+  .bi-alert:hover {
+    border-color: rgb(var(--feature-selection) / 0.34);
+  }
+  .bi-alert-risk-high {
+    border-left-color: rgb(var(--danger));
+    background: rgb(var(--danger) / 0.06);
+  }
+  .bi-alert-risk-medium {
+    border-left-color: rgb(var(--danger) / 0.6);
+  }
+  .bi-alert-risk-low {
+    border-left-color: rgb(var(--danger) / 0.3);
+  }
+  .bi-alert-opportunity-high {
+    border-left-color: rgb(var(--ok));
+    background: rgb(var(--ok) / 0.06);
+  }
+  .bi-alert-opportunity-medium {
+    border-left-color: rgb(var(--ok) / 0.6);
+  }
+  .bi-alert-opportunity-low {
+    border-left-color: rgb(var(--ok) / 0.3);
+  }
+  .bi-alert-metric {
+    @apply text-[10px] tabular-nums;
+    color: rgb(var(--fg-subtle));
+  }
+  /* Coverage: a family we never collected has to look different from one that
+     came back empty, so absence gets a dashed outline rather than a pale fill. */
+  .bi-cov {
+    @apply inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px];
+    border-color: rgb(var(--feature-selection) / 0.34);
+    background: rgb(var(--feature-selection) / 0.08);
+    color: rgb(var(--feature-selection));
+  }
+  .bi-cov-missing {
+    border-style: dashed;
+    border-color: rgb(var(--border));
+    background: transparent;
+    color: rgb(var(--fg-subtle));
+  }
   .input-inline {
     @apply rounded-lg border border-border bg-bg-elevated px-2 text-sm focus:outline-none focus:ring-1;
   }

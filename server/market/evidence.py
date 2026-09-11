@@ -203,7 +203,7 @@ class EvidenceIndex:
         )
         lines = [header]
         for row in list(self.rows.values())[:max_rows]:
-            value = row["value_text"] if row["value_num"] is None else _format(row["value_num"])
+            value, unit = _display(row["value_num"], row["value_text"], row["unit"])
             basis = ("实测" if row["observed"] else "估算") if language == "zh" else (
                 "observed" if row["observed"] else "ESTIMATE")
             quality = row["quality"]
@@ -211,7 +211,7 @@ class EvidenceIndex:
                 quality = f"{quality} n={row['sample_size']}"
             lines.append(
                 f"{row['id']} | {row['subject_id']} | {row['label']} | {value} | "
-                f"{row['unit']} | {row['period']} | {basis} | {quality}"
+                f"{unit} | {row['period']} | {basis} | {quality}"
             )
         if self.gaps:
             label = "数据缺口（这些字段未取到，不得推断）" if language == "zh" else (
@@ -224,6 +224,25 @@ def _format(value: float) -> str:
     if value == int(value) and abs(value) < 1e15:
         return f"{int(value):,}"
     return f"{value:,.2f}"
+
+
+def _display(value_num: float | None, value_text: str | None,
+             unit: str) -> tuple[str, str]:
+    """One evidence value as the model should copy it into prose.
+
+    Shares are stored as fractions, which is right for arithmetic and wrong for
+    reading: handed ``0.0177 share`` a model writes "0.0177" and a human reads
+    it as a rounding error. Worse, two decimal places turn a 1.77% return rate
+    into ``0.02``. Shares are therefore shown as percentages with enough digits
+    to survive, so the prose matches what the panels print beside it.
+    """
+    if value_num is None:
+        return (value_text or "—"), unit
+    if unit == "share":
+        percent = value_num * 100.0
+        digits = 2 if abs(percent) < 10 else 1
+        return f"{percent:,.{digits}f}", "%"
+    return _format(value_num), unit
 
 
 def index_from_rows(rows: Sequence[dict], *, marketplace: str = "US",

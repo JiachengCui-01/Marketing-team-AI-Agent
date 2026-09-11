@@ -566,6 +566,9 @@ CREATE TABLE IF NOT EXISTS market_product_metrics (
     ratings INTEGER,       -- observed
     sellers INTEGER, lqs REAL,
     units_gr REAL, bsr_cr REAL, ratings_cv REAL,
+    -- Traffic mix from traffic_source: whether entry is priced in reviews or in
+    -- ad spend. Collected per flagship ASIN per month.
+    natural_proportion REAL, ad_proportion REAL, recommendation_proportion REAL,
     badge TEXT,
     source_tool TEXT NOT NULL DEFAULT '',
     evidence_id TEXT,
@@ -856,7 +859,8 @@ def init() -> None:
             _migrate_evidence_explicit(conn)
             _migrate_kb_scope(conn)
             _migrate_calendar_status(conn)
-            _migrate_selection_persona(conn)
+            _migrate_selection_overview(conn)
+            _migrate_market_traffic_mix(conn)
             _seed_image_templates(conn)
         _INITIALIZED = True
 
@@ -894,20 +898,32 @@ def _migrate_kb_scope(conn: sqlite3.Connection) -> None:
             conn.execute("ALTER TABLE kb_documents ADD COLUMN scope TEXT NOT NULL DEFAULT 'org'")
 
 
-def _migrate_selection_persona(conn: sqlite3.Connection) -> None:
-    """The market surfaces reuse the selection config, plus a view preference.
+def _migrate_selection_overview(conn: sqlite3.Connection) -> None:
+    """``overview_enabled`` says whether the scheduler also refreshes the
+    furniture-wide board for this user.
 
-    ``persona`` gates which sections a user sees (server/market/personas.py) and
-    ``overview_enabled`` says whether the scheduler should also refresh the
-    furniture-wide board for them.
+    Databases created before the view switch was removed carry a ``persona``
+    column beside it. Nothing reads it and it has a default, so inserts that do
+    not name it still succeed; dropping it would buy nothing and cost a table
+    rebuild.
     """
     cols = _table_columns(conn, "selection_configs")
-    if "persona" not in cols:
-        conn.execute("ALTER TABLE selection_configs ADD COLUMN persona TEXT NOT NULL "
-                     "DEFAULT 'pm'")
     if "overview_enabled" not in cols:
         conn.execute("ALTER TABLE selection_configs ADD COLUMN overview_enabled "
                      "INTEGER NOT NULL DEFAULT 1")
+
+
+def _migrate_market_traffic_mix(conn: sqlite3.Connection) -> None:
+    """Three columns the traffic_source collector was already paying for.
+
+    Without them ``upsert_product_metrics`` filtered the natural/ad/recommendation
+    split out against the table's own column list, so the deep dive's traffic
+    section rendered empty every month on data we had bought.
+    """
+    cols = _table_columns(conn, "market_product_metrics")
+    for column in ("natural_proportion", "ad_proportion", "recommendation_proportion"):
+        if column not in cols:
+            conn.execute(f"ALTER TABLE market_product_metrics ADD COLUMN {column} REAL")
 
 
 def _migrate_calendar_status(conn: sqlite3.Connection) -> None:
@@ -1887,7 +1903,6 @@ def _selection_config_row(row: sqlite3.Row | None) -> dict | None:
     data = dict(row)
     data["enabled"] = bool(data.get("enabled"))
     data["overview_enabled"] = bool(data.get("overview_enabled", 1))
-    data["persona"] = data.get("persona") or "pm"
     data["categories"] = _json_list(data.pop("categories_json", "[]"))
     return data
 
@@ -1917,7 +1932,6 @@ def upsert_selection_config(
     refresh_time: str = "09:00",
     timezone: str = "UTC",
     language: str = "zh",
-    persona: str = "pm",
     overview_enabled: bool = True,
 ) -> dict:
     _ensure()
@@ -1926,17 +1940,17 @@ def upsert_selection_config(
     with _connect() as conn:
         conn.execute(
             "INSERT INTO selection_configs (user_id, scope, categories_json, marketplace, "
-            "refresh_time, timezone, language, persona, overview_enabled, enabled, "
+            "refresh_time, timezone, language, overview_enabled, enabled, "
             "created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?) "
             "ON CONFLICT(user_id) DO UPDATE SET scope = excluded.scope, "
             "categories_json = excluded.categories_json, marketplace = excluded.marketplace, "
             "refresh_time = excluded.refresh_time, timezone = excluded.timezone, "
-            "language = excluded.language, persona = excluded.persona, "
+            "language = excluded.language, "
             "overview_enabled = excluded.overview_enabled, enabled = 1, "
             "cancelled_at = NULL, updated_at = excluded.updated_at",
             (user_id, scope, payload, marketplace, refresh_time, timezone, language,
-             persona, 1 if overview_enabled else 0, now, now),
+             1 if overview_enabled else 0, now, now),
         )
     return get_selection_config(user_id)  # type: ignore[return-value]
 

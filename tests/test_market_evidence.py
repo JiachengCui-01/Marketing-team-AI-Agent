@@ -187,5 +187,35 @@ class CitationTests(unittest.TestCase):
         self.assertEqual(evidence.citation_notes([]), [])
 
 
+class SheetFormattingTests(unittest.TestCase):
+    """Shares are stored as fractions and must not be read out as fractions."""
+
+    def test_a_share_is_printed_as_a_percentage(self) -> None:
+        index = evidence.EvidenceIndex(marketplace="US", period="202609")
+        index.mint(subject_kind="node", subject_id="n", metric="return_ratio",
+                   value=0.0177, tool="market_research", unit="share")
+        sheet = index.sheet(language="zh")
+        self.assertIn("1.77", sheet)
+        self.assertNotIn("0.02", sheet)
+
+    def test_a_small_share_keeps_enough_digits_to_survive(self) -> None:
+        """Two decimals on the fraction would turn 1.77% into 0.02."""
+        index = evidence.EvidenceIndex(marketplace="US", period="202609")
+        index.mint(subject_kind="node", subject_id="n", metric="new_ratio_l12",
+                   value=0.0042, tool="market_research", unit="share")
+        self.assertIn("0.42", index.sheet(language="en"))
+
+    def test_non_share_units_are_left_alone(self) -> None:
+        index = evidence.EvidenceIndex(marketplace="US", period="202609")
+        index.mint(subject_kind="node", subject_id="n", metric="total_revenue",
+                   value=7_920_000.0, tool="market_research", unit="usd")
+        index.mint(subject_kind="keyword", subject_id="k",
+                   metric="supply_demand_ratio", value=24.8,
+                   tool="keyword_research", unit="ratio")
+        sheet = index.sheet(language="en")
+        self.assertIn("7,920,000", sheet)
+        self.assertIn("24.80", sheet)
+
+
 if __name__ == "__main__":
     unittest.main()

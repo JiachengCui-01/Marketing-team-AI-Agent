@@ -150,19 +150,22 @@ class OverviewTests(RenderTestCase):
         self.assertNotIn("nodeLabelPathLocale", prompt)   # no raw vendor payload
         self.assertIn("ESTIMATE", prompt.replace("估算", "ESTIMATE"))
 
+    def test_the_board_hands_the_model_the_alert_list(self) -> None:
+        """Without the brief the model must invent risks or omit the section."""
+        client = FakeClient({"publish_market_overview": self.OVERVIEW})
+        render.render_overview(client=client, period=PERIOD)
+        self.assertIn("RISK SIGNALS", client.prompts[0].replace("风险信号", "RISK SIGNALS"))
+
+    def test_the_model_may_not_add_a_risk_of_its_own(self) -> None:
+        client = FakeClient({"publish_market_overview": self.OVERVIEW})
+        render.render_overview(client=client, period=PERIOD)
+        instruction = "不得新增未列出的风险"
+        self.assertIn(instruction, client.prompts[0])
+
     def test_the_weights_ship_with_the_dashboard(self) -> None:
         client = FakeClient({"publish_market_overview": self.OVERVIEW})
         record = render.render_overview(client=client, period=PERIOD)
         self.assertEqual(record["dashboard"]["score_model"]["version"], "v2")
-
-    def test_sections_follow_the_persona(self) -> None:
-        client = FakeClient({"publish_market_overview": self.OVERVIEW})
-        boss = render.render_overview(client=client, period=PERIOD, persona="boss",
-                                      save=False)
-        analyst = render.render_overview(client=client, period=PERIOD, persona="analyst",
-                                         save=False)
-        self.assertLess(len(boss["dashboard"]["sections"]),
-                        len(analyst["dashboard"]["sections"]))
 
     def test_an_empty_period_is_a_data_gap_and_costs_no_model_call(self) -> None:
         """Spending a model call to write 'I have no data' is absurd."""
@@ -224,6 +227,13 @@ class CategoryTests(RenderTestCase):
         return FakeClient({"publish_category_narrative": self.NARRATIVE,
                            "publish_opportunity_thesis": self.THESIS,
                            "publish_pain_points": {"themes": []}})
+
+    def test_the_deep_dive_hands_the_model_the_alert_list(self) -> None:
+        """Each surface builds its own prompt, and one of them silently lost
+        this line once already."""
+        client = self._client()
+        render.render_category(node_id_path=BUFFETS, client=client, period=PERIOD)
+        self.assertIn("RISK SIGNALS", client.prompts[0].replace("风险信号", "RISK SIGNALS"))
 
     def test_a_category_renders_from_storage_only(self) -> None:
         client = self._client()

@@ -22,13 +22,13 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Sequence
+from typing import Sequence
 
 from marketing_agent import config
 from marketing_agent.source_policy import data_gap_message
 
 from . import evidence as ev
-from . import gateway, jobs, personas, scoring, store, taxonomy
+from . import gateway, jobs, monitor, panels, scoring, store
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +96,11 @@ TOOL_OVERVIEW = {
                 "note": {"type": "string"},
                 "evidence_ids": _EVIDENCE_IDS,
             }, "required": ["node_key", "driver", "evidence_ids"]}},
+            "monitor_summary": {"type": "string", "description":
+                                "<=140 words. Read the supplied RISK/OPPORTUNITY "
+                                "signals together: which ones compound, which one "
+                                "decides the next move. Do not introduce a signal "
+                                "that is not in the list."},
             "notes": {"type": "array", "items": {"type": "string"}},
         },
         "required": ["thesis", "category_verdicts"],
@@ -125,6 +130,10 @@ TOOL_CATEGORY = {
                 "evidence_ids": _EVIDENCE_IDS,
             }, "required": ["asin", "role", "evidence_ids"]}},
             "traffic_reading": {"type": "string"},
+            "monitor_summary": {"type": "string", "description":
+                                "<=120 words on the supplied RISK/OPPORTUNITY "
+                                "signals for this node. Do not introduce a signal "
+                                "that is not in the list."},
             "verdict": _VERDICT,
             "verdict_rationale": {"type": "string"},
             "notes": {"type": "array", "items": {"type": "string"}},
@@ -255,206 +264,15 @@ def _run_tool(client, *, tool: dict, user: str, language: str,
 
 
 # ------------------------------------------------------------- deterministic ----
+# The builders live in ``panels``; they are re-exported here because they are
+# half of this module's public surface and moving them should not move the
+# import site for every caller.
 
-def _pct(value: Any) -> float | None:
-    return None if value is None else round(float(value) * 100.0, 2)
-
-
-def _tile(label: str, value: str, hint: str = "", estimated: bool = False) -> dict:
-    return {"label": label, "value": value, "hint": hint, "estimated": estimated}
-
-
-def _money(value: Any) -> str:
-    number = scoring._num(value)
-    if number is None:
-        return "—"
-    if abs(number) >= 1_000_000:
-        return f"${number / 1_000_000:,.2f}M"
-    if abs(number) >= 1_000:
-        return f"${number / 1_000:,.1f}K"
-    return f"${number:,.0f}"
-
-
-def build_overview(marketplace: str, period: str, language: str) -> dict:
-    """Every deterministic section of the discovery board."""
-    snapshots = {s["node_id_path"]: s for s in store.list_node_snapshots(marketplace, period)}
-    board: list[dict] = []
-    for node in taxonomy.leaf_nodes(marketplace):
-        path = node["node_id_path"]
-        snap = snapshots.get(path)
-        if not snap:
-            continue
-        history = store.snapshot_history(marketplace, path)
-        keywords = store.top_keywords(marketplace, path, period, limit=20)
-        score = scoring.score_category(snap, history=history, keywords=keywords)
-        completeness, missing = jobs.node_completeness(marketplace, path, period)
-        board.append({
-            "node_key": path,
-            "node_label_path": node["node_label_path"],
-            "label": taxonomy.short_label(node["node_label_path"]),
-            "brand_category": node.get("brand_category"),
-            "category_score": score["score"],
-            "score_breakdown": score["breakdown"],
-            "score_confidence": score["confidence"],
-            "revenue_est": snap.get("total_revenue"),
-            "growth_pct": scoring.growth_pct(history),
-            "median_price": snap.get("avg_price"),
-            "top5_brand_share_pct": _pct(snap.get("top5_brand_crn")),
-            "new_revenue_share_pct": scoring.new_revenue_share_pct(snap),
-            "return_ratio_pct": _pct(snap.get("return_ratio")),
-            "return_ratio_avg_pct": _pct(snap.get("return_ratio_avg")),
-            "return_risk": -score["breakdown"].get(scoring.RISK_KEY, 0.0),
-            "completeness": completeness,
-            "missing": missing,
-        })
-    board.sort(key=lambda row: row["category_score"], reverse=True)
-    board = board[:MAX_BOARD_ROWS]
-
-    root = snapshots.get(taxonomy.FURNITURE_ROOT) or {}
-    total_revenue = root.get("total_revenue") or sum(
-        (row["revenue_est"] or 0.0) for row in board)
-    rising = sorted([r for r in board if (r["growth_pct"] or 0) > 0],
-                    key=lambda r: r["growth_pct"], reverse=True)[:5]
-    declining = sorted([r for r in board if (r["growth_pct"] or 0) < 0],
-                       key=lambda r: r["growth_pct"])[:5]
-
-    kpis = [
-        _tile("家具大盘月销售额" if language == "zh" else "Furniture monthly revenue",
-              _money(total_revenue), estimated=True),
-        _tile("追踪子类目" if language == "zh" else "Tracked sub-categories",
-              str(len(board))),
-        _tile("最佳机会类目" if language == "zh" else "Top opportunity",
-              board[0]["label"] if board else "—",
-              f"{board[0]['category_score']}/100" if board else ""),
-        _tile("类目均价中位" if language == "zh" else "Median category price",
-              _money(scoring._median([r["median_price"] for r in board]))),
-        _tile("退货率高于同级的类目" if language == "zh" else "Above-average return risk",
-              str(len([r for r in board
-                       if (r["return_ratio_pct"] or 0) > (r["return_ratio_avg_pct"] or 0)]))),
-    ]
-
-    return {
-        "headline": {"kpis": kpis},
-        "board": board,
-        "movers": {"rising": rising, "declining": declining},
-        "map": [{"node_key": r["node_key"], "label": r["label"],
-                 "competition": 100.0 - (r["top5_brand_share_pct"] or 0.0),
-                 "growth_pct": r["growth_pct"], "revenue_est": r["revenue_est"],
-                 "return_risk": r["return_risk"]} for r in board],
-        "price": _overview_price_bands(marketplace, period, board),
-        "concentration": [{"node_key": r["node_key"], "label": r["label"],
-                           "top5_brand_share_pct": r["top5_brand_share_pct"]}
-                          for r in board if r["top5_brand_share_pct"] is not None],
-        "newproduct": [{"node_key": r["node_key"], "label": r["label"],
-                        "new_revenue_share_pct": r["new_revenue_share_pct"],
-                        "completeness": r["completeness"]} for r in board],
-        "returnrisk": [{"node_key": r["node_key"], "label": r["label"],
-                        "return_ratio_pct": r["return_ratio_pct"],
-                        "return_ratio_avg_pct": r["return_ratio_avg_pct"],
-                        "return_risk": r["return_risk"]} for r in board
-                       if r["return_ratio_pct"] is not None],
-        "budget": gateway.budget_status(marketplace),
-    }
-
-
-def _overview_price_bands(marketplace: str, period: str, board: Sequence[dict]) -> list[dict]:
-    """Price bands summed across the tracked nodes, weighted by their revenue."""
-    totals: dict[str, dict] = {}
-    for row in board:
-        for bucket in store.get_distribution(marketplace, row["node_key"], period, "price"):
-            entry = totals.setdefault(bucket["bucket_key"],
-                                      {"bucket_key": bucket["bucket_key"],
-                                       "products": 0.0, "units": 0.0, "revenue": 0.0,
-                                       "order": bucket["bucket_order"]})
-            entry["products"] += bucket.get("products") or 0.0
-            entry["units"] += bucket.get("units") or 0.0
-            entry["revenue"] += bucket.get("revenue") or 0.0
-    bands = sorted(totals.values(), key=lambda b: b["order"])
-    revenue_total = sum(b["revenue"] for b in bands) or 1.0
-    product_total = sum(b["products"] for b in bands) or 1.0
-    for band in bands:
-        band["revenue_share_pct"] = round(band["revenue"] / revenue_total * 100.0, 1)
-        band["listing_share_pct"] = round(band["products"] / product_total * 100.0, 1)
-    return bands
-
-
-def build_category(marketplace: str, node_id_path: str, period: str, language: str) -> dict:
-    """Every deterministic section of one category deep dive."""
-    snap = store.get_node_snapshot(marketplace, node_id_path, period) or {}
-    history = store.snapshot_history(marketplace, node_id_path)
-    keywords = store.top_keywords(marketplace, node_id_path, period, limit=MAX_KEYWORDS)
-    products = store.top_products(marketplace, node_id_path, period, limit=MAX_COMPETITORS)
-    themes = store.review_themes(marketplace, node_id_path, period)
-    score = scoring.score_category(snap, history=history, keywords=keywords)
-    completeness, missing = jobs.node_completeness(marketplace, node_id_path, period)
-    label = taxonomy.label_for(node_id_path, marketplace)
-
-    opportunities = []
-    for product in products[:MAX_OPPORTUNITIES]:
-        product_score = scoring.score_product(
-            product, snapshot=snap, history=history, keywords=keywords, pain=themes)
-        opportunities.append({
-            "id": f"{node_id_path}|{product['asin']}|{period}",
-            "anchor_asin": product["asin"],
-            "title": (product.get("title") or product["asin"])[:80],
-            "product_score": product_score["score"],
-            "score_breakdown": product_score["breakdown"],
-            "score_confidence": product_score["confidence"],
-            "price": product.get("price"),
-            "revenue_est": product.get("revenue"),
-            "ratings": product.get("ratings"),
-            "rating": product.get("rating"),
-        })
-    opportunities.sort(key=lambda o: o["product_score"], reverse=True)
-
-    traffic = [{"asin": p["asin"], "title": (p.get("title") or "")[:60],
-                "natural": p.get("natural_proportion"), "ad": p.get("ad_proportion"),
-                "recommendation": p.get("recommendation_proportion")}
-               for p in products if p.get("natural_proportion") is not None]
-
-    return {
-        "header": {
-            "node_key": node_id_path,
-            "node_label_path": label,
-            "label": taxonomy.short_label(label),
-            "category_score": score["score"],
-            "score_breakdown": score["breakdown"],
-            "score_confidence": score["confidence"],
-            "completeness": completeness,
-            "missing": missing,
-            "kpis": [
-                _tile("类目月销售额" if language == "zh" else "Category revenue",
-                      _money(snap.get("total_revenue")), estimated=True),
-                _tile("均价" if language == "zh" else "Average price",
-                      _money(snap.get("avg_price"))),
-                _tile("Top5 品牌集中度" if language == "zh" else "Top-5 brand share",
-                      f"{_pct(snap.get('top5_brand_crn'))}%"
-                      if snap.get("top5_brand_crn") is not None else "—"),
-                _tile("退货率 / 同级均值" if language == "zh" else "Return rate vs peers",
-                      f"{_pct(snap.get('return_ratio'))}% / "
-                      f"{_pct(snap.get('return_ratio_avg'))}%"
-                      if snap.get("return_ratio") is not None else "—"),
-                _tile("近 12 月新品占销额" if language == "zh" else "New-entrant revenue share",
-                      f"{round(scoring.new_revenue_share_pct(snap) or 0.0, 1)}%"
-                      if scoring.new_revenue_share_pct(snap) is not None else "—",
-                      estimated=True),
-            ],
-        },
-        "structure": {
-            "price_bands": store.get_distribution(marketplace, node_id_path, period, "price"),
-            "listing_dates": store.get_distribution(marketplace, node_id_path, period,
-                                                    "listing_date"),
-            "brands": store.get_concentration(marketplace, node_id_path, period, "brand",
-                                              limit=10),
-            "trend": [{"period": p["period"], "value": p.get("total_revenue")}
-                      for p in history if p.get("total_revenue") is not None],
-        },
-        "keywords": keywords,
-        "competitors": products,
-        "pain": themes,
-        "traffic": traffic,
-        "opportunities": opportunities,
-    }
+build_overview = panels.build_overview
+build_category = panels.build_category
+_tile = panels.tile
+_money = panels.money
+_pct = panels.pct
 
 
 # -------------------------------------------------------------------- render ----
@@ -491,7 +309,7 @@ def _data_gap(marketplace: str, period: str, scope: str, language: str,
 
 def render_overview(
     *, marketplace: str = "US", period: str | None = None, language: str = "zh",
-    client=None, persona: str = personas.DEFAULT_PERSONA, save: bool = True,
+    client=None, save: bool = True,
 ) -> dict:
     """Render 全局汇总 from stored data. Makes zero vendor calls."""
     period = period or store.latest_period(marketplace) or gateway.previous_period()
@@ -512,6 +330,7 @@ def render_overview(
     user = "\n\n".join([
         f"MARKETPLACE: {marketplace}   PERIOD: {period}",
         _board_brief(payload["board"], language),
+        monitor.brief(payload["monitor"], language),
         index.sheet(language=language),
     ])
     narrative, source = _run_tool(client, tool=TOOL_OVERVIEW, user=user, language=language)
@@ -523,8 +342,8 @@ def render_overview(
     payload["movers_reading"] = cleaned.get("movers_reading", [])
     payload["gaps"] = list(cleaned.get("notes", [])) + ev.citation_notes(dropped, language)
     payload["gaps"] += _missing_notes(payload["board"], language)
+    payload["monitor_summary"] = cleaned.get("monitor_summary", "")
     payload["score_model"] = scoring.score_model()
-    payload["sections"] = personas.sections_for(persona, "overview")
     payload["narrative_source"] = source
 
     completeness = sum(r["completeness"] for r in payload["board"]) / len(payload["board"])
@@ -542,7 +361,7 @@ def render_overview(
 
 def render_category(
     *, node_id_path: str, marketplace: str = "US", period: str | None = None,
-    language: str = "zh", client=None, persona: str = personas.DEFAULT_PERSONA,
+    language: str = "zh", client=None,
     user_id: str | None = None, save: bool = True,
 ) -> dict:
     """Render 品类深度 for one node from stored data. Makes zero vendor calls."""
@@ -580,6 +399,7 @@ def render_category(
     user = "\n\n".join([
         f"MARKETPLACE: {marketplace}   PERIOD: {period}   NODE: {payload['header']['node_label_path']}",
         _category_brief(payload, language),
+        monitor.brief(payload["monitor"], language),
         index.sheet(language=language),
     ])
     narrative, source = _run_tool(client, tool=TOOL_CATEGORY, user=user, language=language)
@@ -598,12 +418,12 @@ def render_category(
     payload["keyword_intents"] = cleaned.get("keyword_intents", [])
     payload["competitor_reading"] = cleaned.get("competitor_reading", [])
     payload["traffic_reading"] = cleaned.get("traffic_reading", "")
+    payload["monitor_summary"] = cleaned.get("monitor_summary", "")
     payload["verdict"] = cleaned.get("verdict", "")
     payload["verdict_rationale"] = cleaned.get("verdict_rationale", "")
     payload["gaps"] = list(cleaned.get("notes", [])) + notes + _missing_notes(
         [payload["header"]], language)
     payload["score_model"] = scoring.score_model()
-    payload["sections"] = personas.sections_for(persona, "category")
     payload["narrative_source"] = source
     payload["thesis_source"] = thesis_source
     payload["evidence_index"] = index.all_rows()

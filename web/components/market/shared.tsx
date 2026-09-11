@@ -1,68 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { CheckCircle, Eye, Info, WarningCircle } from "@phosphor-icons/react";
+import { ArrowUpRight, CheckCircle, Eye, Info, ShieldWarning, WarningCircle }
+  from "@phosphor-icons/react";
 
 import {
   getMarketEvidence,
+  type MarketAlert,
+  type MarketCoverage,
   type MarketEvidence,
   type MarketKpi,
-  type MarketPersona,
-  type MarketPersonaMeta,
-  type MarketSection,
+  type MarketMonitor,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { Modal } from "@/components/modal";
-
-/** Renders a section only when the active persona is entitled to it.
- *
- * The gating table lives on the server (server/market/personas.py) so the rule is
- * unit-testable in Python; this component is the entire frontend cost of it.
- */
-export function SectionGate({
-  id,
-  sections,
-  children,
-}: {
-  id: string;
-  sections: MarketSection[];
-  children: (detail: "full" | "headline") => React.ReactNode;
-}) {
-  const section = sections.find((s) => s.id === id);
-  if (!section) return null;
-  return <>{children(section.detail)}</>;
-}
-
-export function PersonaToggle({
-  personas,
-  value,
-  onChange,
-}: {
-  personas: MarketPersonaMeta[];
-  value: MarketPersona;
-  onChange: (persona: MarketPersona) => void;
-}) {
-  const { locale } = useI18n();
-  return (
-    <div className="seg" role="tablist" aria-label="persona">
-      {personas.map((persona) => {
-        const active = persona.id === value;
-        return (
-          <button
-            key={persona.id}
-            role="tab"
-            aria-selected={active}
-            onClick={() => onChange(persona.id)}
-            title={locale === "zh" ? persona.hint_zh : persona.hint_en}
-            className={`seg-item ${active ? "seg-item-active" : ""}`}
-          >
-            {locale === "zh" ? persona.label_zh : persona.label_en}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
+import { CitationMarkdown } from "@/components/citation-markdown";
 
 export function Section({
   title,
@@ -337,27 +289,171 @@ export function ConfidenceNote({ value }: { value: number | undefined }) {
   );
 }
 
-const PERSONA_KEY = "marketing-agent-market-persona";
-
-/** Remember the chosen view across reloads.
+/** Risk and opportunity monitoring, side by side.
  *
- * Deliberately local, not server-side: switching persona is a view preference,
- * and writing it back would create a scheduled-task config row as a side effect
- * of clicking a tab.
+ * Two columns rather than one merged feed: the question "what could go wrong
+ * here" and the question "what is worth doing here" get answered at different
+ * moments, and interleaving them means neither list can be read straight
+ * through. Every card carries the number it fired on, so an alert can be
+ * disagreed with rather than only believed.
  */
-export function usePersona(): [MarketPersona, (next: MarketPersona) => void] {
-  const [persona, setPersona] = useState<MarketPersona>("pm");
+export function MonitorBoard({
+  monitor,
+  summary,
+  onDrill,
+  showNode = true,
+}: {
+  monitor?: MarketMonitor;
+  summary?: string;
+  onDrill?: (node: { nodeKey: string; label: string }) => void;
+  showNode?: boolean;
+}) {
+  const { t } = useI18n();
+  const risks = monitor?.risks ?? [];
+  const opportunities = monitor?.opportunities ?? [];
+  if (!risks.length && !opportunities.length) return null;
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const stored = window.localStorage.getItem(PERSONA_KEY);
-    if (stored === "boss" || stored === "pm" || stored === "analyst") setPersona(stored);
-  }, []);
+  const column = (
+    alerts: MarketAlert[],
+    title: string,
+    icon: React.ReactNode,
+    empty: string,
+  ) => (
+    <div className="min-w-0 flex-1">
+      <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-fg-muted">
+        {icon}
+        {title}
+        <span className="text-fg-subtle">({alerts.length})</span>
+      </div>
+      {alerts.length === 0 ? (
+        <p className="text-[11px] text-fg-subtle">{empty}</p>
+      ) : (
+        <div className="space-y-1.5">
+          {alerts.map((alert) => (
+            <AlertCard key={alert.key} alert={alert} onDrill={onDrill} showNode={showNode} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
 
-  const update = useCallback((next: MarketPersona) => {
-    setPersona(next);
-    if (typeof window !== "undefined") window.localStorage.setItem(PERSONA_KEY, next);
-  }, []);
+  return (
+    <Section
+      title={t.mnTitle}
+      hint={t.mnHint}
+      right={
+        <span className="flex items-center gap-1.5 text-[10px]">
+          <span className="bi-chip bi-chip-high">
+            {t.mnRiskHigh} {monitor?.counts?.risk_high ?? 0}
+          </span>
+          <span className="bi-chip bi-chip-low">
+            {t.mnOppHigh} {monitor?.counts?.opportunity_high ?? 0}
+          </span>
+        </span>
+      }
+    >
+      {summary ? (
+        <div className="mb-3 text-sm leading-relaxed">
+          <CitationMarkdown content={summary} />
+        </div>
+      ) : null}
+      <div className="flex flex-col gap-4 sm:flex-row">
+        {column(
+          risks,
+          t.mnRisks,
+          <ShieldWarning size={13} weight="duotone" className="text-danger" />,
+          t.mnNoRisks,
+        )}
+        {column(
+          opportunities,
+          t.mnOpportunities,
+          <ArrowUpRight size={13} weight="duotone" className="text-ok" />,
+          t.mnNoOpportunities,
+        )}
+      </div>
+    </Section>
+  );
+}
 
-  return [persona, update];
+function AlertCard({
+  alert,
+  onDrill,
+  showNode,
+}: {
+  alert: MarketAlert;
+  onDrill?: (node: { nodeKey: string; label: string }) => void;
+  showNode: boolean;
+}) {
+  const { t } = useI18n();
+  const severity: Record<string, string> = {
+    high: t.mnHigh,
+    medium: t.mnMedium,
+    low: t.mnLow,
+  };
+  return (
+    <div className={`bi-alert bi-alert-${alert.kind}-${alert.severity}`}>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span
+          className={`bi-chip bi-chip-${
+            alert.severity === "high" ? "high" : alert.severity === "medium" ? "medium" : "low"
+          }`}
+        >
+          {severity[alert.severity] ?? alert.severity}
+        </span>
+        {showNode && alert.label ? (
+          onDrill ? (
+            <button
+              className="text-[11px] font-medium hover:underline"
+              onClick={() => onDrill({ nodeKey: alert.node_key, label: alert.label })}
+            >
+              {alert.label}
+            </button>
+          ) : (
+            <span className="text-[11px] font-medium">{alert.label}</span>
+          )
+        ) : null}
+        {alert.evidence_ids?.length ? <EvidenceChip ids={alert.evidence_ids} /> : null}
+      </div>
+      <div className="mt-1 text-xs font-medium">{alert.title}</div>
+      {alert.detail ? (
+        <div className="mt-0.5 text-[11px] leading-relaxed text-fg-muted">{alert.detail}</div>
+      ) : null}
+      <div className="bi-alert-metric mt-1">{alert.metric}</div>
+    </div>
+  );
+}
+
+/** Which of the vendor's data families reached the warehouse this period.
+ *
+ * Worth a permanent strip rather than a debug page: an analysis is only as wide
+ * as the data behind it, and a family that quietly stopped arriving is
+ * otherwise indistinguishable from one the market has nothing to say about.
+ */
+export function CoverageStrip({ coverage }: { coverage?: MarketCoverage }) {
+  const { t } = useI18n();
+  if (!coverage?.families?.length) return null;
+  return (
+    <Section
+      title={t.cvTitle}
+      hint={t.cvHint}
+      right={
+        <span className="text-[10px] text-fg-subtle">
+          {coverage.present}/{coverage.total}
+        </span>
+      }
+    >
+      <div className="flex flex-wrap gap-1.5">
+        {coverage.families.map((family) => (
+          <span
+            key={family.key}
+            className={family.present ? "bi-cov" : "bi-cov bi-cov-missing"}
+            title={`${family.tool} · ${family.rows} ${t.cvRows}`}
+          >
+            {family.label}
+            <span className="tabular-nums opacity-70">{family.present ? family.rows : "—"}</span>
+          </span>
+        ))}
+      </div>
+    </Section>
+  );
 }

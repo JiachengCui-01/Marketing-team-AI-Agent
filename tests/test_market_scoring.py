@@ -1,4 +1,4 @@
-"""Deterministic scoring and persona gating.
+"""Deterministic scoring.
 
 The single most important test here is that a model-supplied score is overwritten:
 the whole design rests on the number on screen being computed from columns, not
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import unittest
 
-from server.market import personas, scoring
+from server.market import scoring
 
 
 def snapshot(**overrides) -> dict:
@@ -193,60 +193,6 @@ class ScoreModelTests(unittest.TestCase):
         result = scoring.score_category(snapshot())
         for key in result["breakdown"]:
             self.assertIn(key, set(scoring.CATEGORY_WEIGHTS) | {scoring.RISK_KEY})
-
-
-class PersonaTests(unittest.TestCase):
-    def test_every_section_is_claimed_by_at_least_one_persona(self) -> None:
-        for section_id, who, _detail, _order in personas.SECTIONS:
-            with self.subTest(section=section_id):
-                self.assertTrue(who)
-
-    def test_boss_sees_a_strict_subset_of_pm(self) -> None:
-        for surface in ("overview", "category"):
-            boss = {s["id"] for s in personas.sections_for("boss", surface)}
-            pm = {s["id"] for s in personas.sections_for("pm", surface)}
-            analyst = {s["id"] for s in personas.sections_for("analyst", surface)}
-            self.assertTrue(boss < pm, surface)
-            self.assertTrue(pm < analyst, surface)
-
-    def test_the_analyst_sees_everything(self) -> None:
-        for surface in ("overview", "category"):
-            shown = {s["id"] for s in personas.sections_for("analyst", surface)}
-            self.assertEqual(shown, set(personas.all_section_ids(surface)))
-
-    def test_the_boss_reads_the_verdict_before_the_leaderboard(self) -> None:
-        order = [s["id"] for s in personas.sections_for("boss", "overview")]
-        self.assertLess(order.index("overview.thesis"), order.index("overview.board"))
-        pm_order = [s["id"] for s in personas.sections_for("pm", "overview")]
-        self.assertGreater(pm_order.index("overview.thesis"), -1)
-
-    def test_the_boss_board_is_compact(self) -> None:
-        board = next(s for s in personas.sections_for("boss", "overview")
-                     if s["id"] == "overview.board")
-        self.assertEqual(board["detail"], "headline")
-
-    def test_only_the_boss_gets_the_compact_treatment(self) -> None:
-        """A PM reading an opportunity list without its breakdown cannot tell a
-        demand-driven score from a risk-discounted one."""
-        for surface in ("overview", "category"):
-            for section in personas.sections_for("analyst", surface):
-                self.assertEqual(section["detail"], "full")
-            for section in personas.sections_for("pm", surface):
-                self.assertEqual(section["detail"], "full")
-        boss = personas.sections_for("boss", "overview")
-        self.assertTrue(any(s["detail"] == "headline" for s in boss))
-
-    def test_an_unknown_persona_falls_back_to_pm(self) -> None:
-        self.assertEqual(personas.normalize("ceo"), "pm")
-        self.assertEqual(personas.sections_for("ceo", "overview"),
-                         personas.sections_for("pm", "overview"))
-
-    def test_hidden_count_is_reported_so_a_short_page_reads_as_intentional(self) -> None:
-        self.assertGreater(personas.hidden_count("boss", "overview"), 0)
-        self.assertEqual(personas.hidden_count("analyst", "overview"), 0)
-
-    def test_describe_covers_every_persona(self) -> None:
-        self.assertEqual({p["id"] for p in personas.describe()}, set(personas.PERSONAS))
 
 
 if __name__ == "__main__":

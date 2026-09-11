@@ -614,7 +614,6 @@ export type SelectionConfig = {
   user_id: string;
   // Added with the market surfaces: which sections this user sees, and whether
   // the scheduler also refreshes the furniture-wide board for them.
-  persona?: "boss" | "pm" | "analyst";
   overview_enabled?: boolean;
   scope: SelectionScope;
   categories: string[];
@@ -1599,9 +1598,75 @@ export async function searchKb(
 // Reads are free (they render stored rows); only a refresh that asks to collect
 // can spend vendor credits. The legacy selection endpoints above still work.
 
-export type MarketPersona = "boss" | "pm" | "analyst";
 
-export type MarketSection = { id: string; detail: "full" | "headline"; order: number };
+export type MarketAlert = {
+  id: string;
+  key: string;
+  kind: "risk" | "opportunity";
+  family: string;
+  severity: "high" | "medium" | "low";
+  magnitude: number;
+  node_key: string;
+  label: string;
+  title: string;
+  detail: string;
+  metric: string;
+  value: number | null;
+  baseline: number | null;
+  delta: number | null;
+  unit: string;
+  evidence_ids: string[];
+};
+
+export type MarketMonitor = {
+  risks: MarketAlert[];
+  opportunities: MarketAlert[];
+  counts: {
+    risk_high: number;
+    risk_total: number;
+    opportunity_high: number;
+    opportunity_total: number;
+  };
+};
+
+export type MarketCoverage = {
+  present: number;
+  total: number;
+  families: { key: string; tool: string; label: string; rows: number; present: boolean }[];
+};
+
+export type MarketDistributionPanel = {
+  kind: string;
+  label: string;
+  buckets: {
+    bucket_key: string;
+    products: number | null;
+    products_pct: number | null;
+    revenue_pct: number | null;
+    units_pct: number | null;
+  }[];
+};
+
+export type MarketConcentrationPanel = {
+  kind: string;
+  label: string;
+  entities: {
+    entity: string;
+    rank: number | null;
+    revenue_pct: number | null;
+    units_pct: number | null;
+    products: number | null;
+    rating: number | null;
+  }[];
+};
+
+export type MarketBenchmarkAxis = {
+  key: string;
+  label: string;
+  value: number;
+  peer: number;
+  score: number;
+};
 
 export type MarketScoreModel = {
   version: string;
@@ -1728,9 +1793,10 @@ export type MarketEvidence = {
 };
 
 export type MarketDashboard = {
-  sections: MarketSection[];
-  hidden_sections?: number;
   score_model: MarketScoreModel;
+  monitor?: MarketMonitor;
+  monitor_summary?: string;
+  coverage?: MarketCoverage;
   gaps?: string[];
   headline?: { kpis: MarketKpi[] };
   board?: MarketBoardRow[];
@@ -1744,11 +1810,37 @@ export type MarketDashboard = {
     return_risk: number;
   }[];
   price?: MarketBand[];
-  concentration?: { node_key: string; label: string; top5_brand_share_pct: number }[];
+  treemap?: {
+    node_key: string;
+    label: string;
+    value: number;
+    growth_pct: number | null;
+    score: number;
+  }[];
+  trend?: { period: string; value: number }[];
+  quality?: {
+    node_key: string;
+    label: string;
+    avg_rating: number | null;
+    avg_ratings: number | null;
+    head_avg_ratings: number | null;
+    head_avg_price: number | null;
+  }[];
+  // Overview ships a row per node; the deep dive ships one object for the node
+  // it is about. Both shapes are read by name, never indexed positionally.
+  concentration?: any;
+  supply?: any;
+  fulfilment?: any;
+  conversion?: any;
   newproduct?: {
     node_key: string;
     label: string;
     new_revenue_share_pct: number | null;
+    new_count_l12: number | null;
+    new_ratio_l12_pct: number | null;
+    new_ratio_l6_pct: number | null;
+    new_avg_revenue_l12: number | null;
+    new_avg_reviews_l12: number | null;
     completeness: number;
   }[];
   returnrisk?: {
@@ -1777,7 +1869,30 @@ export type MarketDashboard = {
     listing_dates: MarketBand[];
     brands: { entity: string; rank: number; revenue_ratio: number | null }[];
     trend: { period: string; value: number }[];
+    glance_views: { period: string; value: number }[];
   };
+  distributions?: MarketDistributionPanel[];
+  benchmark?: MarketBenchmarkAxis[];
+  offamazon?: { period: string; value: number; keyword?: string }[];
+  history?: {
+    asin: string;
+    title: string;
+    units: { period: string; value: number }[];
+    revenue: { period: string; value: number }[];
+  }[];
+  keyword_edges?: {
+    asin: string;
+    title: string;
+    edges: {
+      keyword: string;
+      traffic_pct: number | null;
+      natural_ratio: number | null;
+      ad_ratio: number | null;
+      searches: number | null;
+      natural_rank: number | null;
+      ad_position: number | null;
+    }[];
+  }[];
   keywords?: Record<string, any>[];
   competitors?: Record<string, any>[];
   pain?: MarketPainTheme[];
@@ -1822,20 +1937,10 @@ export type MarketBudget = {
   total_used: number;
 };
 
-export type MarketPersonaMeta = {
-  id: MarketPersona;
-  label_zh: string;
-  label_en: string;
-  hint_zh: string;
-  hint_en: string;
-};
-
 export type MarketConfigResponse = {
   config: SelectionConfig | null;
   available: boolean;
   marketplaces: string[];
-  personas: MarketPersonaMeta[];
-  sections: { overview: MarketSection[]; category: MarketSection[] };
   score_model: MarketScoreModel;
   nodes: MarketNode[];
 };
@@ -1853,11 +1958,8 @@ export type MarketPrd = {
   generated_at: number;
 };
 
-export async function getMarketConfig(
-  persona?: MarketPersona,
-): Promise<MarketConfigResponse> {
-  const query = persona ? `?persona=${persona}` : "";
-  const res = await fetch(`${API_BASE}/api/market/config${query}`, {
+export async function getMarketConfig(): Promise<MarketConfigResponse> {
+  const res = await fetch(`${API_BASE}/api/market/config`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error(await parseJsonError(res));
@@ -1865,10 +1967,7 @@ export async function getMarketConfig(
 }
 
 export async function saveMarketConfig(
-  payload: SelectionConfigPayload & {
-    persona?: MarketPersona;
-    overview_enabled?: boolean;
-  },
+  payload: SelectionConfigPayload & { overview_enabled?: boolean },
 ): Promise<SelectionConfig> {
   const res = await fetch(`${API_BASE}/api/market/config`, {
     method: "PUT",
@@ -1879,10 +1978,11 @@ export async function saveMarketConfig(
   return (await res.json()).config;
 }
 
-export async function getMarketOverview(
-  persona: MarketPersona,
-): Promise<{ report: MarketReport | null; sections?: MarketSection[]; available: boolean }> {
-  const res = await fetch(`${API_BASE}/api/market/overview?persona=${persona}`, {
+export async function getMarketOverview(): Promise<{
+  report: MarketReport | null;
+  available: boolean;
+}> {
+  const res = await fetch(`${API_BASE}/api/market/overview`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error(await parseJsonError(res));
@@ -1890,7 +1990,6 @@ export async function getMarketOverview(
 }
 
 export async function refreshMarketOverview(payload: {
-  persona: MarketPersona;
   language?: "zh" | "en";
   collect?: boolean;
 }): Promise<MarketReport> {
@@ -1911,11 +2010,11 @@ export async function getMarketCategories(): Promise<MarketCategoryRow[]> {
   return (await res.json()).categories;
 }
 
-export async function getMarketCategory(
-  node: string,
-  persona: MarketPersona,
-): Promise<{ report: MarketReport | null; sections?: MarketSection[]; available: boolean }> {
-  const url = `${API_BASE}/api/market/category?node=${encodeURIComponent(node)}&persona=${persona}`;
+export async function getMarketCategory(node: string): Promise<{
+  report: MarketReport | null;
+  available: boolean;
+}> {
+  const url = `${API_BASE}/api/market/category?node=${encodeURIComponent(node)}`;
   const res = await fetch(url, { headers: authHeaders() });
   if (!res.ok) throw new Error(await parseJsonError(res));
   return await res.json();
@@ -1923,7 +2022,6 @@ export async function getMarketCategory(
 
 export async function refreshMarketCategory(payload: {
   node: string;
-  persona: MarketPersona;
   language?: "zh" | "en";
   collect?: boolean;
   force?: boolean;
