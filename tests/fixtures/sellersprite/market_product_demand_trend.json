@@ -1,0 +1,25 @@
+{
+  "code": "OK",
+  "message": "成功",
+  "data": {
+    "asinCount": 58076,
+    "returnRatio": 1.7748,
+    "searchToPurchaseRatio": 1.20578,
+    "avgReturnRatio": 3.311,
+    "avgSearchToPurchaseRatio": 2.037,
+    "items": [
+      {
+        "date": "2025-08-01",
+        "glanceViews": 3025309
+      },
+      {
+        "date": "2025-09-01",
+        "glanceViews": 7508924
+      },
+      {
+        "date": "2025-10-01",
+        "glanceViews": 8635375
+      }
+    ]
+  }
+}

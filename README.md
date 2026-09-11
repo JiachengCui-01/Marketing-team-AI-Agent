@@ -34,7 +34,9 @@
 - **多智能体对话**：编排器按需分派 **内容与 Listing / 数据 / 市场研究** 三类专家，综合成带引用的最终回答，必要时产出 PDF。内容专家按渠道 SOP 工作 —— Amazon listing、Wayfair 属性表、独立站商详、Instagram / Pinterest / TikTok、EDM、广告、SEO 选购指南。
 - **Agent Trace 追踪 + 预览面板**：右栏两个标签 —— `追踪` 实时显示 intake→planning→delegating→synthesis 每一步；`预览` 以**浏览器式多标签**内联打开产出物、上传件、被引用的网页与知识库文档。
 - **办公助手（对话即可发起）**：任务待办、日程日历、资料问答 —— 全部通过聊天用自然语言发起，AI 生成**草稿卡**，用户点确认后才真正写入。涉及美国客户或供应链交期的时间会提醒确认时区。
-- **自动化入口（定时跑的分析任务）**：一个入口里两个定时任务 —— ① **行业简报**：配置主题、详略、推送时间与时区，定时抓取并生成**分级来源**摘要（来源分级已纳入 USITC / CBP / CPSC / trade.gov 与家居行业媒体 Furniture Today、Home News Now、HFN、Business of Home）；② **选品分析 BI 仪表盘**：完全基于卖家精灵数据，按「关注全部品类」或「指定品类」+ Amazon 站点 + 每日刷新时间配置，输出关键指标磁贴、带机会分的选品推荐、类目需求趋势折线、品类市场快照表和选品结论；两者都支持「立即刷新」。选品分析**没有兜底路径** —— 拿不到市场数据时直接报错，而不是给一个猜出来的推荐。
+- **自动化入口（定时跑的分析任务）**：三个平级标签 —— ① **行业简报**：配置主题、详略、推送时间与时区，定时抓取并生成**分级来源**摘要；② **全盘发现**：家具部门 12 个追踪子类目的机会看板（确定性机会分 + 分解 + 证据覆盖度）、涨跌品类、机会象限、价格带结构、新品可行性、退货率对同级类目均值；③ **品类深度**：手选一个类目做深研 —— 关键词版图、竞品 ASIN、评论痛点、流量结构、产品机会卡，并可一键生成**产品定义书（PRD）**。三者都支持「立即刷新」。市场分析**没有兜底路径** —— 拿不到数据时报数据缺口，而不是给一个猜出来的推荐。
+- **家具市场仓库（`server/market/`）**：把卖家精灵 45 个接口里真正有用的那一批固化成**月度快照仓库**（24 个月保留），采集与渲染彻底分开 —— 采集花厂商额度并写 SQLite，渲染只读 SQLite 再调模型，所以模型故障零成本、可无限重试。仓库是**全局共享**的（美国 Amazon 家具市场对每个用户都是同一个市场），配额按钱包分账（定时扫描 / 按需深研 / 对话补缺口互不挤占），每次厂商调用都记 `market_call_log`。对话侧新增免费本地工具 `market_data_lookup`，注册在 `sellersprite_*` 之前，回复末尾用 `GAPS:` 行声明仓库缺什么 —— 只有缺口字段才值得花一次计费调用。
+- **证据可追溯（防幻觉）**：模型在分析阶段**看不到原始 payload**，只看一张证据表；每条结论必须带 `evidence_ids`，引用不存在的编号会被删除，**含数字却没有出处的句子也会被删除**。屏幕上每个数字都能点开看它来自哪个接口、哪个字段路径、哪个月份、是实测还是厂商估算。机会分完全由服务端按固定公式算，模型的 tool schema 里根本没有分数字段。
 - **竞品与市场数据（卖家精灵为主数据源）**：Amazon 竞品与市场数字 —— 价格、BSR、评分、评论数、价格/排名历史、关键词搜索量与流量来源、销量估算 —— 统一走 **卖家精灵（SellerSprite）MCP**。工具面由 `tools/list` 运行时发现，不在代码里手抄厂商接口。公开网络搜索与实时商品页浏览器降级为**兜底**：只在卖家精灵不可用、或所需字段它查不到时启用（Wayfair / 独立站竞品、关税与 CPSC 政策、行业新闻），并在正文里说明该数字是兜底取得的。厂商的**实测值**（价格 / BSR / 评分 / 评论数）与**估算值**（月销量 / 销售额）在提示词层被强制区分，估算值不得当作实测事实。
 - **产品与供应商资料 RAG**：上传规格书、打样记录、平台规则、物流与关税文件 → 检索 → 回答附**来源引用**，点击引用可在预览区打开原文（embedding → reranker → 词法多级检索，缺重依赖时自动降级）。支持 PDF、Word、文本与 Excel；Excel 会按工作表和连续数据区域切分，大表分块时重复表头，并单独提取形状/SmartArt 流程图的节点与连接关系。查询理解会做同义扩展（实木↔硬木↔solid wood、头程↔海运）并识别 `product_spec` 意图。
 - **产品图 AI 生成**：文生图（Gemini）、上传参考图、一键抠图去背景、按渠道风格（Amazon 合规白底 1:1 / Wayfair 列表图 1:1 / 独立站 Hero 16:9 / Instagram 4:5 / Pinterest 2:3）生成，或套模板画布合成。模板覆盖家具最需要的图型：**尺寸标注图、材质工艺特写、房间实景、尺度对比**。
@@ -170,14 +172,15 @@ IM 消息（人↔人 / 群聊、未读数、已读回执、文件消息，基�
 
 ## 9. 测试与评测
 
-- **后端**：`pytest`，345 个用例覆盖 API、会话/记忆、任务/日历、IM/组织/通讯录、图像、新闻、**自动化选品分析**、KB 检索、来源评分、卖家精灵 MCP 与数据来源标注、OA 工具与 copilot、澄清、记忆抽取、PDF。
-  - 代表：`test_routes.py`(52) · `test_sellersprite.py`(39) · `test_image.py`(37) · `test_selection.py`(36) · `test_news.py`(23) · `test_llm_client.py`(18) · `test_sessions.py`(16) · `test_web_search.py`(14) · `test_oa_modules.py`(13) · `test_source_scoring.py`(10)。
+- **后端**：`pytest`，608 个用例覆盖 API、会话/记忆、任务/日历、IM/组织/通讯录、图像、新闻、**自动化选品分析**、KB 检索、来源评分、卖家精灵 MCP 与数据来源标注、OA 工具与 copilot、澄清、记忆抽取、PDF。
+  - 代表：`test_routes.py`(52) · `test_sellersprite.py`(39) · `test_image.py`(37) · `test_selection.py`(36) · `test_market_store.py`(33) · `test_market_scoring.py`(33) · `test_market_extract.py`(30) · `test_market_routes.py`(25) · `test_market_sweep.py`(24) · `test_news.py`(23) · `test_market_prd.py`(23) · `test_market_evidence.py`(23) · `test_market_gateway.py`(21) · `test_market_render.py`(19) · `test_market_lookup.py`(16) · `test_market_taxonomy.py`(16)。
+  - 市场系统的测试跑在**真实厂商响应**上：`tests/fixtures/sellersprite/` 是 25 份实测回包（一次性探针抓取后裁剪脱敏），所以字段映射、比例口径、日期格式都对着真实契约断言，而不是对着猜测。
 - **前端**：`tsc --noEmit` 类型检查 + 生产 `next build`。
 - **运行**：
   ```bash
   pytest tests -q
   ```
-  （测试用独立 DB，设置 `MARKETING_AGENT_DB_PATH` 到临时路径、`DEEPSEEK_API_KEY=test-key`、`MARKETING_AGENT_MEMORY_LLM=0`、`MARKETING_AGENT_KB_SEMANTIC=0`、`MARKETING_AGENT_KB_RERANK=0`；**测试全程不出网** —— `tests/conftest.py` 会强制清空 `SELLERSPRITE_SECRET_KEY`，避免 `.env` 里的真密钥让一次 `pytest` 真去调用按次计费的厂商接口。）
+  （**必须串行跑**：两个并发 pytest 会因共享 `skills/` 目录与进程级单例互相污染，产生几十个假失败。测试用独立 DB，设置 `MARKETING_AGENT_DB_PATH` 到临时路径、`DEEPSEEK_API_KEY=test-key`、`MARKETING_AGENT_MEMORY_LLM=0`、`MARKETING_AGENT_KB_SEMANTIC=0`、`MARKETING_AGENT_KB_RERANK=0`；**测试全程不出网** —— `tests/conftest.py` 会强制清空 `SELLERSPRITE_SECRET_KEY`，避免 `.env` 里的真密钥让一次 `pytest` 真去调用按次计费的厂商接口。）
 
 ## 10. 快速开始
 
@@ -226,13 +229,24 @@ server/                       FastAPI 后端
   routes.py                   全部 /api 端点        db.py  SQLite 结构与数据访问
   streaming.py                同步回调 → 异步 SSE 桥  auth.py  密码/令牌/资料校验
   kb_retrieval.py, reranker.py, embeddings.py, query_rewrite.py   KB RAG 管线
-  news.py                     行业简报生成      selection.py  选品分析（卖家精灵 → BI 仪表盘）
+  news.py                     行业简报生成      selection.py  旧版选品分析（兼容外壳）
+  market/                     家具市场决策系统
+    taxonomy.py               家具浏览树目录（真实 nodeIdPath，引导零调用）
+    fields.py                 returnFields 白名单（唯一能从源头压缩 payload 的杠杆）
+    gateway.py                通向厂商的唯一入口：钱包配额 / 去重 / 字段裁剪 / pytest 熔断
+    extract.py                payload → 类型化行 + 证据（纯函数）
+    store.py                  仓库 SQL：upsert / 读取 / 24 个月裁剪
+    jobs.py, sweep.py         任务目录与每日扫描（到期队列 + 每日封顶）
+    deepdive.py               按需品类深研（独立钱包）
+    scoring.py, personas.py   确定性机会分 / 三视角 section 表
+    evidence.py, render.py    证据与引用校验 / 两个仪表盘的渲染
+    prd.py, lookup.py         产品定义书 / 对话用的免费仓库读取工具
   memory*.py, clarify.py, im_hub.py, uploads.py, image_*.py
 web/                          Next.js 14 前端
   app/page.tsx                单页工作台外壳 + SSE 处理
   components/*.tsx            各功能面板 + chat/preview/auth UI
-    automation-panel.tsx      自动化入口（行业新闻 / 选品分析 两个标签）
-    selection-panel.tsx       选品分析 BI 仪表盘（磁贴 / 推荐卡 / 趋势折线 / 快照表）
+    automation-panel.tsx      自动化入口（行业新闻 / 全盘发现 / 品类深度 三个标签）
+    market/                   全盘看板、品类深度、三视角开关、证据抽屉、PRD、手写 SVG 图表
   lib/*                       api、sse、i18n、stores(sessions/im)、oa-drafts
 tests/                        pytest 套件（见 §9）
 skills/                       业务 SOP 技能（竞品 Listing 对比、新品上架战役）
@@ -246,7 +260,7 @@ render.yaml · vercel.json     部署配置
 - 营销多智能体编排（内容/分析/研究）+ Agent Trace + 预览多标签
 - 企业 OA Copilot：任务 / 日程 / 知识问答（对话发起 + 草稿-确认）
 - 企业协同：实时 IM（人↔人/群、已读回执、文件）+ 通讯录（组织/外部/星标/群组）
-- 自动化入口：行业新闻自动摘要 + **选品分析 BI 仪表盘**（卖家精灵数据，可设关注品类与每日定时）
+- 自动化入口：行业新闻自动摘要 + **家具市场决策系统**（全盘发现 → 品类深度 → 产品机会 → PRD，月度快照仓库 + 确定性评分 + 证据可追溯）
 - 营销图 AI 生成、可解释营销记忆
 - 体验：引用点开预览、编辑历史消息重新生成、停止生成、日程时区修正
 

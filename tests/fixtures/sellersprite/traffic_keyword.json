@@ -1,0 +1,163 @@
+{
+  "code": "OK",
+  "message": "成功",
+  "data": {
+    "marketplace": "US",
+    "asin": "B0F5WV3394",
+    "total": 9,
+    "items": [
+      {
+        "keyword": "fluted 4 doors credenza",
+        "keywordCn": null,
+        "searches": null,
+        "products": 0,
+        "purchases": null,
+        "purchaseRate": null,
+        "bid": null,
+        "bidMax": null,
+        "bidMin": null,
+        "badges": [
+          "naturalSearching"
+        ],
+        "rankPosition": {
+          "page": 2,
+          "pageSize": 71,
+          "index": 49,
+          "position": 87,
+          "updatedTime": 1787737853000
+        },
+        "adPosition": null,
+        "updatedTime": 1787737853000,
+        "searchesRank": null,
+        "searchesRankTimeFrom": null,
+        "searchesRankTimeTo": null,
+        "latest1daysAds": 0,
+        "latest7daysAds": 48,
+        "latest30daysAds": 48,
+        "supplyDemandRatio": null,
+        "trafficPercentage": 0.0,
+        "trafficKeywordType": null,
+        "conversionKeywordType": null,
+        "calculatedWeeklySearches": 0.0,
+        "titleDensity": null,
+        "spr": null,
+        "monopolyClickRate": null,
+        "top3ClickingRate": null,
+        "top3ConversionRate": null,
+        "clicks": null,
+        "impressions": null,
+        "naturalRatio": 1,
+        "adRatio": 0,
+        "topAsins": null,
+        "searchesTrend": null,
+        "gkDatas": null
+      },
+      {
+        "keyword": "4 doors with mid century modern",
+        "keywordCn": null,
+        "searches": null,
+        "products": 0,
+        "purchases": null,
+        "purchaseRate": null,
+        "bid": null,
+        "bidMax": null,
+        "bidMin": null,
+        "badges": [
+          "naturalSearching"
+        ],
+        "rankPosition": {
+          "page": 2,
+          "pageSize": 58,
+          "index": 46,
+          "position": 85,
+          "updatedTime": 1787625981000
+        },
+        "adPosition": null,
+        "updatedTime": 1787625981000,
+        "searchesRank": null,
+        "searchesRankTimeFrom": null,
+        "searchesRankTimeTo": null,
+        "latest1daysAds": 0,
+        "latest7daysAds": 12,
+        "latest30daysAds": 12,
+        "supplyDemandRatio": null,
+        "trafficPercentage": 0.0,
+        "trafficKeywordType": null,
+        "conversionKeywordType": null,
+        "calculatedWeeklySearches": 0.0,
+        "titleDensity": null,
+        "spr": null,
+        "monopolyClickRate": null,
+        "top3ClickingRate": null,
+        "top3ConversionRate": null,
+        "clicks": null,
+        "impressions": null,
+        "naturalRatio": 1,
+        "adRatio": 0,
+        "topAsins": null,
+        "searchesTrend": null,
+        "gkDatas": null
+      },
+      {
+        "keyword": "fluted 4 doors sideboard cabinet",
+        "keywordCn": null,
+        "searches": null,
+        "products": 0,
+        "purchases": null,
+        "purchaseRate": null,
+        "bid": null,
+        "bidMax": null,
+        "bidMin": null,
+        "badges": [
+          "naturalSearching"
+        ],
+        "rankPosition": {
+          "page": 2,
+          "pageSize": 63,
+          "index": 36,
+          "position": 96,
+          "updatedTime": 1786964857000
+        },
+        "adPosition": null,
+        "updatedTime": 1786964857000,
+        "searchesRank": null,
+        "searchesRankTimeFrom": null,
+        "searchesRankTimeTo": null,
+        "latest1daysAds": 0,
+        "latest7daysAds": 0,
+        "latest30daysAds": 29,
+        "supplyDemandRatio": null,
+        "trafficPercentage": 0.0,
+        "trafficKeywordType": null,
+        "conversionKeywordType": null,
+        "calculatedWeeklySearches": 0.0,
+        "titleDensity": null,
+        "spr": null,
+        "monopolyClickRate": null,
+        "top3ClickingRate": null,
+        "top3ConversionRate": null,
+        "clicks": null,
+        "impressions": null,
+        "naturalRatio": 1,
+        "adRatio": 0,
+        "topAsins": null,
+        "searchesTrend": null,
+        "gkDatas": null
+      }
+    ],
+    "stats": [
+      {
+        "keywords": "4",
+        "total": 5
+      },
+      {
+        "keywords": "doors",
+        "total": 4
+      },
+      {
+        "keywords": "fluted",
+        "total": 4
+      }
+    ]
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "code": "OK",
+  "message": "成功",
+  "data": [
+    {
+      "label": "无评分数",
+      "asins": [],
+      "products": 0,
+      "units": 0,
+      "revenue": 0.0,
+      "unitsRatio": 0.0
+    },
+    {
+      "label": "1-50",
+      "asins": [
+        "B0GQ68PKNJ",
+        "B0GTXWQJK4",
+        "B0FN7YNSRX"
+      ],
+      "products": 22,
+      "units": 5556,
+      "revenue": 961460.23,
+      "unitsRatio": 0.1388
+    },
+    {
+      "label": "50-100",
+      "asins": [
+        "B0FHWB1429",
+        "B0FPLVD11V",
+        "B0H7KBLG5Y"
+      ],
+      "products": 17,
+      "units": 4794,
+      "revenue": 884758.06,
+      "unitsRatio": 0.1198
+    }
+  ]
+}

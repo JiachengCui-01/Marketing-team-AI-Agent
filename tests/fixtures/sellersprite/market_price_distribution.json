@@ -1,0 +1,42 @@
+{
+  "code": "OK",
+  "message": "成功",
+  "data": [
+    {
+      "label": "50-100",
+      "asins": [
+        "B0881FB9GF",
+        "B0H25BV94V",
+        "B0DS42P7HD"
+      ],
+      "products": 20,
+      "units": 9130,
+      "revenue": 777972.75,
+      "unitsRatio": 0.2281
+    },
+    {
+      "label": "100-150",
+      "asins": [
+        "B0C5MGKN8J",
+        "B0BHT6B5Y7",
+        "B0F1Y4TBLP"
+      ],
+      "products": 25,
+      "units": 9533,
+      "revenue": 1202347.13,
+      "unitsRatio": 0.2381
+    },
+    {
+      "label": "150-200",
+      "asins": [
+        "B0GF7G7WWC",
+        "B0DX5Y6L8D",
+        "B0GYNWV7Q3"
+      ],
+      "products": 26,
+      "units": 10527,
+      "revenue": 1753640.22,
+      "unitsRatio": 0.263
+    }
+  ]
+}

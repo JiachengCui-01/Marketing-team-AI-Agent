@@ -612,6 +612,10 @@ export type SelectionScope = "all" | "categories";
 
 export type SelectionConfig = {
   user_id: string;
+  // Added with the market surfaces: which sections this user sees, and whether
+  // the scheduler also refreshes the furniture-wide board for them.
+  persona?: "boss" | "pm" | "analyst";
+  overview_enabled?: boolean;
   scope: SelectionScope;
   categories: string[];
   marketplace: string;
@@ -1588,4 +1592,386 @@ export async function searchKb(
   });
   if (!res.ok) throw new Error(await parseJsonError(res));
   return await res.json();
+}
+
+// ---------- market decision system: discovery + category deep dive ----------
+//
+// Reads are free (they render stored rows); only a refresh that asks to collect
+// can spend vendor credits. The legacy selection endpoints above still work.
+
+export type MarketPersona = "boss" | "pm" | "analyst";
+
+export type MarketSection = { id: string; detail: "full" | "headline"; order: number };
+
+export type MarketScoreModel = {
+  version: string;
+  category_weights: Record<string, number>;
+  product_weights: Record<string, number>;
+  risk_key: string;
+  risk_max: number;
+};
+
+export type MarketNode = {
+  node_key: string;
+  label: string;
+  node_label_path: string;
+  brand_category: string | null;
+  tier: number;
+};
+
+export type MarketCategoryRow = MarketNode & {
+  has_snapshot: boolean;
+  completeness: number | null;
+  score: number | null;
+  deepdive_status: string | null;
+};
+
+export type MarketKpi = {
+  label: string;
+  value: string;
+  hint?: string;
+  estimated?: boolean;
+};
+
+export type MarketBoardRow = {
+  node_key: string;
+  node_label_path: string;
+  label: string;
+  brand_category: string | null;
+  category_score: number;
+  score_breakdown: Record<string, number>;
+  score_confidence: number;
+  revenue_est: number | null;
+  growth_pct: number | null;
+  median_price: number | null;
+  top5_brand_share_pct: number | null;
+  new_revenue_share_pct: number | null;
+  return_ratio_pct: number | null;
+  return_ratio_avg_pct: number | null;
+  return_risk: number;
+  completeness: number;
+  missing: string[];
+};
+
+export type MarketVerdict = {
+  node_key: string;
+  verdict: "enter" | "validate" | "watch" | "avoid";
+  rationale: string;
+  evidence_ids: string[];
+};
+
+export type MarketBand = {
+  bucket_key: string;
+  products?: number | null;
+  units?: number | null;
+  revenue?: number | null;
+  units_ratio?: number | null;
+  revenue_share_pct?: number;
+  listing_share_pct?: number;
+};
+
+export type MarketOpportunity = {
+  id: string;
+  anchor_asin: string;
+  title: string;
+  product_score: number;
+  score_breakdown: Record<string, number>;
+  score_confidence: number;
+  price: number | null;
+  revenue_est: number | null;
+  rating: number | null;
+  ratings: number | null;
+  thesis?: string;
+  target_price_band?: string;
+  anchor_keywords?: string[];
+  pain_themes?: string[];
+  differentiation_hypotheses?: {
+    claim: string;
+    backing: string;
+    evidence_ids: string[];
+  }[];
+  risks?: { risk: string; kind?: string; evidence_ids: string[] }[];
+  evidence_ids?: string[];
+};
+
+export type MarketPainTheme = {
+  theme: string;
+  theme_label: string;
+  category: string;
+  severity: string;
+  fixable_in_design: boolean;
+  return_driving: boolean;
+  mention_count: number;
+  sample_size: number;
+  share_of_negative: number | null;
+  summary: string;
+  quotes: string[];
+};
+
+export type MarketEvidence = {
+  id: string;
+  tool: string;
+  field_path: string;
+  subject_kind: string;
+  subject_id: string;
+  metric: string;
+  period: string;
+  value_num: number | null;
+  value_text: string | null;
+  unit: string;
+  observed: boolean;
+  sample_size: number | null;
+  quality: string;
+  retrieved_at: number;
+  label?: string;
+  arguments?: Record<string, unknown>;
+};
+
+export type MarketDashboard = {
+  sections: MarketSection[];
+  hidden_sections?: number;
+  score_model: MarketScoreModel;
+  gaps?: string[];
+  headline?: { kpis: MarketKpi[] };
+  board?: MarketBoardRow[];
+  movers?: { rising: MarketBoardRow[]; declining: MarketBoardRow[] };
+  map?: {
+    node_key: string;
+    label: string;
+    competition: number;
+    growth_pct: number | null;
+    revenue_est: number | null;
+    return_risk: number;
+  }[];
+  price?: MarketBand[];
+  concentration?: { node_key: string; label: string; top5_brand_share_pct: number }[];
+  newproduct?: {
+    node_key: string;
+    label: string;
+    new_revenue_share_pct: number | null;
+    completeness: number;
+  }[];
+  returnrisk?: {
+    node_key: string;
+    label: string;
+    return_ratio_pct: number | null;
+    return_ratio_avg_pct: number | null;
+    return_risk: number;
+  }[];
+  budget?: MarketBudget;
+  thesis?: string;
+  verdicts?: Record<string, MarketVerdict>;
+  header?: {
+    node_key: string;
+    node_label_path: string;
+    label: string;
+    category_score: number;
+    score_breakdown: Record<string, number>;
+    score_confidence: number;
+    completeness: number;
+    missing: string[];
+    kpis: MarketKpi[];
+  };
+  structure?: {
+    price_bands: MarketBand[];
+    listing_dates: MarketBand[];
+    brands: { entity: string; rank: number; revenue_ratio: number | null }[];
+    trend: { period: string; value: number }[];
+  };
+  keywords?: Record<string, any>[];
+  competitors?: Record<string, any>[];
+  pain?: MarketPainTheme[];
+  traffic?: {
+    asin: string;
+    title: string;
+    natural: number | null;
+    ad: number | null;
+    recommendation: number | null;
+  }[];
+  opportunities?: MarketOpportunity[];
+  narrative?: string;
+  verdict?: string;
+  verdict_rationale?: string;
+  evidence_index?: MarketEvidence[];
+  narrative_source?: string;
+};
+
+export type MarketReport = {
+  id?: string;
+  scope: "overview" | "category";
+  status: "ok" | "data_gap";
+  marketplace?: string;
+  period: string;
+  node_id_path?: string | null;
+  language?: string;
+  dashboard: MarketDashboard;
+  summary: string;
+  evidence: MarketEvidence[];
+  vendor_tools?: string[];
+  data_as_of?: number | null;
+  completeness: number;
+  generated_at?: number;
+};
+
+export type MarketWallet = { limit: number; used: number; remaining: number };
+
+export type MarketBudget = {
+  run_date: string;
+  marketplace: string;
+  wallets: Record<string, MarketWallet>;
+  total_used: number;
+};
+
+export type MarketPersonaMeta = {
+  id: MarketPersona;
+  label_zh: string;
+  label_en: string;
+  hint_zh: string;
+  hint_en: string;
+};
+
+export type MarketConfigResponse = {
+  config: SelectionConfig | null;
+  available: boolean;
+  marketplaces: string[];
+  personas: MarketPersonaMeta[];
+  sections: { overview: MarketSection[]; category: MarketSection[] };
+  score_model: MarketScoreModel;
+  nodes: MarketNode[];
+};
+
+export type MarketPrd = {
+  id: string;
+  node_id_path: string;
+  period: string;
+  title: string;
+  opportunity_id: string;
+  prd: Record<string, any>;
+  assumptions: string[];
+  evidence_ids: string[];
+  notes: string[];
+  generated_at: number;
+};
+
+export async function getMarketConfig(
+  persona?: MarketPersona,
+): Promise<MarketConfigResponse> {
+  const query = persona ? `?persona=${persona}` : "";
+  const res = await fetch(`${API_BASE}/api/market/config${query}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return await res.json();
+}
+
+export async function saveMarketConfig(
+  payload: SelectionConfigPayload & {
+    persona?: MarketPersona;
+    overview_enabled?: boolean;
+  },
+): Promise<SelectionConfig> {
+  const res = await fetch(`${API_BASE}/api/market/config`, {
+    method: "PUT",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).config;
+}
+
+export async function getMarketOverview(
+  persona: MarketPersona,
+): Promise<{ report: MarketReport | null; sections?: MarketSection[]; available: boolean }> {
+  const res = await fetch(`${API_BASE}/api/market/overview?persona=${persona}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return await res.json();
+}
+
+export async function refreshMarketOverview(payload: {
+  persona: MarketPersona;
+  language?: "zh" | "en";
+  collect?: boolean;
+}): Promise<MarketReport> {
+  const res = await fetch(`${API_BASE}/api/market/overview/refresh`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).report;
+}
+
+export async function getMarketCategories(): Promise<MarketCategoryRow[]> {
+  const res = await fetch(`${API_BASE}/api/market/categories`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).categories;
+}
+
+export async function getMarketCategory(
+  node: string,
+  persona: MarketPersona,
+): Promise<{ report: MarketReport | null; sections?: MarketSection[]; available: boolean }> {
+  const url = `${API_BASE}/api/market/category?node=${encodeURIComponent(node)}&persona=${persona}`;
+  const res = await fetch(url, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return await res.json();
+}
+
+export async function refreshMarketCategory(payload: {
+  node: string;
+  persona: MarketPersona;
+  language?: "zh" | "en";
+  collect?: boolean;
+  force?: boolean;
+}): Promise<MarketReport> {
+  const res = await fetch(`${API_BASE}/api/market/category/refresh`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).report;
+}
+
+export async function getMarketEvidence(ids: string[]): Promise<MarketEvidence[]> {
+  const url = `${API_BASE}/api/market/evidence?ids=${encodeURIComponent(ids.join(","))}`;
+  const res = await fetch(url, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).evidence;
+}
+
+export async function getMarketBudget(): Promise<{
+  budget: MarketBudget;
+  last_run: Record<string, any> | null;
+  queue_depth: number;
+  calls: Record<string, any>[];
+}> {
+  const res = await fetch(`${API_BASE}/api/market/budget`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return await res.json();
+}
+
+export async function createMarketPrd(payload: {
+  node: string;
+  opportunity_id?: string;
+  period?: string;
+  language?: "zh" | "en";
+}): Promise<MarketPrd> {
+  const res = await fetch(`${API_BASE}/api/market/prd`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).prd;
+}
+
+export async function getMarketPrd(id: string): Promise<MarketPrd> {
+  const res = await fetch(`${API_BASE}/api/market/prd/${id}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseJsonError(res));
+  return (await res.json()).prd;
 }

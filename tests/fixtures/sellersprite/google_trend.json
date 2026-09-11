@@ -1,0 +1,23 @@
+{
+  "code": "OK",
+  "message": "成功",
+  "data": {
+    "marketplace": "US",
+    "keyword": "sideboard",
+    "link": "https://trends.google.com/trends/explore?hl=zh-CN&date=2021-09-11+2026-09-11&geo=US&q=sideboard",
+    "items": [
+      {
+        "time": 1630195200000,
+        "value": 21
+      },
+      {
+        "time": 1630800000000,
+        "value": 23
+      },
+      {
+        "time": 1631404800000,
+        "value": 21
+      }
+    ]
+  }
+}

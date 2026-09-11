@@ -1,0 +1,45 @@
+{
+  "code": "OK",
+  "message": "成功",
+  "data": [
+    {
+      "label": "1个月",
+      "shelfTime": "1个月",
+      "asins": [
+        "B0HCCJR66Y",
+        "B0H8RMYW8J",
+        "B0GQ68PKNJ"
+      ],
+      "products": 11,
+      "units": 3001,
+      "revenue": 512629.42,
+      "unitsRatio": 0.075
+    },
+    {
+      "label": "3个月",
+      "shelfTime": "3个月",
+      "asins": [
+        "B0H25BV94V",
+        "B0H2H44GGQ",
+        "B0H3NNVK4F"
+      ],
+      "products": 7,
+      "units": 2128,
+      "revenue": 257321.02,
+      "unitsRatio": 0.0532
+    },
+    {
+      "label": "半年",
+      "shelfTime": "半年",
+      "asins": [
+        "B0GMMHNXMK",
+        "B0GYNWV7Q3",
+        "B0GTXWQJK4"
+      ],
+      "products": 13,
+      "units": 4378,
+      "revenue": 831531.49,
+      "unitsRatio": 0.1094
+    }
+  ]
+}

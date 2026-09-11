@@ -1,0 +1,48 @@
+{
+  "code": "OK",
+  "message": "成功",
+  "data": [
+    {
+      "label": "中国",
+      "country": "中国",
+      "asins": [
+        "B0GF7G7WWC",
+        "B0C5MGKN8J",
+        "B0DP2NCQRN"
+      ],
+      "products": 57,
+      "units": 20294,
+      "revenue": 3570653.81,
+      "unitsRatio": 0.5069,
+      "revenueRatio": 0.5288
+    },
+    {
+      "label": "美国",
+      "country": "美国",
+      "asins": [
+        "B0881FB9GF",
+        "B0H25BV94V",
+        "B0GYNWV7Q3"
+      ],
+      "products": 31,
+      "units": 14188,
+      "revenue": 2106537.07,
+      "unitsRatio": 0.3544,
+      "revenueRatio": 0.312
+    },
+    {
+      "label": "中国香港",
+      "country": "中国香港",
+      "asins": [
+        "B0G58QM99R",
+        "B0HGKSX2JT",
+        "B0FN7YNSRX"
+      ],
+      "products": 11,
+      "units": 5302,
+      "revenue": 1038980.65,
+      "unitsRatio": 0.1324,
+      "revenueRatio": 0.1539
+    }
+  ]
+}

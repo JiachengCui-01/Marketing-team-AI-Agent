@@ -1503,3 +1503,157 @@ select.field:focus {
     opacity: 1;
   }
 }
+
+@layer components {
+  /* Market decision system — extends the .bi-* layer the selection board
+     established, same feature colour, same authoring style. */
+  .bi-card {
+    @apply rounded-xl border border-border bg-bg-elevated px-3.5 py-3 transition-all duration-200;
+  }
+  .bi-card:hover {
+    border-color: rgb(var(--feature-selection) / 0.34);
+  }
+  .bi-rank {
+    @apply inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold;
+    color: rgb(var(--feature-selection));
+    background: rgb(var(--feature-selection) / 0.12);
+  }
+  .bi-seg-strip {
+    @apply flex h-4 w-full items-end gap-[2px];
+  }
+  .bi-seg {
+    @apply relative h-full overflow-hidden rounded-[2px];
+    background: rgb(var(--border) / 0.5);
+  }
+  .bi-seg-fill {
+    @apply absolute bottom-0 left-0 w-full;
+    background: rgb(var(--feature-selection) / 0.75);
+  }
+  .bi-seg-risk {
+    background: rgb(var(--danger) / 0.16);
+  }
+  .bi-seg-fill-risk {
+    @apply absolute bottom-0 left-0 w-full;
+    background: rgb(var(--danger) / 0.7);
+  }
+  .bi-band {
+    @apply w-2.5 rounded-t-[2px];
+    background: rgb(var(--feature-selection) / 0.8);
+    min-height: 2px;
+  }
+  .bi-band-alt {
+    @apply w-2.5 rounded-t-[2px];
+    background: rgb(var(--feature-selection) / 0.32);
+    min-height: 2px;
+  }
+  .bi-swatch {
+    @apply inline-block h-2 w-2 rounded-[2px];
+    background: rgb(var(--feature-selection) / 0.8);
+  }
+  .bi-swatch-alt {
+    background: rgb(var(--feature-selection) / 0.32);
+  }
+  .bi-share-bar {
+    @apply flex h-3 w-full overflow-hidden rounded-full;
+    background: rgb(var(--bg-subtle));
+  }
+  .bi-share-seg {
+    @apply h-full;
+    background: rgb(var(--feature-selection));
+  }
+  .bi-share-rest {
+    @apply h-full;
+    background: rgb(var(--border));
+  }
+  .bi-dot {
+    fill: rgb(var(--feature-selection) / 0.55);
+    stroke: rgb(var(--feature-selection));
+    stroke-width: 1;
+  }
+  .bi-dot-risk {
+    fill: rgb(var(--danger) / 0.45);
+    stroke: rgb(var(--danger));
+  }
+  .bi-axis {
+    stroke: rgb(var(--border));
+    stroke-width: 1;
+    stroke-dasharray: 3 3;
+  }
+  .bi-quadrant-label {
+    fill: rgb(var(--fg-subtle));
+    font-size: 9px;
+  }
+  .bi-delta-track {
+    @apply relative h-2 flex-1 rounded-full;
+    background: rgb(var(--bg-subtle));
+  }
+  .bi-delta-pos {
+    @apply absolute top-0 h-full rounded-full;
+    background: rgb(var(--ok) / 0.8);
+  }
+  .bi-delta-neg {
+    @apply absolute top-0 h-full rounded-full;
+    background: rgb(var(--danger) / 0.75);
+  }
+  .bi-delta-zero {
+    @apply absolute top-0 h-full w-px left-1/2;
+    background: rgb(var(--border));
+  }
+  .bi-bullet {
+    @apply relative h-2 w-full overflow-hidden rounded-full;
+    background: rgb(var(--bg-subtle));
+  }
+  .bi-bullet-fill {
+    @apply h-full rounded-full;
+    background: rgb(var(--ok) / 0.7);
+  }
+  .bi-bullet-bad {
+    background: rgb(var(--danger) / 0.7);
+  }
+  .bi-bullet-mark {
+    @apply absolute top-0 h-full w-px;
+    background: rgb(var(--fg-muted));
+  }
+  .bi-evidence-chip {
+    @apply ml-1 inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0 text-[10px] leading-[15px] align-middle;
+    color: rgb(var(--feature-selection));
+    border-color: rgb(var(--feature-selection) / 0.34);
+    background: rgb(var(--feature-selection) / 0.08);
+  }
+  .bi-evidence-chip:hover {
+    background: rgb(var(--feature-selection) / 0.16);
+  }
+  .bi-evidence {
+    @apply rounded-lg border border-border bg-bg-subtle px-3 py-2;
+  }
+  /* A "[待确认 尺寸]" is not a blank to skim past: no vendor data exists for that
+     field and somebody has to go and measure it. */
+  .bi-placeholder {
+    color: rgb(var(--warn));
+    border-bottom: 1px dashed rgb(var(--warn) / 0.6);
+    display: inline-block;
+  }
+  .bi-verdict-enter {
+    color: rgb(var(--ok));
+    border-color: rgb(var(--ok) / 0.34);
+    background: rgb(var(--ok) / 0.1);
+  }
+  .bi-verdict-validate {
+    color: rgb(var(--feature-selection));
+    border-color: rgb(var(--feature-selection) / 0.34);
+    background: rgb(var(--feature-selection) / 0.1);
+  }
+  .bi-verdict-watch {
+    color: rgb(var(--warn));
+    border-color: rgb(var(--warn) / 0.34);
+    background: rgb(var(--warn) / 0.1);
+  }
+  .bi-verdict-avoid {
+    color: rgb(var(--danger));
+    border-color: rgb(var(--danger) / 0.34);
+    background: rgb(var(--danger) / 0.1);
+  }
+  .input-inline {
+    @apply rounded-lg border border-border bg-bg-elevated px-2 text-sm focus:outline-none focus:ring-1;
+  }
+}

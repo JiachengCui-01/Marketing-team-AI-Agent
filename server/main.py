@@ -15,6 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv()
 
 from . import db, news, selection  # noqa: E402 - must load env first
+from .market import store as market_store  # noqa: E402
+from .market import sweep as market_sweep  # noqa: E402
 from .routes import router  # noqa: E402 - must load env first
 
 logger = logging.getLogger("marketing_agent.news")
@@ -89,6 +91,15 @@ async def _automation_scheduler() -> None:
                     await _run_due_selection_job(config)
         except Exception as exc:  # noqa: BLE001 - never let the loop die
             logger.warning("Selection scheduler tick failed: %s", exc)
+        try:
+            # The market warehouse is global, so this runs once per day for the
+            # whole workspace rather than once per user. The day is claimed with a
+            # unique index, so a second worker is a no-op rather than a double bill.
+            if market_sweep.is_due("US"):
+                await asyncio.to_thread(market_sweep.run_daily_sweep, "US")
+            await asyncio.to_thread(market_store.prune_market_history)
+        except Exception as exc:  # noqa: BLE001 - never let the loop die
+            logger.warning("Market sweep tick failed: %s", exc)
         await asyncio.sleep(_SCHEDULER_INTERVAL_SECONDS)
 
 

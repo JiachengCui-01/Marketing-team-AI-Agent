@@ -1,0 +1,101 @@
+{
+  "code": "OK",
+  "message": "成功",
+  "data": {
+    "guestId": null,
+    "pages": 2,
+    "page": 1,
+    "size": 20,
+    "total": 36,
+    "took": 0,
+    "url": null,
+    "order": {
+      "field": "",
+      "desc": true
+    },
+    "items": [
+      {
+        "author": "reviewer-1",
+        "title": "Bad pricing for product",
+        "content": "Somewhat disappointed. The pictures made this idea seem nicer than it is. The quality of the product is not worth the price. The material scratches very easily.  The hardware for the inside shelves also doesn’t stay securely in place and te…",
+        "date": 1788710400000,
+        "star": 3,
+        "authorLabels": [
+          "Verified Purchase"
+        ],
+        "skus": [
+          "Color: Jagger Camel D",
+          "Size: 1"
+        ],
+        "images": [
+          "https://m.media-amazon.com/images/I/71cQYbFTcDL._SY200.jpg"
+        ],
+        "videos": null,
+        "likes": 0,
+        "image": true,
+        "video": false,
+        "verified": true,
+        "vine": false,
+        "free": false,
+        "experience": false
+      },
+      {
+        "author": "reviewer-2",
+        "title": "Incorrect color representation",
+        "content": "Clearly the photo shows a natural oak,maple like color, bijou whatever it is called, but in reality it is a cool walnut color. Needed to return it as it's photo is an extremely false representation.<br>",
+        "date": 1787932800000,
+        "star": 1,
+        "authorLabels": [
+          "Verified Purchase"
+        ],
+        "skus": [
+          "Color: Bijou Camel E",
+          "Size: 1"
+        ],
+        "images": [
+          "https://m.media-amazon.com/images/I/71BH8xunpnL._SY200.jpg",
+          "https://m.media-amazon.com/images/I/71qNPo-NkmL._SY200.jpg",
+          "https://m.media-amazon.com/images/I/61rQotth-ML._SY200.jpg"
+        ],
+        "videos": null,
+        "likes": 0,
+        "image": true,
+        "video": false,
+        "verified": true,
+        "vine": false,
+        "free": false,
+        "experience": false
+      },
+      {
+        "author": "reviewer-3",
+        "title": "PLEASE READ BEFORE YOU BUY!!!",
+        "content": "I’m completely disappointed with this product. I was misled by the reviews, and I regret buying it. The cabinet itself is very beautiful and elegant, but the material is terrible and definitely NOT WORTH THE PRICE. If I had to buy it again,…",
+        "date": 1787155200000,
+        "star": 1,
+        "authorLabels": [
+          "Verified Purchase"
+        ],
+        "skus": [
+          "Color: Jagger Ebony E",
+          "Size: 1"
+        ],
+        "images": [
+          "https://m.media-amazon.com/images/I/713tzYRI-OL._SY200.jpg",
+          "https://m.media-amazon.com/images/I/61+dJswo5FL._SY200.jpg",
+          "https://m.media-amazon.com/images/I/71eoyG1uk1L._SY200.jpg"
+        ],
+        "videos": null,
+        "likes": 0,
+        "image": true,
+        "video": false,
+        "verified": true,
+        "vine": false,
+        "free": false,
+        "experience": false
+      }
+    ],
+    "terminal": null,
+    "hasNextPage": true,
+    "guestVisited": false
+  }
+}

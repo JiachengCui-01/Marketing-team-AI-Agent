@@ -1,0 +1,201 @@
+{
+  "code": "OK",
+  "message": "成功",
+  "data": {
+    "guestId": null,
+    "pages": 0,
+    "page": 1,
+    "size": 15,
+    "total": 717485,
+    "took": 0,
+    "url": null,
+    "order": {
+      "field": "",
+      "desc": true
+    },
+    "items": [
+      {
+        "marketplace": "US",
+        "date": "202608",
+        "keyword": "reacher",
+        "keywordCn": "里彻",
+        "keywordJp": "リーチャー",
+        "departments": [],
+        "searchRank": 1,
+        "searchRankCv": 203,
+        "searchRankCr": 0.9951,
+        "searches": 10115226,
+        "purchaseRate": 0.0006000000284984708,
+        "purchases": 8092,
+        "clicks": 4753910,
+        "impressions": 289837012,
+        "searchRankGrowthValue": 203,
+        "searchRankGrowthRate": 0.9951,
+        "cvsShareRate": 0.0,
+        "clickShareRate": 0.3885,
+        "titleDensityExact": 46,
+        "cprExact": 184,
+        "w1SearchRank": 204,
+        "w1RankGrowthValue": 203,
+        "w1RankGrowthRate": 0.9951,
+        "w4SearchRank": 203,
+        "w4RankGrowthValue": 202,
+        "w4RankGrowthRate": 0.9951,
+        "w12SearchRank": 234,
+        "w12RankGrowthValue": 233,
+        "w12RankGrowthRate": 0.9957,
+        "top3Brands": [
+          null,
+          "RMS",
+          "FGRHY"
+        ],
+        "bid": 0.61,
+        "bidMax": 0.76,
+        "bidMin": 0.47,
+        "top3AsinDtoList": [
+          {
+            "asin": "B0HB4HWYML",
+            "imageUrl": null,
+            "clickRate": 0.1474,
+            "conversionRate": 0.0
+          },
+          {
+            "asin": "B0H978T4T8",
+            "imageUrl": null,
+            "clickRate": 0.1344,
+            "conversionRate": 0.0
+          },
+          {
+            "asin": "B0H8N888NW",
+            "imageUrl": null,
+            "clickRate": 0.1067,
+            "conversionRate": 0.0
+          }
+        ]
+      },
+      {
+        "marketplace": "US",
+        "date": "202608",
+        "keyword": "sterling point",
+        "keywordCn": "斯特林点",
+        "keywordJp": "スターリングポイント",
+        "departments": [
+          "Jewelry"
+        ],
+        "searchRank": 2,
+        "searchRankCv": 6599,
+        "searchRankCr": 0.9997,
+        "searches": 5568048,
+        "purchaseRate": 0.011500000022351742,
+        "purchases": 65146,
+        "clicks": 2645532,
+        "impressions": 155712027,
+        "searchRankGrowthValue": 6599,
+        "searchRankGrowthRate": 0.9997,
+        "cvsShareRate": 0.0,
+        "clickShareRate": 0.8208,
+        "titleDensityExact": 0,
+        "cprExact": 1477,
+        "w1SearchRank": 6601,
+        "w1RankGrowthValue": 6599,
+        "w1RankGrowthRate": 0.9997,
+        "w4SearchRank": null,
+        "w4RankGrowthValue": null,
+        "w4RankGrowthRate": null,
+        "w12SearchRank": null,
+        "w12RankGrowthValue": null,
+        "w12RankGrowthRate": null,
+        "top3Brands": [
+          null,
+          "Hoops & Loops",
+          "Sabrina Silver"
+        ],
+        "bid": 0.86,
+        "bidMax": 1.08,
+        "bidMin": 0.65,
+        "top3AsinDtoList": [
+          {
+            "asin": "B0H5TN2HH1",
+            "imageUrl": null,
+            "clickRate": 0.3934,
+            "conversionRate": 0.0
+          },
+          {
+            "asin": "B0H8VVW8C5",
+            "imageUrl": null,
+            "clickRate": 0.33270000000000005,
+            "conversionRate": 0.0
+          },
+          {
+            "asin": "B0H9Q2J9NL",
+            "imageUrl": null,
+            "clickRate": 0.0947,
+            "conversionRate": 0.0
+          }
+        ]
+      },
+      {
+        "marketplace": "US",
+        "date": "202608",
+        "keyword": "lioness",
+        "keywordCn": "母狮",
+        "keywordJp": "雌ライオン",
+        "departments": [],
+        "searchRank": 3,
+        "searchRankCv": 312,
+        "searchRankCr": 0.9905,
+        "searches": 5054171,
+        "purchaseRate": 0.0284000001847744,
+        "purchases": 143538,
+        "clicks": 2492732,
+        "impressions": 144845619,
+        "searchRankGrowthValue": 312,
+        "searchRankGrowthRate": 0.9905,
+        "cvsShareRate": 0.0,
+        "clickShareRate": 0.4076,
+        "titleDensityExact": 43,
+        "cprExact": 3254,
+        "w1SearchRank": 315,
+        "w1RankGrowthValue": 312,
+        "w1RankGrowthRate": 0.9905,
+        "w4SearchRank": 2733,
+        "w4RankGrowthValue": 2730,
+        "w4RankGrowthRate": 0.9989,
+        "w12SearchRank": 3022,
+        "w12RankGrowthValue": 3019,
+        "w12RankGrowthRate": 0.999,
+        "top3Brands": [
+          null,
+          "Lioness",
+          "Paramount"
+        ],
+        "bid": 0.61,
+        "bidMax": 0.76,
+        "bidMin": 0.46,
+        "top3AsinDtoList": [
+          {
+            "asin": "B0D54QF3FG",
+            "imageUrl": null,
+            "clickRate": 0.2418,
+            "conversionRate": 0.0
+          },
+          {
+            "asin": "B0H9ZKN4DX",
+            "imageUrl": null,
+            "clickRate": 0.0864,
+            "conversionRate": 0.0
+          },
+          {
+            "asin": "B0D6C69KH4",
+            "imageUrl": null,
+            "clickRate": 0.0794,
+            "conversionRate": 0.0
+          }
+        ]
+      }
+    ],
+    "terminal": null,
+    "hasNextPage": true,
+    "guestVisited": false
+  }
+}

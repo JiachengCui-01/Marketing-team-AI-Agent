@@ -1,0 +1,160 @@
+{
+  "code": "OK",
+  "message": "成功",
+  "data": {
+    "guestId": null,
+    "pages": 84,
+    "page": 1,
+    "size": 20,
+    "total": 1663,
+    "took": 0,
+    "url": null,
+    "order": {
+      "field": "",
+      "desc": true
+    },
+    "items": [
+      {
+        "marketplace": "US",
+        "keyword": "tv stand",
+        "keywordCn": "电视柜",
+        "keywordJp": "テレビ台",
+        "departments": [
+          {
+            "code": "Furniture",
+            "label": "Home / Furniture"
+          },
+          {
+            "code": "office-products",
+            "label": "Office Products"
+          },
+          {
+            "code": "electronics",
+            "label": "Electronics"
+          }
+        ],
+        "month": "2026.08",
+        "supplement": "N",
+        "searches": 1214135,
+        "purchases": 7285,
+        "purchaseRate": 0.006,
+        "monopolyClickRate": 0.0826,
+        "products": 36069,
+        "adProducts": 1237,
+        "supplyDemandRatio": 33.66,
+        "avgPrice": 45.99,
+        "avgRatings": null,
+        "avgRating": 4.4,
+        "bidMin": 0.65,
+        "bidMax": 1.26,
+        "bid": 0.97,
+        "cvsShareRate": 0.0765,
+        "wordCount": 2,
+        "titleDensity": 48,
+        "spr": 168,
+        "relevancy": 1.3,
+        "amazonChoice": true,
+        "searchRank": 152,
+        "trends": null,
+        "clicks": 517060,
+        "impressions": 36296920,
+        "topAsins": null
+      },
+      {
+        "marketplace": "US",
+        "keyword": "coffee table",
+        "keywordCn": "咖啡桌",
+        "keywordJp": "コーヒーテーブル",
+        "departments": [
+          {
+            "code": "Furniture",
+            "label": "Home / Furniture"
+          },
+          {
+            "code": "lawn-garden",
+            "label": "Garden & Outdoor"
+          },
+          {
+            "code": "hi",
+            "label": "Tools & Home Improvement"
+          }
+        ],
+        "month": "2026.08",
+        "supplement": "N",
+        "searches": 1058672,
+        "purchases": 2858,
+        "purchaseRate": 0.0027,
+        "monopolyClickRate": 0.1109,
+        "products": 56,
+        "adProducts": 1028,
+        "supplyDemandRatio": 18904.86,
+        "avgPrice": 69.99,
+        "avgRatings": null,
+        "avgRating": 4.3,
+        "bidMin": 0.48,
+        "bidMax": 0.83,
+        "bid": 0.69,
+        "cvsShareRate": 0.0711,
+        "wordCount": 2,
+        "titleDensity": 49,
+        "spr": 70,
+        "relevancy": 1.7,
+        "amazonChoice": true,
+        "searchRank": 226,
+        "trends": null,
+        "clicks": 481959,
+        "impressions": 31125971,
+        "topAsins": null
+      },
+      {
+        "marketplace": "US",
+        "keyword": "tv stands for living room",
+        "keywordCn": "电视代表客厅",
+        "keywordJp": "テレビはリビングルームの略です",
+        "departments": [
+          {
+            "code": "Furniture",
+            "label": "Home / Furniture"
+          },
+          {
+            "code": "office-products",
+            "label": "Office Products"
+          },
+          {
+            "code": "electronics",
+            "label": "Electronics"
+          }
+        ],
+        "month": "2026.08",
+        "supplement": "N",
+        "searches": 400368,
+        "purchases": 1241,
+        "purchaseRate": 0.0031,
+        "monopolyClickRate": 0.0872,
+        "products": 17454,
+        "adProducts": 539,
+        "supplyDemandRatio": 22.94,
+        "avgPrice": 129.98,
+        "avgRatings": null,
+        "avgRating": 4.5,
+        "bidMin": 0.69,
+        "bidMax": 1.06,
+        "bid": 0.86,
+        "cvsShareRate": 0.0531,
+        "wordCount": 5,
+        "titleDensity": 0,
+        "spr": 30,
+        "relevancy": 0.8,
+        "amazonChoice": true,
+        "searchRank": 1071,
+        "trends": null,
+        "clicks": 184700,
+        "impressions": 11527214,
+        "topAsins": null
+      }
+    ],
+    "terminal": null,
+    "hasNextPage": true,
+    "guestVisited": false
+  }
+}

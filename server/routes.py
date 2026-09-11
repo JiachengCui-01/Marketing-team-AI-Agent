@@ -17,6 +17,16 @@ from sse_starlette.sse import EventSourceResponse
 
 from marketing_agent import llm_client
 from marketing_agent.agents.image_skills import IMAGE_SKILLS, select_image_skill
+from marketing_agent.tools.mcp_client import McpUnavailable
+from server.market import deepdive as market_deepdive
+from server.market import gateway as market_gateway
+from server.market import personas as market_personas
+from server.market import prd as market_prd
+from server.market import render as market_render
+from server.market import scoring as market_scoring
+from server.market import store as market_store
+from server.market import sweep as market_sweep
+from server.market import taxonomy as market_taxonomy
 from marketing_agent.conversation import Conversation
 from marketing_agent.file_inputs import build_prompt_addendum, extract
 from marketing_agent.oa.agent import run_oa_copilot
@@ -550,6 +560,267 @@ async def refresh_selection(request: Request) -> dict:
     except selection.SelectionGenerationError as exc:
         raise HTTPException(502, str(exc)) from exc
     return {"report": record}
+
+
+# ---------- market decision system ----------
+#
+# Two surfaces over one warehouse: 全盘发现 (every tracked furniture node) and
+# 品类深度 (one node). Reads are free — they render stored rows — so only the two
+# refresh endpoints can spend vendor credits, and each has its own wallet.
+#
+# The legacy /selection/* endpoints above are untouched: a cached web bundle keeps
+# working, for the same reason the legacy DELETE shim does.
+
+
+def _market_language(payload: dict, config: dict | None) -> str:
+    language = str(payload.get("language")
+                   or (config or {}).get("language") or "zh").lower()
+    return language if language in {"zh", "en"} else "zh"
+
+
+def _market_persona(request: Request, config: dict | None) -> str:
+    return market_personas.normalize(
+        request.query_params.get("persona") or (config or {}).get("persona"))
+
+
+def _market_period(request: Request) -> str:
+    raw = (request.query_params.get("period") or "").strip()
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    return digits[:6] if len(digits) >= 6 else market_gateway.previous_period()
+
+
+@router.get("/market/config")
+def market_config(request: Request) -> dict:
+    user = auth.require_user(request)
+    config = _resolved_selection_config(user["id"])
+    persona = _market_persona(request, config)
+    return {
+        "config": config,
+        "available": sellersprite_configured(),
+        "marketplaces": list(selection.MARKETPLACES),
+        "personas": market_personas.describe(),
+        "sections": {
+            "overview": market_personas.sections_for(persona, "overview"),
+            "category": market_personas.sections_for(persona, "category"),
+        },
+        "score_model": market_scoring.score_model(),
+        "nodes": [
+            {
+                "node_key": node["node_id_path"],
+                "label": market_taxonomy.short_label(node["node_label_path"]),
+                "node_label_path": node["node_label_path"],
+                "brand_category": node.get("brand_category"),
+                "tier": node.get("tier"),
+            }
+            for node in market_taxonomy.leaf_nodes()
+        ],
+    }
+
+
+@router.put("/market/config")
+async def save_market_config(request: Request) -> dict:
+    user = auth.require_user(request)
+    payload = await request.json()
+    fields = _validate_selection_payload(payload)
+    persona = market_personas.normalize(payload.get("persona"))
+    overview_enabled = bool(payload.get("overview_enabled", True))
+    config = db.upsert_selection_config(user["id"], persona=persona,
+                                        overview_enabled=overview_enabled, **fields)
+    return {"config": config}
+
+
+@router.get("/market/overview")
+def market_overview(request: Request) -> dict:
+    user = auth.require_user(request)
+    config = _resolved_selection_config(user["id"])
+    language = str((config or {}).get("language") or "zh")
+    persona = _market_persona(request, config)
+    record = market_store.latest_dashboard(marketplace="US", scope="overview",
+                                           language=language)
+    if record is None:
+        return {"report": None, "persona": persona,
+                "sections": market_personas.sections_for(persona, "overview"),
+                "available": sellersprite_configured()}
+    # Persona gating is applied on read, so switching view costs no model call.
+    record["dashboard"]["sections"] = market_personas.sections_for(persona, "overview")
+    record["dashboard"]["hidden_sections"] = market_personas.hidden_count(persona, "overview")
+    return {"report": record, "persona": persona, "available": sellersprite_configured()}
+
+
+@router.post("/market/overview/refresh")
+async def refresh_market_overview(request: Request) -> dict:
+    """Re-render the board. Free unless the caller explicitly asks to collect."""
+    user = auth.require_user(request)
+    config = _resolved_selection_config(user["id"])
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001 — tolerate a bodyless POST
+        payload = {}
+    language = _market_language(payload, config)
+    persona = market_personas.normalize(
+        payload.get("persona") or (config or {}).get("persona"))
+    period = str(payload.get("period") or "") or None
+
+    if payload.get("collect"):
+        if not sellersprite_configured():
+            raise HTTPException(502, "卖家精灵（SellerSprite）未配置，无法采集市场数据。"
+                                     "请在服务端设置 SELLERSPRITE_SECRET_KEY。")
+        try:
+            await asyncio.to_thread(market_sweep.run_daily_sweep, "US")
+        except McpUnavailable as exc:
+            raise HTTPException(
+                502, f"卖家精灵接口暂时不可用：{exc}。已有数据不会被覆盖。") from exc
+
+    client = llm.get_client()
+    record = await asyncio.to_thread(
+        market_render.render_overview, marketplace="US", period=period,
+        language=language, client=client, persona=persona)
+    return {"report": record, "persona": persona}
+
+
+@router.get("/market/categories")
+def market_categories(request: Request) -> dict:
+    """The picker: every tracked node with its freshness and latest score."""
+    auth.require_user(request)
+    period = _market_period(request)
+    scores = {row["subject_id"]: row
+              for row in market_store.get_scores("US", "node", period)}
+    out = []
+    for node in market_taxonomy.leaf_nodes():
+        path = node["node_id_path"]
+        snapshot = market_store.get_node_snapshot("US", path, period)
+        dive = market_store.get_deepdive("US", path, period)
+        out.append({
+            "node_key": path,
+            "label": market_taxonomy.short_label(node["node_label_path"]),
+            "node_label_path": node["node_label_path"],
+            "brand_category": node.get("brand_category"),
+            "tier": node.get("tier"),
+            "has_snapshot": snapshot is not None,
+            "completeness": (snapshot or {}).get("completeness"),
+            "score": (scores.get(path) or {}).get("score"),
+            "deepdive_status": (dive or {}).get("status"),
+        })
+    return {"categories": out, "period": period}
+
+
+@router.get("/market/category")
+def market_category(request: Request) -> dict:
+    user = auth.require_user(request)
+    config = _resolved_selection_config(user["id"])
+    node = (request.query_params.get("node") or "").strip()
+    if not node:
+        raise HTTPException(400, "缺少类目节点参数。")
+    language = str((config or {}).get("language") or "zh")
+    persona = _market_persona(request, config)
+    record = market_store.latest_dashboard(marketplace="US", scope="category",
+                                           language=language, node_id_path=node)
+    if record is None:
+        return {"report": None, "persona": persona,
+                "sections": market_personas.sections_for(persona, "category"),
+                "available": sellersprite_configured()}
+    record["dashboard"]["sections"] = market_personas.sections_for(persona, "category")
+    record["dashboard"]["hidden_sections"] = market_personas.hidden_count(
+        persona, "category")
+    return {"report": record, "persona": persona, "available": sellersprite_configured()}
+
+
+@router.post("/market/category/refresh")
+async def refresh_market_category(request: Request) -> dict:
+    """Run (or reuse) a deep dive for one node, then render it."""
+    user = auth.require_user(request)
+    config = _resolved_selection_config(user["id"])
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        payload = {}
+    node = str(payload.get("node") or "").strip()
+    if not node:
+        raise HTTPException(400, "缺少类目节点参数。")
+    language = _market_language(payload, config)
+    persona = market_personas.normalize(
+        payload.get("persona") or (config or {}).get("persona"))
+    period = str(payload.get("period") or "") or None
+
+    if payload.get("collect", True):
+        if not sellersprite_configured():
+            raise HTTPException(502, "卖家精灵（SellerSprite）未配置，无法采集品类数据。"
+                                     "请在服务端设置 SELLERSPRITE_SECRET_KEY。")
+        try:
+            await asyncio.to_thread(
+                market_deepdive.run_deepdive, node_id_path=node, period=period,
+                user_id=user["id"], force=bool(payload.get("force")))
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except McpUnavailable as exc:
+            raise HTTPException(
+                502, f"卖家精灵接口暂时不可用：{exc}。已有数据不会被覆盖。") from exc
+
+    client = llm.get_client()
+    record = await asyncio.to_thread(
+        market_render.render_category, node_id_path=node, marketplace="US",
+        period=period, language=language, client=client, persona=persona,
+        user_id=user["id"])
+    return {"report": record, "persona": persona}
+
+
+@router.get("/market/evidence")
+def market_evidence(request: Request) -> dict:
+    """Resolve evidence ids for the drawer. Any number on screen leads here."""
+    auth.require_user(request)
+    raw = (request.query_params.get("ids") or "").strip()
+    ids = [i for i in (part.strip() for part in raw.split(",")) if i][:50]
+    if not ids:
+        raise HTTPException(400, "缺少证据编号。")
+    return {"evidence": market_store.get_evidence(ids)}
+
+
+@router.get("/market/budget")
+def market_budget(request: Request) -> dict:
+    auth.require_user(request)
+    run = market_store.latest_run("US")
+    return {
+        "budget": market_gateway.budget_status("US"),
+        "last_run": run,
+        "queue_depth": market_store.queue_depth("US"),
+        "calls": market_store.call_log("US", market_gateway.run_date(), limit=50),
+    }
+
+
+@router.post("/market/prd")
+async def create_market_prd(request: Request) -> dict:
+    user = auth.require_user(request)
+    config = _resolved_selection_config(user["id"])
+    payload = await request.json()
+    node = str(payload.get("node") or "").strip()
+    if not node:
+        raise HTTPException(400, "缺少类目节点参数。")
+    language = _market_language(payload, config)
+    client = llm.get_client()
+    try:
+        record = await asyncio.to_thread(
+            market_prd.generate_prd, user_id=user["id"], node_id_path=node,
+            opportunity_id=str(payload.get("opportunity_id") or ""),
+            period=str(payload.get("period") or "") or None, language=language,
+            client=client)
+    except market_render.RenderError as exc:
+        raise HTTPException(409, f"该类目暂无可用于生成产品定义书的数据：{exc}") from exc
+    return {"prd": record}
+
+
+@router.get("/market/prd")
+def list_market_prds(request: Request) -> dict:
+    user = auth.require_user(request)
+    return {"prds": market_store.list_prds(user["id"])}
+
+
+@router.get("/market/prd/{prd_id}")
+def get_market_prd(request: Request, prd_id: str) -> dict:
+    user = auth.require_user(request)
+    record = market_store.get_prd(prd_id, user["id"])
+    if record is None:
+        raise HTTPException(404, "产品定义书不存在。")
+    return {"prd": record}
 
 
 # ---------- groups ----------

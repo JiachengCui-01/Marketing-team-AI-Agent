@@ -1,0 +1,27 @@
+{
+  "code": "OK",
+  "message": "成功",
+  "data": [
+    {
+      "label": "有A+有视频",
+      "products": 75,
+      "productsRatio": 75.0,
+      "units": 30661,
+      "unitsRatio": 76.59
+    },
+    {
+      "label": "新品无A+无视频",
+      "products": 1,
+      "productsRatio": 1.92,
+      "units": 197,
+      "unitsRatio": 1.07
+    },
+    {
+      "label": "有A+无视频",
+      "products": 24,
+      "productsRatio": 24.0,
+      "units": 9174,
+      "unitsRatio": 22.92
+    }
+  ]
+}

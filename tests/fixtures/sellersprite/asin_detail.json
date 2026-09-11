@@ -1,0 +1,82 @@
+{
+  "code": "OK",
+  "message": "成功",
+  "data": {
+    "asin": "B0F5WV3394",
+    "asinUrl": "https://www.amazon.com/dp/B0F5WV3394?psc=1",
+    "availableDate": 1745164800000,
+    "brand": "BELLEZE",
+    "brandUrl": "/stores/BELLEZE/page/3756A5DA-BD38-45F0-A540-80BE59171696?lp_asin=B0F5WV3394&ref_=ast_bln&store_ref=bl_ast_dp_brandlogo_sto",
+    "bsrId": "home-garden",
+    "bsrLabel": "Home & Kitchen",
+    "bsrRank": 26865,
+    "subcategories": [
+      {
+        "rank": 3,
+        "code": "3733831",
+        "label": "Buffets & Sideboards"
+      }
+    ],
+    "createdTime": 1745344150000,
+    "dimensions": "15.7\"D x 32.7\"W x 31.7\"H",
+    "firstRatingDate": 1750176000000,
+    "imageUrl": "https://m.media-amazon.com/images/I/41AcXf9wjyL._AC_US200_.jpg",
+    "lqs": 96,
+    "nodeId": 3733831,
+    "nodeIdPath": "1055398:1063306:3733781:3733831",
+    "nodeLabelPath": "Home & Kitchen:Furniture:Dining Room Furniture:Buffets & Sideboards",
+    "nodeLabelPathLocale": null,
+    "parent": "B0G33K6DYG",
+    "price": 1019.99,
+    "primePrice": -1.0,
+    "deliveryPrice": -1.0,
+    "coupon": "52.00",
+    "questions": null,
+    "rating": 4.3,
+    "ratings": 366,
+    "reviews": null,
+    "variantRatings": 0,
+    "variantReviews": 0,
+    "sellerId": "A3RCRUQZKOMTW7",
+    "sellerName": "Align Inc.",
+    "fulfillment": "FBM",
+    "sellers": 1,
+    "marketplace": "US",
+    "title": "BELLEZE Set of 4 Modular Fluted Sideboard Buffet Cabinet, Mid-Century Modern Console Sideboard with Symmetrical Arched Doors, Elegant Credenza for Kitchen, and Living Room, Camel",
+    "updatedTime": 1789105711000,
+    "variations": 80,
+    "weight": "75.4 pounds",
+    "zoomImageUrl": "https://m.media-amazon.com/images/I/41AcXf9wjyL._AC_US600_.jpg",
+    "skuList": [
+      "Color: Stacked Camel C",
+      "Size: 4"
+    ],
+    "variationList": [
+      {
+        "asin": "B0G34J3N5H",
+        "attribute": "Color: Jagger Camel D | Size: 1"
+      },
+      {
+        "asin": "B0G24Z6NK3",
+        "attribute": "Color: Jagger Camel C | Size: 4"
+      },
+      {
+        "asin": "B0G24YCKF7",
+        "attribute": "Color: Jagger Ebony C | Size: 4"
+      }
+    ],
+    "features": [
+      "Elegant Arched Design & Exquisite Handcraft: The BELLEZE Sideboard Buffet with Storage features symmetrical arched door panels, with flowing curves and hand-nailed decorative strips that create a layered, modern, and elegant look. The golden semi-circular handles complement the overall design. This fluted sideboard cabinet is perfect for adding both style and function to your home.",
+      "Versatile Sideboard Design to Meet Various Needs: The sideboard buffet cabinet with organization and adjustable shelves design is ideal for storing dinnerware, wine glasses, small appliances, books, and more. The adjustable shelves allow you to customize the organization to fit different-sized items, ensuring your space stays neat and organized.",
+      "Premium Materials for Durability & Stability: Crafted from a blend of black and brown finish and high-quality PB+MDF, this sideboard with storage is built to last, U.S. Design Patent US D1,093,039 S. With a thickened structure and reinforcement, this cabinet provides long-lasting stability, whether you're storing heavy items or using it daily. Its sturdy construction makes it a reliable sideboard buffet cabinet for any living space."
+    ],
+    "overviews": "{\"Brand\":\"BELLEZE\",\"Color\":\"Stacked Camel C\",\"Material\":\"Engineered Wood\",\"Recommended Uses For Product\":\"Home Bar\",\"Product Dimensions\":\"15.7\\\"D x 32.7\\\"W x 31.7\\\"H\"}",
+    "badge": {
+      "bestSeller": "N",
+      "amazonChoice": "N",
+      "newRelease": "N",
+      "ebc": "Y",
+      "video": "Y"
+    }
+  }
+}

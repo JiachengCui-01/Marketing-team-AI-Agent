@@ -1,0 +1,324 @@
+{
+  "code": "OK",
+  "message": "成功",
+  "data": {
+    "guestId": null,
+    "pages": 1,
+    "page": 1,
+    "size": 15,
+    "total": 15,
+    "took": 18,
+    "url": null,
+    "order": {
+      "field": "",
+      "desc": true
+    },
+    "items": [
+      {
+        "marketplace": "US",
+        "keywords": "sideboard buffet cabinet",
+        "searches": 17134,
+        "purchases": 130,
+        "growth": 18.312387,
+        "purchaseRate": 0.0076,
+        "products": 6398,
+        "supplyDemandRatio": 2.68,
+        "searchDepartments": [
+          {
+            "code": "Furniture",
+            "label": "Home / Furniture",
+            "total": 17134,
+            "ratio": 1.0
+          }
+        ],
+        "month": "2026.08",
+        "supplement": "N",
+        "searchMonthlyCv": -1516,
+        "searchMonthlyCr": -8.13,
+        "searchNearlyCv": -986,
+        "searchNearlyCr": -7.27,
+        "currency": "$",
+        "avgPrice": 175.67,
+        "avgRatings": 414,
+        "avgRating": 4.4,
+        "relationAsinList": [
+          {
+            "asin": "B0FDGHG1LW",
+            "imageUrl": "https://m.media-amazon.com/images/I/31sYUDzplKL._AC_US200_.jpg",
+            "price": 154.99,
+            "ratings": 239,
+            "rating": 4.1,
+            "title": "usikey 55\" Buffet Cabinet with Storage and Drawers, Large Sideboard Buffet Cabinet with Adjustable Shelves and Doors, Modern Coffee Bar for Kitchen, Living Room, White"
+          },
+          {
+            "asin": "B0DTKDC297",
+            "imageUrl": "https://m.media-amazon.com/images/I/31PRGGuWaTL._AC_US200_.jpg",
+            "price": 227.99,
+            "ratings": 425,
+            "rating": 4.4,
+            "title": "HOSTACK 60\" W Sideboard Buffet Cabinet with Storage, Kitchen Cabinet, White"
+          },
+          {
+            "asin": "B0HDP2BVS2",
+            "imageUrl": "https://m.media-amazon.com/images/I/513mo91d8PL._AC_US200_.jpg",
+            "price": 299.99,
+            "ratings": 2,
+            "rating": 5.0,
+            "title": "67\" Large Sideboard Buffet Cabinet with Storages, Oak"
+          }
+        ],
+        "bidMin": 0.5,
+        "bidMax": 0.9,
+        "bid": 0.62,
+        "araAsinList": [
+          {
+            "asin": "B0FDGHG1LW",
+            "title": null,
+            "imageUrl": "https://m.media-amazon.com/images/I/31sYUDzplKL._AC_US200_.jpg",
+            "clickRate": 0.0188,
+            "conversionShareRate": 0.0
+          },
+          {
+            "asin": "B0D28Z6Q9R",
+            "title": null,
+            "imageUrl": "https://m.media-amazon.com/images/W/BW_MEDIAX_AVIF_MEASUREMENT_1306696-T1/images/I/51leDV2xdCL._AC_US200_.jpg",
+            "clickRate": 0.0164,
+            "conversionShareRate": 0.0
+          },
+          {
+            "asin": "B0FXRGJ4S9",
+            "title": null,
+            "imageUrl": "https://m.media-amazon.com/images/I/510uevIBdfL._AC_US200_.jpg",
+            "clickRate": 0.0132,
+            "conversionShareRate": 0.0
+          }
+        ],
+        "araClickRate": 0.0483,
+        "araShareRate": 0.0,
+        "goodsValue": 0.0056,
+        "marketPeriod": "N",
+        "brand": null,
+        "hasBrandWord": false,
+        "keywordCn": "餐具柜自助餐柜",
+        "brands": [
+          "ONBRILL",
+          "HOSTACK",
+          "RoyalCraft"
+        ],
+        "categories": [
+          "Furniture",
+          "Home",
+          "Home Improvement"
+        ],
+        "titleDensityExact": 31,
+        "clicks": 6657,
+        "impressions": 457580,
+        "topAsins": null
+      },
+      {
+        "marketplace": "US",
+        "keywords": "buffet sideboard cabinet",
+        "searches": 4444,
+        "purchases": 21,
+        "growth": -4.4095507,
+        "purchaseRate": 0.0048,
+        "products": 5427,
+        "supplyDemandRatio": 0.82,
+        "searchDepartments": [
+          {
+            "code": "Furniture",
+            "label": "Home / Furniture",
+            "total": 4444,
+            "ratio": 1.0
+          }
+        ],
+        "month": "2026.08",
+        "supplement": "N",
+        "searchMonthlyCv": -331,
+        "searchMonthlyCr": -6.93,
+        "searchNearlyCv": -205,
+        "searchNearlyCr": -4.41,
+        "currency": "$",
+        "avgPrice": 249.99,
+        "avgRatings": 552,
+        "avgRating": 4.4,
+        "relationAsinList": [
+          {
+            "asin": "B0HC21Y2VS",
+            "imageUrl": "https://m.media-amazon.com/images/I/51PzDGLJGNL._AC_US200_.jpg",
+            "price": 249.98,
+            "ratings": 3,
+            "rating": 5.0,
+            "title": "63\" Arched Fluted Doors Buffet Sideboard Cabinet with Storage"
+          },
+          {
+            "asin": "B0D28Z6Q9R",
+            "imageUrl": "https://m.media-amazon.com/images/I/51leDV2xdCL._AC_US200_.jpg",
+            "price": 175.67,
+            "ratings": 552,
+            "rating": 4.4,
+            "title": "RoyalCraft Buffet Cabinet with Storage, 59\" Vintage Sideboard with Adjustable Shelves, Mid Century Modern Painted Credenza Coffee Bar for Kitchen, Dining Room, Entryway, Living Room, Forest Green"
+          },
+          {
+            "asin": "B0DTKDC297",
+            "imageUrl": "https://m.media-amazon.com/images/I/31PRGGuWaTL._AC_US200_.jpg",
+            "price": 227.99,
+            "ratings": 425,
+            "rating": 4.4,
+            "title": "HOSTACK 60\" W Sideboard Buffet Cabinet with Storage, Kitchen Cabinet, White"
+          }
+        ],
+        "bidMin": 0.62,
+        "bidMax": 1.0,
+        "bid": 0.81,
+        "araAsinList": [
+          {
+            "asin": "B0D28Z6Q9R",
+            "title": null,
+            "imageUrl": "https://m.media-amazon.com/images/I/51leDV2xdCL._AC_US200_.jpg",
+            "clickRate": 0.0235,
+            "conversionShareRate": 0.0476
+          },
+          {
+            "asin": "B0CG9MSS4Y",
+            "title": null,
+            "imageUrl": "https://m.media-amazon.com/images/I/51vuWz97MaL._AC_US200_.jpg",
+            "clickRate": 0.0235,
+            "conversionShareRate": 0.0
+          },
+          {
+            "asin": "B0FXRGJ4S9",
+            "title": null,
+            "imageUrl": "https://m.media-amazon.com/images/I/510uevIBdfL._AC_US200_.jpg",
+            "clickRate": 0.0212,
+            "conversionShareRate": 0.0
+          }
+        ],
+        "araClickRate": 0.068,
+        "araShareRate": 0.0476,
+        "goodsValue": 0.005,
+        "marketPeriod": "N",
+        "brand": null,
+        "hasBrandWord": false,
+        "keywordCn": "自助餐边柜",
+        "brands": [
+          "ONBRILL",
+          "RoyalCraft",
+          "IFGET"
+        ],
+        "categories": [
+          "Furniture",
+          "Home"
+        ],
+        "titleDensityExact": 2,
+        "clicks": 2212,
+        "impressions": 105241,
+        "topAsins": null
+      },
+      {
+        "marketplace": "US",
+        "keywords": "green sideboard buffet cabinet",
+        "searches": 1387,
+        "purchases": 16,
+        "growth": 109.20061,
+        "purchaseRate": 0.0118,
+        "products": 1118,
+        "supplyDemandRatio": 1.24,
+        "searchDepartments": [
+          {
+            "code": "Furniture",
+            "label": "Home / Furniture",
+            "total": 1387,
+            "ratio": 1.0
+          }
+        ],
+        "month": "2026.08",
+        "supplement": "N",
+        "searchMonthlyCv": 1387,
+        "searchMonthlyCr": 1.0,
+        "searchNearlyCv": 523,
+        "searchNearlyCr": 109.2,
+        "currency": "$",
+        "avgPrice": 229.99,
+        "avgRatings": 146,
+        "avgRating": 4.4,
+        "relationAsinList": [
+          {
+            "asin": "B0D28Z6Q9R",
+            "imageUrl": "https://m.media-amazon.com/images/I/51leDV2xdCL._AC_US200_.jpg",
+            "price": 175.67,
+            "ratings": 553,
+            "rating": 4.4,
+            "title": "RoyalCraft Buffet Cabinet with Storage, 59\" Vintage Sideboard with Adjustable Shelves, Mid Century Modern Painted Credenza Coffee Bar for Kitchen, Dining Room, Entryway, Living Room, Forest Green"
+          },
+          {
+            "asin": "B0GDY1FCBS",
+            "imageUrl": "https://m.media-amazon.com/images/I/31zie0ijeSL._AC_US200_.jpg",
+            "price": 229.99,
+            "ratings": 146,
+            "rating": 4.2,
+            "title": "HOSTACK 71\"W Farmhouse Kitchen Sideboard Buffet Cabinet with Storage, Green"
+          },
+          {
+            "asin": "B0H5C8QFND",
+            "imageUrl": "https://m.media-amazon.com/images/I/41JBW7Vi1OL._AC_US200_.jpg",
+            "price": 167.99,
+            "ratings": 52,
+            "rating": 4.5,
+            "title": "54\" Sideboard Cabinet, Kitchen Buffet Cabinet with Storage, Olive Green"
+          }
+        ],
+        "bidMin": 0.47,
+        "bidMax": 0.79,
+        "bid": 0.63,
+        "araAsinList": [
+          {
+            "asin": "B0D28Z6Q9R",
+            "title": null,
+            "imageUrl": "https://m.media-amazon.com/images/I/51leDV2xdCL._AC_US200_.jpg",
+            "clickRate": 0.0758,
+            "conversionShareRate": 0.0
+          },
+          {
+            "asin": "B0H7JJW3RF",
+            "title": null,
+            "imageUrl": "https://m.media-amazon.com/images/I/41jvHlbipKL._AC_US200_.jpg",
+            "clickRate": 0.0758,
+            "conversionShareRate": 0.0
+          },
+          {
+            "asin": "B0GDY1FCBS",
+            "title": null,
+            "imageUrl": "https://m.media-amazon.com/images/I/31zie0ijeSL._AC_US200_.jpg",
+            "clickRate": 0.0606,
+            "conversionShareRate": 0.0
+          }
+        ],
+        "araClickRate": 0.2122,
+        "araShareRate": 0.0,
+        "goodsValue": 0.005,
+        "marketPeriod": "N",
+        "brand": null,
+        "hasBrandWord": false,
+        "keywordCn": "绿色餐边柜 自助餐柜",
+        "brands": [
+          "RoyalCraft",
+          "HOSTACK",
+          "ARTPOWER"
+        ],
+        "categories": [
+          "Furniture",
+          "Home",
+          "Biss"
+        ],
+        "titleDensityExact": 1,
+        "clicks": 569,
+        "impressions": 34953,
+        "topAsins": null
+      }
+    ],
+    "terminal": null,
+    "hasNextPage": false,
+    "guestVisited": false
+  }
+}

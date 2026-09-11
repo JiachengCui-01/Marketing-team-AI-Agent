@@ -12,8 +12,11 @@ type I18nContextValue = {
   t: (typeof messages)[Locale];
 };
 
+import { marketMessages } from "@/lib/i18n-market";
+
 const messages = {
   zh: {
+    ...marketMessages.zh,
     language: "语言",
     chinese: "中文",
     english: "English",
@@ -419,6 +422,7 @@ const messages = {
     imageDragHint: "在预览图上拖拽移动主体",
   },
   en: {
+    ...marketMessages.en,
     language: "Language",
     chinese: "中文",
     english: "English",
@@ -825,6 +829,15 @@ const messages = {
     imageDragHint: "Drag on the preview to move the subject",
   },
 } as const;
+
+// Spreading loses the implicit zh/en key equality a single `as const` literal
+// used to give for free, so assert it back explicitly: a key added to one locale
+// and not the other now fails typecheck instead of rendering undefined.
+type ZhKeys = keyof (typeof messages)["zh"];
+type EnKeys = keyof (typeof messages)["en"];
+const _localeParity: [ZhKeys extends EnKeys ? true : never,
+                      EnKeys extends ZhKeys ? true : never] = [true, true];
+void _localeParity;
 
 export type I18nText = (typeof messages)[Locale];
 

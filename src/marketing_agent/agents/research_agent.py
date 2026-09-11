@@ -251,6 +251,25 @@ def _sources_unconfigured() -> str:
     )
 
 
+
+def _warehouse_tool():
+    """The local market warehouse, when this process has one.
+
+    Imported lazily and defensively on purpose: ``marketing_agent`` is installable
+    on its own (the ``marketing-agent`` CLI), and the warehouse lives in the server
+    package. Depending on it at module scope would invert the layering and break
+    the standalone install.
+    """
+    try:
+        from server.market import lookup  # noqa: PLC0415 — see docstring
+    except Exception:  # noqa: BLE001 — no server package in this process
+        return None, None
+    try:
+        return lookup.build_tool()
+    except Exception:  # noqa: BLE001 — a broken warehouse must not sink research
+        return None, None
+
+
 def run(
     client: llm_client.DeepSeek,
     task: str,
@@ -289,6 +308,13 @@ def run(
             "reopens if the vendor stops returning data), and browse_product_page is not "
             "available at all — a live page load costs tens of seconds each."
         )
+        if not sellersprite_only:
+            parts.append(
+                "\nWAREHOUSE FIRST: market_data_lookup reads the stored SellerSprite "
+                "warehouse — free, instant, up to 24 months of monthly snapshots. Call "
+                "it before any sellersprite_* tool, and spend a metered vendor call "
+                "only on a field its GAPS line says the warehouse does not hold."
+            )
         parts.append(
             f"\nTOOLS: SellerSprite is your data source and is live. {web_note} "
             f"Budget: at most {sellersprite.MAX_CALLS_PER_RUN} vendor calls and "
@@ -386,6 +412,21 @@ def run(
     # the menu, and web search is offered only for what the vendor cannot hold.
     tools = [*vendor_tools]
     handlers = {**vendor_handlers}
+
+    # The stored warehouse goes FIRST, ahead of every metered vendor tool: it is
+    # free and instant, and its reply ends with a GAPS line saying what it does not
+    # hold. That turns the vendor budget from "this turn's research allowance" into
+    # "this turn's gap-filling allowance", which is the largest cost reduction on
+    # the chat path.
+    # Not in sellersprite_only mode: those skills are the audit-grade path and
+    # require evidence collected in THIS turn, so they buy fresh vendor data even
+    # though the warehouse holds the same vendor's numbers.
+    warehouse_tool, warehouse_handler = (
+        (None, None) if sellersprite_only else _warehouse_tool())
+    if warehouse_tool is not None:
+        tools.insert(0, warehouse_tool)
+        handlers[warehouse_tool["name"]] = warehouse_handler
+
     if vendor_tools:
         # Registered whenever a provider exists — the handler itself decides whether
         # this particular call is warranted, which is what lets a stalled vendor

@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import os
 import re
 import threading
@@ -116,65 +115,16 @@ def _trim(payload: str) -> str:
     return payload[:MAX_PAYLOAD_CHARS] + f"\n… [truncated at {MAX_PAYLOAD_CHARS} chars]"
 
 
-# The browse tree this business actually sells into. ``product_node`` happily returns
-# office and outdoor furniture nodes for the same keyword, and a "sofa" under Office
-# Products is a task chair — a different price band, buyer, and freight profile.
-_HOME_FURNITURE_PREFIX = "home & kitchen:furniture"
-_STOPWORDS = {"and", "or", "the", "of", "with", "for", "&"}
-
-
-def _category_tokens(category: str) -> set[str]:
-    words = re.split(r"[^a-z0-9]+", (category or "").lower())
-    return {w for w in words if len(w) > 2 and w not in _STOPWORDS}
-
-
-def pick_node(payload: str, category: str) -> tuple[str, str] | None:
-    """Choose the best category node from a ``product_node`` reply.
-
-    Returns ``(nodeIdPath, nodeLabelPath)``, or ``None`` when nothing usable came
-    back. Picking matters more than it looks: driving the rest of the sweep off a
-    free-text keyword instead of a node id is what makes the vendor answer a
-    furniture query with toilet paper.
-    """
-    try:
-        data = json.loads(payload)
-    except (ValueError, TypeError):
-        return None
-    rows = data.get("data") if isinstance(data, dict) else data
-    if not isinstance(rows, list):
-        return None
-
-    tokens = _category_tokens(category)
-    best: tuple[float, str, str] | None = None
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        path = str(row.get("nodeIdPath") or "").strip()
-        label = str(row.get("nodeLabelPath") or "").strip()
-        if not path:
-            continue
-        lowered = label.lower()
-        score = 0.0
-        # Being in the right tree outweighs any keyword or size signal.
-        if lowered.startswith(_HOME_FURNITURE_PREFIX):
-            score += 1000.0
-        elif "furniture" in lowered:
-            score += 200.0
-        score += 100.0 * sum(1 for token in tokens if token in lowered)
-        try:
-            products = float(row.get("products") or 0)
-        except (TypeError, ValueError):
-            products = 0.0
-        # A node with more listings is the more representative read of the
-        # category, but only as a tiebreak — hence the log.
-        score += math.log10(products + 1)
-        if best is None or score > best[0]:
-            best = (score, path, label)
-    if best is None or best[0] < 100.0:
-        # Neither the right tree nor a keyword match: better to report a gap than
-        # to analyze whatever the vendor's first row happened to be.
-        return None
-    return best[1], best[2]
+# Browse-node resolution moved to ``server/market/taxonomy.py`` when the market
+# warehouse took over collection: the market package needs it for deep dives on
+# categories outside the tracked catalog, and one scorer beats two. Re-exported
+# here so existing callers and tests keep the old import path.
+from .market.taxonomy import (  # noqa: E402  (placed with the code it replaced)
+    _HOME_FURNITURE_PREFIX,
+    _STOPWORDS,
+    _category_tokens,
+    pick_node,
+)
 
 
 def collect_vendor_data(categories: list[str], marketplace: str) -> tuple[list[dict], list[str]]:

@@ -25,13 +25,18 @@ _INITIALIZED = False
 CURRENT_USER_ID: ContextVar[str | None] = ContextVar("CURRENT_USER_ID", default=None)
 
 
-def _connect() -> sqlite3.Connection:
+def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=10, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     return conn
+
+
+# ``server/market/store.py`` owns the market-warehouse SQL and opens its own
+# connections; the private spelling stays so the 2,800 lines below keep working.
+_connect = connect
 
 
 SCHEMA = """
@@ -422,6 +427,418 @@ CREATE TABLE IF NOT EXISTS kb_chunks (
 """
 
 
+# ======================================================================
+# Furniture market warehouse.
+#
+# GLOBAL, NOT PER-USER. The US Amazon furniture market is the same market for
+# every user of this workspace, so making these tables user-scoped would
+# multiply a 30-60 call/day vendor budget by the user count. User scoping lives
+# only in market_dashboards, market_deepdives and market_prds.
+#
+# Every fact table is keyed by period (yyyyMM) so a monthly vendor snapshot is
+# idempotent: re-running an ingest upserts, never appends. Retention is 24
+# monthly snapshots, enforced by market.store.prune_market_history().
+# ======================================================================
+MARKET_SCHEMA = """
+CREATE TABLE IF NOT EXISTS market_nodes (
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    node_id_path TEXT NOT NULL,
+    node_label_path TEXT NOT NULL,
+    label TEXT NOT NULL,
+    parent_path TEXT,
+    depth INTEGER NOT NULL DEFAULT 0,
+    -- Which line in marketing_agent.domain.PRODUCT_CATEGORIES this node serves.
+    -- NULL = discovered by the department sweep, not a tracked line.
+    brand_category TEXT,
+    tracked INTEGER NOT NULL DEFAULT 0,
+    tier INTEGER NOT NULL DEFAULT 2,
+    products INTEGER,
+    resolved_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (marketplace, node_id_path)
+);
+CREATE INDEX IF NOT EXISTS idx_market_nodes_tracked ON market_nodes(marketplace, tracked, tier);
+
+CREATE TABLE IF NOT EXISTS market_node_snapshots (
+    id TEXT PRIMARY KEY,
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    node_id_path TEXT NOT NULL,
+    period TEXT NOT NULL,
+    -- Structure, straight from market_research / market_research_statistics.
+    avg_price REAL, avg_revenue REAL, avg_units REAL, avg_profit REAL,
+    avg_rating REAL, avg_ratings REAL, avg_bsr REAL, avg_sellers REAL,
+    avg_volume REAL, avg_weight REAL,
+    total_products INTEGER, total_revenue REAL, total_units REAL,
+    brands INTEGER, sellers INTEGER,
+    -- Concentration comes free with market_research: top-N revenue share.
+    top5_brand_crn REAL, top10_brand_crn REAL,
+    top5_seller_crn REAL, top10_seller_crn REAL,
+    top5_product_crn REAL, top10_product_crn REAL,
+    -- Newcomer viability: l1/l3/l6/l12 = listings launched in the last N months.
+    new_count_l12 INTEGER, new_ratio_l12 REAL,
+    new_avg_revenue_l12 REAL, new_avg_units_l12 REAL, new_avg_reviews_l12 REAL,
+    new_count_l6 INTEGER, new_ratio_l6 REAL,
+    fba_proportion REAL, fbm_proportion REAL, ebc_proportion REAL,
+    amazon_self_proportion REAL,
+    -- Demand + the sibling-category averages the vendor supplies alongside.
+    -- Decisive for large furniture: a return costs more than the order's margin.
+    return_ratio REAL, return_ratio_avg REAL,
+    search_purchase_ratio REAL, search_purchase_ratio_avg REAL,
+    glance_views REAL, asin_count INTEGER,
+    -- Head-listing metrics: the entrenchment input.
+    hl_avg_ratings REAL, hl_avg_price REAL, hl_avg_revenue REAL,
+    new_product_proportion REAL,
+    completeness REAL NOT NULL DEFAULT 0.0,
+    missing_json TEXT NOT NULL DEFAULT '[]',
+    schema_version INTEGER NOT NULL DEFAULT 1,
+    ingested_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_market_node_snapshots_key
+    ON market_node_snapshots(marketplace, node_id_path, period);
+CREATE INDEX IF NOT EXISTS idx_market_node_snapshots_period
+    ON market_node_snapshots(marketplace, period);
+
+-- Long format so six distribution tools share one table instead of six wide ones.
+CREATE TABLE IF NOT EXISTS market_distributions (
+    id TEXT PRIMARY KEY,
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    node_id_path TEXT NOT NULL,
+    period TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    bucket_key TEXT NOT NULL,
+    bucket_order INTEGER NOT NULL DEFAULT 0,
+    products INTEGER, products_ratio REAL,
+    revenue REAL, revenue_ratio REAL,
+    units REAL, units_ratio REAL,
+    evidence_id TEXT,
+    ingested_at REAL NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_market_distributions_key
+    ON market_distributions(marketplace, node_id_path, period, kind, bucket_key);
+
+CREATE TABLE IF NOT EXISTS market_concentration (
+    id TEXT PRIMARY KEY,
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    node_id_path TEXT NOT NULL,
+    period TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    entity TEXT NOT NULL,
+    rank INTEGER NOT NULL DEFAULT 0,
+    products INTEGER, revenue REAL, revenue_ratio REAL,
+    units REAL, units_ratio REAL,
+    new_products INTEGER, new_revenue_ratio REAL,
+    rating REAL, ratings REAL,
+    evidence_id TEXT,
+    ingested_at REAL NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_market_concentration_key
+    ON market_concentration(marketplace, node_id_path, period, kind, entity);
+
+CREATE TABLE IF NOT EXISTS market_products (
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    asin TEXT NOT NULL,
+    title TEXT, brand TEXT, seller_name TEXT, seller_nation TEXT,
+    node_id_path TEXT, fulfillment TEXT,
+    available_date REAL,
+    variations INTEGER,
+    -- Real physical attributes: product_research returns these, which is why a
+    -- PRD may quote a COMPETITOR's dimensions (never our own, see domain.NEVER_FABRICATE).
+    dimension TEXT, weight TEXT, pkg_dimensions TEXT, pkg_weight TEXT,
+    first_seen_at REAL NOT NULL,
+    last_seen_at REAL NOT NULL,
+    PRIMARY KEY (marketplace, asin)
+);
+CREATE INDEX IF NOT EXISTS idx_market_products_node ON market_products(node_id_path, last_seen_at);
+
+CREATE TABLE IF NOT EXISTS market_product_metrics (
+    id TEXT PRIMARY KEY,
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    asin TEXT NOT NULL,
+    node_id_path TEXT,
+    period TEXT NOT NULL,
+    price REAL,            -- observed
+    units REAL,            -- vendor ESTIMATE
+    revenue REAL,          -- vendor ESTIMATE
+    profit REAL,           -- vendor ESTIMATE
+    bsr INTEGER,           -- observed
+    rating REAL,           -- observed
+    ratings INTEGER,       -- observed
+    sellers INTEGER, lqs REAL,
+    units_gr REAL, bsr_cr REAL, ratings_cv REAL,
+    badge TEXT,
+    source_tool TEXT NOT NULL DEFAULT '',
+    evidence_id TEXT,
+    ingested_at REAL NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_market_product_metrics_key
+    ON market_product_metrics(marketplace, asin, period);
+CREATE INDEX IF NOT EXISTS idx_market_product_metrics_node
+    ON market_product_metrics(node_id_path, period, revenue);
+
+CREATE TABLE IF NOT EXISTS market_product_history (
+    id TEXT PRIMARY KEY,
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    asin TEXT NOT NULL,
+    period TEXT NOT NULL,
+    grain TEXT NOT NULL DEFAULT 'month',
+    metric TEXT NOT NULL,
+    value REAL,
+    observed INTEGER NOT NULL DEFAULT 1,
+    source_tool TEXT NOT NULL DEFAULT '',
+    ingested_at REAL NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_market_product_history_key
+    ON market_product_history(marketplace, asin, period, grain, metric);
+
+CREATE TABLE IF NOT EXISTS market_keyword_metrics (
+    id TEXT PRIMARY KEY,
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    keyword TEXT NOT NULL,
+    node_id_path TEXT,
+    period TEXT NOT NULL,
+    grain TEXT NOT NULL DEFAULT 'month',
+    searches REAL, searches_growth REAL,
+    search_rank INTEGER, rank_growth_rate REAL,
+    purchases REAL, purchase_rate REAL,
+    supply_demand_ratio REAL, monopoly_click_rate REAL,
+    spr REAL, title_density REAL,
+    products REAL, avg_price REAL, bid REAL, bid_max REAL,
+    market_period TEXT,
+    google_trend_index REAL,
+    source_tool TEXT NOT NULL DEFAULT '',
+    evidence_id TEXT,
+    ingested_at REAL NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_market_keyword_metrics_key
+    ON market_keyword_metrics(marketplace, keyword, period, grain);
+CREATE INDEX IF NOT EXISTS idx_market_keyword_metrics_node
+    ON market_keyword_metrics(node_id_path, period, searches);
+
+CREATE TABLE IF NOT EXISTS market_keyword_asin_edges (
+    id TEXT PRIMARY KEY,
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    keyword TEXT NOT NULL,
+    asin TEXT NOT NULL,
+    period TEXT NOT NULL,
+    traffic_keyword_type TEXT,
+    conversion_keyword_type TEXT,
+    natural_rank INTEGER, ad_position INTEGER,
+    traffic_percentage REAL, natural_ratio REAL, ad_ratio REAL,
+    searches REAL, purchases REAL, purchase_rate REAL,
+    ingested_at REAL NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_market_kw_asin_key
+    ON market_keyword_asin_edges(marketplace, keyword, asin, period);
+CREATE INDEX IF NOT EXISTS idx_market_kw_asin_asin
+    ON market_keyword_asin_edges(asin, period);
+
+-- Review PROSE is not retained: it is third-party text whose analytical value is
+-- spent once themed, and keeping it bloats the DB. What is retained is the theme,
+-- its counts, and short supporting quotes so a pain point stays auditable.
+CREATE TABLE IF NOT EXISTS market_review_themes (
+    id TEXT PRIMARY KEY,
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    node_id_path TEXT,
+    asin TEXT NOT NULL DEFAULT '',
+    period TEXT NOT NULL,
+    theme TEXT NOT NULL,
+    theme_label TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT 'other',
+    polarity TEXT NOT NULL DEFAULT 'negative',
+    severity TEXT NOT NULL DEFAULT 'minor',
+    fixable_in_design INTEGER NOT NULL DEFAULT 0,
+    return_driving INTEGER NOT NULL DEFAULT 0,
+    mention_count INTEGER NOT NULL DEFAULT 0,
+    sample_size INTEGER NOT NULL DEFAULT 0,
+    share_of_negative REAL,
+    summary TEXT NOT NULL DEFAULT '',
+    quotes_json TEXT NOT NULL DEFAULT '[]',
+    evidence_ids_json TEXT NOT NULL DEFAULT '[]',
+    ingested_at REAL NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_market_review_themes_key
+    ON market_review_themes(marketplace, node_id_path, asin, period, theme);
+
+CREATE TABLE IF NOT EXISTS market_scores (
+    id TEXT PRIMARY KEY,
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    subject_kind TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    period TEXT NOT NULL,
+    score REAL NOT NULL,
+    confidence REAL NOT NULL DEFAULT 0,
+    breakdown_json TEXT NOT NULL DEFAULT '{}',
+    missing_json TEXT NOT NULL DEFAULT '[]',
+    formula_version TEXT NOT NULL DEFAULT 'v2',
+    computed_at REAL NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_market_scores_key
+    ON market_scores(marketplace, subject_kind, subject_id, period);
+
+-- One row per material number. Nothing in a dashboard or a PRD may state a figure
+-- that does not resolve to a row here.
+CREATE TABLE IF NOT EXISTS market_evidence (
+    id TEXT PRIMARY KEY,
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    tool TEXT NOT NULL,
+    arguments_json TEXT NOT NULL DEFAULT '{}',
+    field_path TEXT NOT NULL,
+    subject_kind TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    metric TEXT NOT NULL,
+    period TEXT NOT NULL DEFAULT '',
+    value_num REAL,
+    value_text TEXT,
+    unit TEXT NOT NULL DEFAULT '',
+    -- 0 = vendor-modeled estimate (units, revenue, profit, predictions).
+    observed INTEGER NOT NULL DEFAULT 1,
+    sample_size INTEGER,
+    quality TEXT NOT NULL DEFAULT 'ok',
+    call_id TEXT NOT NULL DEFAULT '',
+    retrieved_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_market_evidence_subject
+    ON market_evidence(subject_kind, subject_id, period, metric);
+CREATE INDEX IF NOT EXISTS idx_market_evidence_retrieved
+    ON market_evidence(retrieved_at);
+
+CREATE TABLE IF NOT EXISTS market_call_log (
+    id TEXT PRIMARY KEY,
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    tool TEXT NOT NULL,
+    arguments_json TEXT NOT NULL DEFAULT '{}',
+    arguments_hash TEXT NOT NULL,
+    -- Which wallet this came out of. Each bucket has its own cap.
+    bucket TEXT NOT NULL DEFAULT 'sweep',
+    purpose TEXT NOT NULL DEFAULT '',
+    run_date TEXT NOT NULL,
+    status TEXT NOT NULL,
+    -- A cached reply costs nothing and must not count against the budget.
+    billable INTEGER NOT NULL DEFAULT 1,
+    payload_bytes INTEGER NOT NULL DEFAULT 0,
+    rows_extracted INTEGER NOT NULL DEFAULT 0,
+    elapsed_ms INTEGER NOT NULL DEFAULT 0,
+    detail TEXT,
+    called_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_market_call_log_day
+    ON market_call_log(run_date, bucket, billable);
+CREATE INDEX IF NOT EXISTS idx_market_call_log_args
+    ON market_call_log(tool, arguments_hash, called_at);
+
+CREATE TABLE IF NOT EXISTS market_jobs (
+    id TEXT PRIMARY KEY,
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    job_kind TEXT NOT NULL,
+    subject_kind TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    period TEXT NOT NULL DEFAULT '',
+    priority INTEGER NOT NULL DEFAULT 100,
+    -- The queue never starts a job it cannot finish inside the remaining budget.
+    est_calls INTEGER NOT NULL DEFAULT 1,
+    next_due_at REAL NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    last_run_at REAL,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_market_jobs_key
+    ON market_jobs(marketplace, job_kind, subject_kind, subject_id, period);
+CREATE INDEX IF NOT EXISTS idx_market_jobs_due
+    ON market_jobs(status, next_due_at, priority);
+
+-- One row per sweep day. The UNIQUE index doubles as the single-worker claim lock:
+-- INSERT OR IGNORE succeeds for exactly one caller per (marketplace, run_date).
+CREATE TABLE IF NOT EXISTS market_runs (
+    id TEXT PRIMARY KEY,
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    run_date TEXT NOT NULL,
+    period TEXT NOT NULL,
+    budget INTEGER NOT NULL DEFAULT 0,
+    calls_used INTEGER NOT NULL DEFAULT 0,
+    jobs_done INTEGER NOT NULL DEFAULT 0,
+    jobs_failed INTEGER NOT NULL DEFAULT 0,
+    queue_depth INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'running',
+    detail TEXT,
+    started_at REAL NOT NULL,
+    finished_at REAL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_market_runs_day
+    ON market_runs(marketplace, run_date);
+
+-- Rendered output. Global rows carry user_id IS NULL and are shared by everyone;
+-- only the language varies.
+CREATE TABLE IF NOT EXISTS market_dashboards (
+    id TEXT PRIMARY KEY,
+    user_id TEXT,
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    scope TEXT NOT NULL,
+    node_id_path TEXT,
+    period TEXT NOT NULL,
+    language TEXT NOT NULL DEFAULT 'zh',
+    status TEXT NOT NULL DEFAULT 'ok',
+    dashboard_json TEXT NOT NULL DEFAULT '{}',
+    summary TEXT NOT NULL DEFAULT '',
+    evidence_json TEXT NOT NULL DEFAULT '[]',
+    vendor_tools_json TEXT NOT NULL DEFAULT '[]',
+    data_as_of REAL,
+    completeness REAL NOT NULL DEFAULT 0.0,
+    generated_at REAL NOT NULL,
+    created_at REAL NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_market_dashboards_scope
+    ON market_dashboards(marketplace, scope, period, language, created_at);
+CREATE INDEX IF NOT EXISTS idx_market_dashboards_node
+    ON market_dashboards(node_id_path, period, created_at);
+
+-- A deep-dive is a shared artifact keyed by (node, period): the second user asking
+-- for the same category in the same month reads this row and pays nothing.
+CREATE TABLE IF NOT EXISTS market_deepdives (
+    id TEXT PRIMARY KEY,
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    node_id_path TEXT NOT NULL,
+    period TEXT NOT NULL,
+    requested_by TEXT,
+    status TEXT NOT NULL DEFAULT 'running',
+    calls_used INTEGER NOT NULL DEFAULT 0,
+    calls_budget INTEGER NOT NULL DEFAULT 40,
+    plan_json TEXT NOT NULL DEFAULT '[]',
+    detail TEXT,
+    started_at REAL NOT NULL,
+    finished_at REAL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_market_deepdives_key
+    ON market_deepdives(marketplace, node_id_path, period);
+
+CREATE TABLE IF NOT EXISTS market_prds (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    node_id_path TEXT NOT NULL,
+    period TEXT NOT NULL,
+    language TEXT NOT NULL DEFAULT 'zh',
+    opportunity_id TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL,
+    prd_json TEXT NOT NULL DEFAULT '{}',
+    -- Figures the vendor cannot supply (FOB, freight, landed cost, margin) live
+    -- here and are NEVER merged into evidence-backed fields.
+    assumptions_json TEXT NOT NULL DEFAULT '[]',
+    evidence_json TEXT NOT NULL DEFAULT '[]',
+    notes_json TEXT NOT NULL DEFAULT '[]',
+    generated_at REAL NOT NULL,
+    created_at REAL NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_market_prds_user ON market_prds(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_market_prds_node ON market_prds(node_id_path, period);
+"""
+
+
 def init() -> None:
     global _INITIALIZED
     with _LOCK:
@@ -430,6 +847,7 @@ def init() -> None:
         with _connect() as conn:
             _drop_anonymous_tables_if_needed(conn)
             conn.executescript(SCHEMA)
+            conn.executescript(MARKET_SCHEMA)
             _migrate_news_config_language(conn)
             _migrate_news_config_cancelled_at(conn)
             _migrate_selection_config_cancelled_at(conn)
@@ -438,6 +856,7 @@ def init() -> None:
             _migrate_evidence_explicit(conn)
             _migrate_kb_scope(conn)
             _migrate_calendar_status(conn)
+            _migrate_selection_persona(conn)
             _seed_image_templates(conn)
         _INITIALIZED = True
 
@@ -473,6 +892,22 @@ def _migrate_kb_scope(conn: sqlite3.Connection) -> None:
     if "kb_documents" in {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}:
         if "scope" not in _table_columns(conn, "kb_documents"):
             conn.execute("ALTER TABLE kb_documents ADD COLUMN scope TEXT NOT NULL DEFAULT 'org'")
+
+
+def _migrate_selection_persona(conn: sqlite3.Connection) -> None:
+    """The market surfaces reuse the selection config, plus a view preference.
+
+    ``persona`` gates which sections a user sees (server/market/personas.py) and
+    ``overview_enabled`` says whether the scheduler should also refresh the
+    furniture-wide board for them.
+    """
+    cols = _table_columns(conn, "selection_configs")
+    if "persona" not in cols:
+        conn.execute("ALTER TABLE selection_configs ADD COLUMN persona TEXT NOT NULL "
+                     "DEFAULT 'pm'")
+    if "overview_enabled" not in cols:
+        conn.execute("ALTER TABLE selection_configs ADD COLUMN overview_enabled "
+                     "INTEGER NOT NULL DEFAULT 1")
 
 
 def _migrate_calendar_status(conn: sqlite3.Connection) -> None:
@@ -1451,6 +1886,8 @@ def _selection_config_row(row: sqlite3.Row | None) -> dict | None:
         return None
     data = dict(row)
     data["enabled"] = bool(data.get("enabled"))
+    data["overview_enabled"] = bool(data.get("overview_enabled", 1))
+    data["persona"] = data.get("persona") or "pm"
     data["categories"] = _json_list(data.pop("categories_json", "[]"))
     return data
 
@@ -1480,6 +1917,8 @@ def upsert_selection_config(
     refresh_time: str = "09:00",
     timezone: str = "UTC",
     language: str = "zh",
+    persona: str = "pm",
+    overview_enabled: bool = True,
 ) -> dict:
     _ensure()
     now = time.time()
@@ -1487,14 +1926,17 @@ def upsert_selection_config(
     with _connect() as conn:
         conn.execute(
             "INSERT INTO selection_configs (user_id, scope, categories_json, marketplace, "
-            "refresh_time, timezone, language, enabled, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?) "
+            "refresh_time, timezone, language, persona, overview_enabled, enabled, "
+            "created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?) "
             "ON CONFLICT(user_id) DO UPDATE SET scope = excluded.scope, "
             "categories_json = excluded.categories_json, marketplace = excluded.marketplace, "
             "refresh_time = excluded.refresh_time, timezone = excluded.timezone, "
-            "language = excluded.language, enabled = 1, cancelled_at = NULL, "
-            "updated_at = excluded.updated_at",
-            (user_id, scope, payload, marketplace, refresh_time, timezone, language, now, now),
+            "language = excluded.language, persona = excluded.persona, "
+            "overview_enabled = excluded.overview_enabled, enabled = 1, "
+            "cancelled_at = NULL, updated_at = excluded.updated_at",
+            (user_id, scope, payload, marketplace, refresh_time, timezone, language,
+             persona, 1 if overview_enabled else 0, now, now),
         )
     return get_selection_config(user_id)  # type: ignore[return-value]
 
@@ -2781,6 +3223,26 @@ def reset_for_tests() -> None:
                 with _connect() as conn:
                     conn.executescript(
                         """
+                        DROP TABLE IF EXISTS market_prds;
+                        DROP TABLE IF EXISTS market_deepdives;
+                        DROP TABLE IF EXISTS market_dashboards;
+                        DROP TABLE IF EXISTS market_runs;
+                        DROP TABLE IF EXISTS market_jobs;
+                        DROP TABLE IF EXISTS market_call_log;
+                        DROP TABLE IF EXISTS market_evidence;
+                        DROP TABLE IF EXISTS market_scores;
+                        DROP TABLE IF EXISTS market_review_themes;
+                        DROP TABLE IF EXISTS market_keyword_asin_edges;
+                        DROP TABLE IF EXISTS market_keyword_metrics;
+                        DROP TABLE IF EXISTS market_product_history;
+                        DROP TABLE IF EXISTS market_product_metrics;
+                        DROP TABLE IF EXISTS market_products;
+                        DROP TABLE IF EXISTS market_concentration;
+                        DROP TABLE IF EXISTS market_distributions;
+                        DROP TABLE IF EXISTS market_node_snapshots;
+                        DROP TABLE IF EXISTS market_nodes;
+                        DROP TABLE IF EXISTS selection_reports;
+                        DROP TABLE IF EXISTS selection_configs;
                         DROP TABLE IF EXISTS kb_chunks;
                         DROP TABLE IF EXISTS kb_documents;
                         DROP TABLE IF EXISTS calendar_events;

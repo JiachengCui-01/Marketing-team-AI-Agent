@@ -8,6 +8,7 @@ import { ExternalLink, Link2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/i18n";
 import { usePreviewOpener } from "@/lib/preview-context";
+import { EvidenceChip } from "@/components/market/shared";
 
 export type CitationSource = {
   url: string;
@@ -180,6 +181,12 @@ function MarkdownBody({ children, inline = false }: { children: string; inline?:
       </div>
     ),
     a: ({ href, children }: { href?: string; children?: ReactNode }) => {
+      // Market dashboards cite stored evidence rather than URLs, as
+      // [ev_a1b2c3](evidence:ev_a1b2c3). Routing that through the existing anchor
+      // renderer is what buys the whole inline-citation UI for six lines.
+      if (href?.startsWith("evidence:")) {
+        return <EvidenceChip ids={[href.slice("evidence:".length)]} />;
+      }
       const source = sourceFromHref(href, children);
       return source ? <CitationCapsules sources={[source]} /> : <>{children}</>;
     },

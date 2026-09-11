@@ -1,0 +1,34 @@
+{
+  "code": "OK",
+  "message": "成功",
+  "data": [
+    {
+      "label": "2.0以下",
+      "asins": [],
+      "products": 0,
+      "units": 0,
+      "revenue": 0.0,
+      "unitsRatio": 0.0
+    },
+    {
+      "label": "2.0-3.0",
+      "asins": [],
+      "products": 0,
+      "units": 0,
+      "revenue": 0.0,
+      "unitsRatio": 0.0
+    },
+    {
+      "label": "3.0-3.5",
+      "asins": [
+        "B0GQ68PKNJ",
+        "B0GQ62ZQ3P",
+        "B0GQ6FKPLM"
+      ],
+      "products": 3,
+      "units": 896,
+      "revenue": 108956.44,
+      "unitsRatio": 0.0224
+    }
+  ]
+}

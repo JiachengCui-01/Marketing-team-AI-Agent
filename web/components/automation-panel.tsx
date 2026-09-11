@@ -2,27 +2,41 @@
 
 import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
-import { Newspaper, ChartLineUp, Robot } from "@phosphor-icons/react";
+import { ChartLineUp, Compass, Newspaper, Robot } from "@phosphor-icons/react";
 import { NewsPanel } from "@/components/news-panel";
-import { SelectionPanel } from "@/components/selection-panel";
+import { MarketOverviewPanel } from "@/components/market/overview-panel";
+import { MarketCategoryPanel } from "@/components/market/category-panel";
 import { useI18n } from "@/lib/i18n";
 
-type Tab = "news" | "selection";
+type Tab = "news" | "discovery" | "category";
+type Drill = { nodeKey: string; label: string } | null;
 
-/** The Automation entry: scheduled analysis jobs that run on their own timer.
+/** The Automation entry: scheduled analysis that runs on its own timer.
  *
  * Owns the column header and the tab switch; each sub-panel renders body-only so
- * both tabs share one header, one toolbar rhythm, and one set of transitions
- * across every theme. */
+ * every tab shares one header, one toolbar rhythm, and one set of transitions
+ * across every theme.
+ *
+ * The `drill` state is the whole 全盘 → 品类 path: the discovery board hands a node
+ * up, this shell switches tabs, and the deep dive opens on it. Lifting one value
+ * here is cheaper than a router or a shared store for a two-surface hop.
+ */
 export function AutomationPanel({ onBack }: { onBack: () => void }) {
   const { t } = useI18n();
   const [tab, setTab] = useState<Tab>("news");
+  const [drill, setDrill] = useState<Drill>(null);
 
   const tabs: { id: Tab; label: string; icon: typeof Newspaper; tone: string }[] = [
     { id: "news", label: t.automationTabNews, icon: Newspaper, tone: "text-feature-news" },
     {
-      id: "selection",
-      label: t.automationTabSelection,
+      id: "discovery",
+      label: t.automationTabDiscovery,
+      icon: Compass,
+      tone: "text-feature-selection",
+    },
+    {
+      id: "category",
+      label: t.automationTabCategory,
       icon: ChartLineUp,
       tone: "text-feature-selection",
     },
@@ -67,7 +81,18 @@ export function AutomationPanel({ onBack }: { onBack: () => void }) {
 
       {/* Keyed so switching tabs replays the same enter animation both ways. */}
       <div key={tab} className="flex min-h-0 flex-1 animate-automation-switch flex-col">
-        {tab === "news" ? <NewsPanel /> : <SelectionPanel />}
+        {tab === "news" ? (
+          <NewsPanel />
+        ) : tab === "discovery" ? (
+          <MarketOverviewPanel
+            onDrill={(node) => {
+              setDrill(node);
+              setTab("category");
+            }}
+          />
+        ) : (
+          <MarketCategoryPanel initialNode={drill} />
+        )}
       </div>
     </div>
   );

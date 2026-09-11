@@ -1,0 +1,75 @@
+{
+  "code": "OK",
+  "message": "成功",
+  "data": [
+    {
+      "sellerName": "Amazon",
+      "ranking": 1,
+      "asins": [
+        "B0GMMHNXMK",
+        "B0H25BV94V",
+        "B0GYNWV7Q3"
+      ],
+      "products": 22,
+      "newProducts": 16,
+      "newUnits": 6450,
+      "newRevenue": 851134.380859375,
+      "newUnitsRatio": 0.6521,
+      "newRevenueRatio": 0.6685,
+      "avgPrice": 137.55,
+      "ratings": 10026,
+      "rating": 4.2,
+      "reviews": 2113,
+      "totalUnits": 9891,
+      "totalRevenue": 1273287.96,
+      "totalUnitsRatio": 0.2486,
+      "totalRevenueRatio": 0.1896
+    },
+    {
+      "sellerName": "Seleadc",
+      "ranking": 2,
+      "asins": [
+        "B0DJY92PY2",
+        "B0G7Z4XZNS",
+        "B0CTZW95B8"
+      ],
+      "products": 4,
+      "newProducts": 1,
+      "newUnits": 826,
+      "newRevenue": 216577.203125,
+      "newUnitsRatio": 0.2607,
+      "newRevenueRatio": 0.33,
+      "avgPrice": 196.99,
+      "ratings": 2233,
+      "rating": 4.4,
+      "reviews": 603,
+      "totalUnits": 3168,
+      "totalRevenue": 656381.39,
+      "totalUnitsRatio": 0.0796,
+      "totalRevenueRatio": 0.0977
+    },
+    {
+      "sellerName": "Fioneso",
+      "ranking": 3,
+      "asins": [
+        "B0G58QM99R",
+        "B0FDGHG1LW",
+        "B0D9Y2HGBN"
+      ],
+      "products": 3,
+      "newProducts": 1,
+      "newUnits": 1255,
+      "newRevenue": 262633.84375,
+      "newUnitsRatio": 0.4253,
+      "newRevenueRatio": 0.4938,
+      "avgPrice": 185.64,
+      "ratings": 778,
+      "rating": 4.2,
+      "reviews": 282,
+      "totalUnits": 2951,
+      "totalRevenue": 531815.87,
+      "totalUnitsRatio": 0.0742,
+      "totalRevenueRatio": 0.0792
+    }
+  ]
+}
