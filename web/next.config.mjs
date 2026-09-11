@@ -4,7 +4,7 @@ const nextConfig = {
   async rewrites() {
     const apiBase =
       process.env.NEXT_PUBLIC_API_BASE ??
-      "https://marketing-agent-api-ufgx.onrender.com";
+      "https://furniture-dtc-agent-api.onrender.com";
     return [
       {
         source: "/api/:path*",

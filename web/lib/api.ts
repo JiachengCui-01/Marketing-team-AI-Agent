@@ -3,7 +3,7 @@
 // browser points at the user's own machine and causes template/refine requests to
 // fail with "Failed to fetch".
 const CONFIGURED_API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
-const DEFAULT_REMOTE_API_BASE = "https://marketing-agent-api-ufgx.onrender.com";
+const DEFAULT_REMOTE_API_BASE = "https://furniture-dtc-agent-api.onrender.com";
 
 function isLoopbackHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
