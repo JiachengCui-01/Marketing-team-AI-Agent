@@ -11,6 +11,107 @@ from server import db
 from server.market import store
 
 
+# The shape this table had before ``grain`` existed, written out rather than
+# derived, so the test keeps reproducing the old database even after the live
+# schema moves on again.
+_PRE_GRAIN_SNAPSHOTS = """
+DROP TABLE IF EXISTS market_node_snapshots;
+CREATE TABLE market_node_snapshots (
+    id TEXT PRIMARY KEY,
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    node_id_path TEXT NOT NULL,
+    period TEXT NOT NULL,
+    avg_price REAL,
+    total_revenue REAL,
+    total_products INTEGER,
+    completeness REAL NOT NULL DEFAULT 0.0,
+    missing_json TEXT NOT NULL DEFAULT '[]',
+    schema_version INTEGER NOT NULL DEFAULT 1,
+    ingested_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE UNIQUE INDEX idx_market_node_snapshots_key
+    ON market_node_snapshots(marketplace, node_id_path, period);
+"""
+
+
+class SchemaUpgradeTests(unittest.TestCase):
+    """``init()`` must survive meeting a database from an earlier release.
+
+    This is the failure mode that takes a deployment down rather than degrading
+    it. ``init()`` runs the schema script before the migrations, so a statement
+    in the script that references a column only a migration adds raises on every
+    existing database — and ``_ensure()`` runs on the first query of every
+    request, so the entire API 500s and nobody can even log in.
+    """
+
+    NODE = "1055398:1063306:3733781:3733831"
+
+    def _downgrade(self) -> None:
+        db.reset_for_tests()
+        db.init()
+        with db.connect() as conn:
+            conn.executescript(_PRE_GRAIN_SNAPSHOTS)
+            self.assertNotIn("grain", db._table_columns(conn, "market_node_snapshots"))
+        db._INITIALIZED = False
+
+    def tearDown(self) -> None:
+        db.reset_for_tests()
+
+    def test_init_upgrades_a_database_that_predates_the_grain_column(self) -> None:
+        self._downgrade()
+
+        db.init()                      # must not raise
+
+        with db.connect() as conn:
+            columns = db._table_columns(conn, "market_node_snapshots")
+            indexes = {r["name"] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'index' "
+                "AND tbl_name = 'market_node_snapshots'")}
+        self.assertIn("grain", columns)
+        self.assertIn("observed_at", columns)
+        self.assertIn("idx_market_node_snapshots_grain", indexes)
+        # The old key would reject a pulse row sharing a month with its aggregate.
+        self.assertNotIn("idx_market_node_snapshots_key", indexes)
+
+    def test_rows_predating_the_column_become_monthly_rows(self) -> None:
+        """The default has to backfill, or the board loses every month it had."""
+        self._downgrade()
+        now = time.time()
+        with db.connect() as conn:
+            conn.execute(
+                "INSERT INTO market_node_snapshots (id, marketplace, node_id_path, "
+                "period, total_revenue, ingested_at, updated_at) "
+                "VALUES ('x', 'US', ?, '202608', 6907337.97, ?, ?)",
+                (self.NODE, now, now))
+
+        db.init()
+
+        snapshot = store.get_node_snapshot("US", self.NODE, "202608")
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(snapshot["grain"], "month")
+        self.assertEqual(store.latest_period("US"), "202608")
+
+    def test_the_upgraded_table_accepts_a_pulse_beside_its_aggregate(self) -> None:
+        """Same node, same month, two grains — impossible under the old key."""
+        self._downgrade()
+        db.init()
+        store.upsert_node_snapshot("US", self.NODE, "202609", {"total_revenue": 1.0})
+        store.upsert_node_snapshot("US", self.NODE, "202609", {"avg_price": 2.0},
+                                   grain=store.PULSE)
+        self.assertEqual(
+            store.get_node_snapshot("US", self.NODE, "202609")["total_revenue"], 1.0)
+        self.assertEqual(
+            store.get_node_snapshot("US", self.NODE, "202609",
+                                    grain=store.PULSE)["avg_price"], 2.0)
+
+    def test_initialising_twice_changes_nothing(self) -> None:
+        db.reset_for_tests()
+        db.init()
+        db._INITIALIZED = False
+        db.init()      # idempotent: the scheduler and the tests both re-enter it
+
+
 class MarketStoreTests(unittest.TestCase):
     NODE = "1055398:1063306:3733781:3733831"
     LABEL = "Home & Kitchen:Furniture:Kitchen & Dining Room Furniture:Buffets & Sideboards"

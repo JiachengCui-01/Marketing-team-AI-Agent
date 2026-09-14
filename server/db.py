@@ -500,8 +500,10 @@ CREATE TABLE IF NOT EXISTS market_node_snapshots (
     grain TEXT NOT NULL DEFAULT 'month',
     observed_at REAL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_market_node_snapshots_grain
-    ON market_node_snapshots(marketplace, node_id_path, period, grain);
+-- The unique index over (…, grain) is created by _migrate_snapshot_grain, not
+-- here. This script runs before the migrations, so on a database predating the
+-- column the statement would fail with "no such column: grain" and take down
+-- init() — and with it every request that touches the database.
 CREATE INDEX IF NOT EXISTS idx_market_node_snapshots_period
     ON market_node_snapshots(marketplace, period);
 
