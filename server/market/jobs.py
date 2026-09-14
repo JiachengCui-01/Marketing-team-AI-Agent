@@ -199,6 +199,40 @@ def _category_demand(*, marketplace: str, period: str, subject_id: str,
                      detail=f"{len(series)} trend points")
 
 
+def _category_pulse(*, marketplace: str, period: str, subject_id: str,
+                    bucket: str) -> JobResult:
+    """A live reading of one node, taken while the current month is still open.
+
+    ``market_research_statistics`` describes the shelf as it stands rather than
+    aggregating a closed month, so it is the one category tool that answers for a
+    month in progress. What it gives is real but different in kind: listing and
+    seller counts, the price and rating level, the head-listing review wall, the
+    freight profile — a run-rate, not a total. It lands at ``grain='pulse'`` so
+    nothing can mistake it for the month's finished numbers.
+
+    ``period`` here is the *job's* week stamp; the row is written against the
+    calendar month the reading falls in.
+    """
+    month = gateway.current_period()
+    reply = gateway.call(
+        "market_research_statistics",
+        _request(marketplace=marketplace, nodeIdPath=subject_id, month=month, topN=10),
+        bucket=bucket, purpose="live pulse", marketplace=marketplace)
+    if not _ok(reply):
+        return JobResult(status="pending", calls=int(reply.billable), detail=reply.detail)
+    index = EvidenceIndex(marketplace=marketplace, period=month)
+    metrics = extract.extract_market_statistics(
+        reply, node_id_path=subject_id, period=month, index=index)
+    if not metrics:
+        return JobResult(status="pending", calls=int(reply.billable),
+                         detail="no live data")
+    store.upsert_node_snapshot(marketplace, subject_id, month, metrics,
+                               grain=store.PULSE)
+    store.record_evidence(index.all_rows())
+    return JobResult(status="done", calls=int(reply.billable),
+                     detail=f"{len(metrics)} live metrics")
+
+
 def _distribution_job(tool: str, kind: str):
     def handler(*, marketplace: str, period: str, subject_id: str, bucket: str) -> JobResult:
         reply = gateway.call(
@@ -453,6 +487,9 @@ def _offamazon_trend(*, marketplace: str, period: str, subject_id: str,
 # -------------------------------------------------------------- job catalog ----
 
 CATALOG: tuple[JobSpec, ...] = (
+    # The pulse runs first: it is one cheap call and it is the only thing on the
+    # board that can describe today rather than last month.
+    JobSpec("category_pulse", "node", 15, 1, "week", _category_pulse),
     JobSpec("department_roll", "department", 20, 1, "month", _department_roll,
             scope="department"),
     JobSpec("category_structure", "node", 30, 2, "month", _category_structure),
@@ -478,10 +515,39 @@ CATALOG: tuple[JobSpec, ...] = (
 
 BY_KIND: dict[str, JobSpec] = {spec.kind: spec for spec in CATALOG}
 
+# Jobs that deliberately target the *current* month. Everything else is keyed to a
+# closed month and must be parked until that month ends; these must not be.
+PULSE_KINDS: tuple[str, ...] = tuple(
+    spec.kind for spec in CATALOG if spec.cadence == "week" and spec.kind == "category_pulse")
+
 # The steps a node's month is considered to consist of, for ``completeness``.
 NODE_PACK = ("category_structure", "category_demand", "category_price_bands",
              "category_newcomers", "category_brands", "product_pack",
              "product_newcomers", "keyword_demand")
+
+
+def week_stamp(now=None) -> str:
+    """The ISO week a pulse job belongs to, e.g. ``2026-W37``.
+
+    The queue's unique key ends in ``period``, so a weekly job needs a period
+    that changes weekly or the second week's run silently collides with the
+    first's completed row.
+    """
+    return (now or gateway.sweep_now()).strftime("%G-W%V")
+
+
+def plan_pulse(marketplace: str, now=None) -> int:
+    """Enqueue this week's live reading for every tracked node."""
+    taxonomy.ensure_nodes(marketplace)
+    before = store.queue_depth(marketplace)
+    spec = BY_KIND["category_pulse"]
+    stamp = week_stamp(now)
+    for node in taxonomy.leaf_nodes(marketplace):
+        store.enqueue_job(marketplace=marketplace, job_kind=spec.kind,
+                          subject_kind="node", subject_id=node["node_id_path"],
+                          period=stamp, priority=spec.priority,
+                          est_calls=spec.est_calls)
+    return store.queue_depth(marketplace) - before
 
 
 def plan_period(marketplace: str, period: str) -> int:
@@ -491,6 +557,8 @@ def plan_period(marketplace: str, period: str) -> int:
     for spec in CATALOG:
         if spec.subject_kind == "asin":
             continue        # enqueued by product_pack, once the ASINs exist
+        if spec.kind in PULSE_KINDS:
+            continue        # weekly and keyed by week — see plan_pulse
         if spec.scope == "department":
             store.enqueue_job(marketplace=marketplace, job_kind=spec.kind,
                               subject_kind="department", subject_id=taxonomy.FURNITURE_ROOT,

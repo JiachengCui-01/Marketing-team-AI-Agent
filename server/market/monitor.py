@@ -585,6 +585,73 @@ def organic_winnable(facts: NodeFacts) -> Alert | None:
     )
 
 
+# --------------------------------------------------------------- pulse layer ----
+# A pulse is a live reading taken while the month is still open, compared
+# like-for-like against the last month the vendor closed. It cannot see revenue
+# or returns — those are aggregates and they do not exist yet — so these signals
+# stay strictly inside what the live tool actually reports, and they are labelled
+# as an early read rather than a result.
+
+# (metric, id, unit, thresholds for a rise, thresholds for a fall, kind-when-up)
+_PULSE_SPECS: tuple[tuple[str, str, str, tuple, tuple, str], ...] = (
+    ("avg_revenue", "pulse_runrate", "$",
+     ((20.0, HIGH), (10.0, MEDIUM), (5.0, LOW)),
+     ((20.0, HIGH), (10.0, MEDIUM), (5.0, LOW)), OPPORTUNITY),
+    ("avg_price", "pulse_price", "$",
+     ((8.0, MEDIUM), (4.0, LOW)),
+     ((10.0, HIGH), (6.0, MEDIUM), (3.0, LOW)), OPPORTUNITY),
+    ("hl_avg_ratings", "pulse_reviewwall", "",
+     ((12.0, HIGH), (6.0, MEDIUM), (3.0, LOW)), (), RISK),
+    ("sellers", "pulse_sellers", "",
+     ((12.0, HIGH), (6.0, MEDIUM), (3.0, LOW)), (), RISK),
+    ("new_product_proportion", "pulse_newcomers", "%",
+     ((20.0, MEDIUM), (10.0, LOW)),
+     ((25.0, MEDIUM), (12.0, LOW)), OPPORTUNITY),
+    ("avg_rating", "pulse_rating", "★",
+     (), ((3.0, HIGH), (1.5, MEDIUM), (0.8, LOW)), OPPORTUNITY),
+)
+
+# Which direction is bad, per metric, when the spec's "up" kind is stated.
+_PULSE_FAMILY = {
+    "pulse_runrate": "demand", "pulse_price": "pricing",
+    "pulse_reviewwall": "competition", "pulse_sellers": "competition",
+    "pulse_newcomers": "entry", "pulse_rating": "quality",
+}
+
+
+def scan_pulse(pulse: Mapping[str, Any], baseline: Mapping[str, Any]) -> list[Alert]:
+    """Compare a live reading against the last closed month, metric by metric.
+
+    Deliberately not part of ``scan``: those signals describe a finished month
+    and this one describes a month in flight. Mixing them would let an early
+    read outrank a settled fact in the same list.
+    """
+    fired: list[Alert] = []
+    for metric, signal_id, unit, up_table, down_table, up_kind in _PULSE_SPECS:
+        now, before = _num(pulse.get(metric)), _num(baseline.get(metric))
+        change = _rel(now, before)
+        if change is None:
+            continue
+        rising = change >= 0
+        table = up_table if rising else down_table
+        if not table:
+            continue
+        severity = _by(table, abs(change))
+        if severity is None:
+            continue
+        down_kind = RISK if up_kind == OPPORTUNITY else OPPORTUNITY
+        kind = up_kind if rising else down_kind
+        fired.append(Alert(
+            id=f"{signal_id}_{'up' if rising else 'down'}", kind=kind,
+            family=_PULSE_FAMILY.get(signal_id, "demand"), severity=severity,
+            magnitude=min(100.0, abs(change) * 4.0), metric=metric,
+            value=_pct(now) if unit == "%" else now,
+            baseline=_pct(before) if unit == "%" else before,
+            delta=change, unit=unit, evidence_metrics=(metric,),
+        ))
+    return sorted(fired, key=lambda a: (-_SEVERITY_RANK[a.severity], -a.magnitude, a.id))
+
+
 SIGNALS: tuple[Signal, ...] = (
     return_above_peers, return_below_peers, return_rising,
     demand_falling, demand_accelerating, conversion_weakening, offamazon_leading,
@@ -725,6 +792,50 @@ _TEXT: dict[str, dict[str, tuple[str, str]]] = {
                "头部 ASIN 广告流量占比均值 {value}% —— 进场门槛是广告预算，不是评论数。"),
         "en": ("Head traffic is paid",
                "Ad traffic averages {value}% across the head ASINs — entry is priced in ad budget, not reviews."),
+    },
+    "pulse_runrate_up": {
+        "zh": ("单链接销售额在走高", "当下 {value}／链接，上月 {baseline}，上升 {delta}%。"),
+        "en": ("Revenue per listing is rising",
+               "{value} per listing now against {baseline} last month, up {delta}%."),
+    },
+    "pulse_runrate_down": {
+        "zh": ("单链接销售额在走低", "当下 {value}／链接，上月 {baseline}，下降 {delta}%。"),
+        "en": ("Revenue per listing is falling",
+               "{value} per listing now against {baseline} last month, down {delta}%."),
+    },
+    "pulse_price_up": {
+        "zh": ("均价在抬升", "当下 {value}，上月 {baseline}，上升 {delta}%。"),
+        "en": ("Price level is rising", "{value} now against {baseline} last month, up {delta}%."),
+    },
+    "pulse_price_down": {
+        "zh": ("均价在下滑", "当下 {value}，上月 {baseline}，下降 {delta}% —— 本月可能正在打价格战。"),
+        "en": ("Price level is sliding",
+               "{value} now against {baseline}, down {delta}% — a price war may be under way this month."),
+    },
+    "pulse_reviewwall_up": {
+        "zh": ("头部评论墙本月在加厚", "头部平均评论数 {value}，上月 {baseline}，上升 {delta}%。"),
+        "en": ("The review moat is thickening this month",
+               "Head listings average {value} against {baseline}, up {delta}%."),
+    },
+    "pulse_sellers_up": {
+        "zh": ("卖家数本月在增加", "当下 {value} 家，上月 {baseline} 家，上升 {delta}%。"),
+        "en": ("Sellers are arriving this month",
+               "{value} now against {baseline} last month, up {delta}%."),
+    },
+    "pulse_newcomers_up": {
+        "zh": ("新品涌入加快", "新品占比 {value}%，上月 {baseline}%，上升 {delta}%。"),
+        "en": ("New listings are arriving faster",
+               "New-listing share {value}% against {baseline}%, up {delta}%."),
+    },
+    "pulse_newcomers_down": {
+        "zh": ("新品涌入放缓", "新品占比 {value}%，上月 {baseline}%，下降 {delta}%。"),
+        "en": ("New listings are slowing",
+               "New-listing share {value}% against {baseline}%, down {delta}%."),
+    },
+    "pulse_rating_down": {
+        "zh": ("类目满意度本月在掉", "均分 {value}★，上月 {baseline}★，下降 {delta}% —— 现有产品没解决的问题正在放大。"),
+        "en": ("Satisfaction is slipping this month",
+               "Average {value}★ against {baseline}★, down {delta}% — the unsolved problems are getting louder."),
     },
     "organic_winnable": {
         "zh": ("自然流量仍是主力", "头部 ASIN 自然流量占比均值 {value}% —— 内容和关键词还打得动。"),

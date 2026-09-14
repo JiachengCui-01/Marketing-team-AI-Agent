@@ -10,6 +10,7 @@ import {
   refreshMarketOverview,
   type MarketBoardRow,
   type MarketConfigResponse,
+  type MarketCurrent,
   type MarketReport,
 } from "@/lib/api";
 import { CitationMarkdown } from "@/components/citation-markdown";
@@ -31,12 +32,14 @@ import {
   BiTable,
   ConfidenceNote,
   CoverageStrip,
+  CurrentPanel,
   DataGapCard,
   EvidenceChip,
   GapList,
   KpiRow,
   MonitorBoard,
   Section,
+  SplitTabs,
   VerdictChip,
   useScoreLabels,
 } from "@/components/market/shared";
@@ -61,6 +64,8 @@ export function MarketOverviewPanel({
   const labels = useScoreLabels();
   const [meta, setMeta] = useState<MarketConfigResponse | null>(null);
   const [report, setReport] = useState<MarketReport | null>(null);
+  const [current, setCurrent] = useState<MarketCurrent | undefined>(undefined);
+  const [half, setHalf] = useState<"monthly" | "current">("monthly");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<"" | "render" | "collect">("");
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +77,7 @@ export function MarketOverviewPanel({
       const [config, overview] = await Promise.all([getMarketConfig(), getMarketOverview()]);
       setMeta(config);
       setReport(overview.report);
+      setCurrent(overview.report?.dashboard?.current ?? overview.current);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -87,7 +93,9 @@ export function MarketOverviewPanel({
     setBusy(collect ? "collect" : "render");
     setError(null);
     try {
-      setReport(await refreshMarketOverview({ collect, language: locale }));
+      const next = await refreshMarketOverview({ collect, language: locale });
+      setReport(next);
+      setCurrent(next.dashboard?.current);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -111,6 +119,7 @@ export function MarketOverviewPanel({
         <Compass size={15} weight="duotone" className="text-feature-selection" />
         <span className="text-sm font-medium">{t.gmTitle}</span>
         <span className="text-[11px] text-fg-subtle">{t.gmSubtitle}</span>
+        <SplitTabs value={half} onChange={setHalf} />
         <div className="ml-auto flex items-center gap-2">
           <button onClick={() => refresh(false)} disabled={busy !== ""}
                   className="btn-ghost h-8 px-2 text-xs">
@@ -133,7 +142,9 @@ export function MarketOverviewPanel({
           </p>
         ) : null}
 
-        {!report ? (
+        {half === "current" ? (
+          <CurrentPanel current={current} onDrill={onDrill} />
+        ) : !report ? (
           <div className="rounded-xl border border-border p-5 text-center">
             <p className="text-sm font-medium">{t.gmEmpty}</p>
             <p className="mt-1 text-xs text-fg-muted">{t.gmEmptyHint}</p>

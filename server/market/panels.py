@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
 
-from . import jobs, monitor, scoring, store, taxonomy
+from . import gateway, jobs, monitor, scoring, store, taxonomy
 
 MAX_BOARD_ROWS = 24
 MAX_COMPETITORS = 12
@@ -145,6 +145,139 @@ def coverage(marketplace: str, period: str, language: str) -> dict:
     return {"families": rows, "present": present, "total": len(rows)}
 
 
+# ------------------------------------------------------------- current month ----
+# The board proper describes the last month the vendor closed. This describes the
+# month in flight, and it is a different kind of statement: a live reading of the
+# shelf, compared like-for-like against that closed month.
+#
+# What it deliberately cannot show is revenue, units sold, returns or
+# concentration. Those are monthly aggregates and for an open month they do not
+# exist — not "are small", do not exist. Everything below comes from the one
+# category tool that answers for an open month, and nothing is extrapolated into
+# a total without saying so.
+
+PULSE_METRICS: tuple[tuple[str, str, str, str], ...] = (
+    ("avg_revenue", "$", "单链接月销售额", "Revenue per listing"),
+    ("avg_units", "", "单链接月销量", "Units per listing"),
+    ("avg_price", "$", "均价", "Average price"),
+    ("sellers", "", "卖家数", "Sellers"),
+    ("brands", "", "品牌数", "Brands"),
+    ("avg_rating", "★", "类目均分", "Average rating"),
+    ("hl_avg_ratings", "", "头部评论数", "Head-listing reviews"),
+    ("new_product_proportion", "%", "新品占比", "New-listing share"),
+)
+
+
+def _delta_pct(now: Any, before: Any) -> float | None:
+    a, b = scoring._num(now), scoring._num(before)
+    if a is None or b in (None, 0):
+        return None
+    return round((a - b) / abs(b) * 100.0, 1)
+
+
+def _pulse_row(pulse: Mapping[str, Any], baseline: Mapping[str, Any],
+               zh: bool) -> list[dict]:
+    out = []
+    for key, unit, label_zh, label_en in PULSE_METRICS:
+        now = scoring._num(pulse.get(key))
+        if now is None:
+            continue
+        before = scoring._num(baseline.get(key))
+        out.append({
+            "key": key,
+            "label": label_zh if zh else label_en,
+            "unit": unit,
+            "now": pct(now) if unit == "%" else now,
+            "baseline": (pct(before) if unit == "%" else before) if before is not None else None,
+            "delta_pct": _delta_pct(now, before),
+        })
+    return out
+
+
+def _implied_pace(pulse: Mapping[str, Any], baseline: Mapping[str, Any]) -> dict | None:
+    """How this month is tracking against the last closed one, as a multiple.
+
+    A ratio rather than a projected total, and that is the whole point. The
+    vendor's ``totalRevenue`` covers the ~100 head listings it analyses, not the
+    category's full shelf — ``totalRevenue / avgRevenue`` is exactly 100 while
+    ``totalProducts`` is 1816 — so multiplying a live per-listing rate by a
+    listing count produces a number roughly eighteen times too large. Dividing
+    two per-listing rates cancels the sample entirely and needs no assumption
+    about how many listings the vendor looked at, as long as it looked at the
+    same number both months.
+
+    Still an inference: it says the head of the category is selling at N× last
+    month's pace, not that the month will end at N× last month's revenue.
+    """
+    now = scoring._num(pulse.get("avg_revenue"))
+    before = scoring._num(baseline.get("avg_revenue"))
+    if now is None or not before:
+        return None
+    return {
+        "ratio": round(now / before, 2),
+        "now": now,
+        "baseline": before,
+        "delta_pct": _delta_pct(now, before),
+        "estimated": True,
+    }
+
+
+def build_current(marketplace: str, language: str, *,
+                  node_id_path: str | None = None) -> dict:
+    """The month in flight: live readings, their deltas, and the early warnings.
+
+    Returns ``{"available": False}`` rather than an empty shell when no pulse has
+    been taken — a panel of em-dashes reads as breakage, and "not collected yet"
+    is a different statement from "nothing is happening".
+    """
+    zh = _zh(language)
+    pulses = store.latest_pulse(marketplace)
+    if node_id_path:
+        pulses = [p for p in pulses if p["node_id_path"] == node_id_path]
+    if not pulses:
+        return {"available": False, "period": gateway.current_period(),
+                "baseline_period": store.latest_period(marketplace)}
+
+    baseline_period = store.latest_period(marketplace)
+    rows: list[dict] = []
+    alerts: list[dict] = []
+    for pulse in pulses:
+        path = pulse["node_id_path"]
+        baseline = (store.get_node_snapshot(marketplace, path, baseline_period)
+                    if baseline_period else None) or {}
+        label = taxonomy.short_label(pulse.get("node_label_path") or path)
+        metrics = _pulse_row(pulse, baseline, zh)
+        if not metrics:
+            continue
+        rows.append({
+            "node_key": path,
+            "label": label,
+            "observed_at": pulse.get("observed_at"),
+            "metrics": metrics,
+            "implied_pace": _implied_pace(pulse, baseline),
+        })
+        for alert in monitor.scan_pulse(pulse, baseline):
+            ids: list[str] = []
+            if alert.evidence_metrics and baseline_period:
+                found = store.evidence_ids_by_metric(
+                    marketplace, "node", path, gateway.current_period(),
+                    alert.evidence_metrics)
+                ids = [found[m] for m in alert.evidence_metrics if m in found]
+            alerts.append(monitor.serialize(alert, node_key=path, label=label,
+                                            language=language, evidence_ids=ids))
+
+    observed = [r["observed_at"] for r in rows if r.get("observed_at")]
+    return {
+        "available": bool(rows),
+        "period": gateway.current_period(),
+        "baseline_period": baseline_period,
+        "observed_at": max(observed) if observed else None,
+        "rows": rows,
+        "monitor": monitor.split(monitor.diversify(alerts),
+                                 limit=monitor.MAX_OVERVIEW_ALERTS),
+    }
+
+
 # ----------------------------------------------------------------- overview ----
 
 def build_overview(marketplace: str, period: str, language: str) -> dict:
@@ -216,9 +349,11 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
     families = coverage(marketplace, period, language)
 
     kpis = [
-        tile("家具大盘月销售额" if zh else "Furniture monthly revenue",
+        tile("追踪类目头部月销售额" if zh else "Head-listing monthly revenue",
              money(total_revenue),
-             hint="" if observed else ("本期未取到销售额" if zh else "not collected"),
+             hint=("厂商按各类目头部约 100 个链接统计" if zh
+                   else "vendor totals cover the ~100 head listings per category")
+             if observed else ("本期未取到销售额" if zh else "not collected"),
              estimated=True),
         tile("追踪子类目" if zh else "Tracked sub-categories", str(len(board))),
         tile("最佳机会类目" if zh else "Top opportunity",
@@ -538,8 +673,10 @@ def build_category(marketplace: str, node_id_path: str, period: str,
 def _category_kpis(snap: Mapping[str, Any], zh: bool) -> list[dict]:
     new_share = scoring.new_revenue_share_pct(dict(snap))
     return [
-        tile("类目月销售额" if zh else "Category revenue",
-             money(snap.get("total_revenue")), estimated=True),
+        tile("头部月销售额" if zh else "Head-listing revenue",
+             money(snap.get("total_revenue")),
+             "厂商按头部约 100 个链接统计" if zh else "vendor totals cover ~100 head listings",
+             estimated=True),
         tile("均价" if zh else "Average price", money(snap.get("avg_price"))),
         tile("在售 / 卖家 / 品牌" if zh else "Listings / sellers / brands",
              " / ".join(str(int(v)) if v is not None else "—"

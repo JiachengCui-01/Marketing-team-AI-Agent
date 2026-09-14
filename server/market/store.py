@@ -147,6 +147,13 @@ def list_nodes(marketplace: str = "US", *, tracked_only: bool = True) -> list[di
 
 # ------------------------------------------------------------- node facts ----
 
+# Two kinds of fact share this table. ``month`` is the vendor's closed-month
+# aggregate — revenue, concentration, returns — published only after a month
+# ends. ``pulse`` is a point-in-time reading of the live listing snapshot, taken
+# while the month is still open: real, but a run-rate rather than a total.
+MONTH, PULSE = "month", "pulse"
+
+
 def upsert_node_snapshot(
     marketplace: str,
     node_id_path: str,
@@ -155,8 +162,10 @@ def upsert_node_snapshot(
     *,
     completeness: float | None = None,
     missing: Sequence[str] | None = None,
+    grain: str = MONTH,
+    observed_at: float | None = None,
 ) -> None:
-    """Write (or fill in) one category-month row.
+    """Write (or fill in) one category row for a period and grain.
 
     ``metrics`` keys must be real column names; unknown keys are dropped rather
     than raising, because an extractor that learns a new vendor field should not
@@ -174,23 +183,30 @@ def upsert_node_snapshot(
             "marketplace": marketplace,
             "node_id_path": node_id_path,
             "period": period,
+            "grain": grain,
             "ingested_at": _now(),
             "updated_at": _now(),
         })
+        if grain == PULSE:
+            # A pulse is only meaningful with the moment it was taken; the month
+            # it falls in is not a period the vendor has closed.
+            row["observed_at"] = observed_at or _now()
         if completeness is not None:
             row["completeness"] = float(completeness)
         if missing is not None:
             row["missing_json"] = _dumps(list(missing))
-        _upsert(conn, "market_node_snapshots", ("marketplace", "node_id_path", "period"), row)
+        _upsert(conn, "market_node_snapshots",
+                ("marketplace", "node_id_path", "period", "grain"), row)
 
 
-def get_node_snapshot(marketplace: str, node_id_path: str, period: str) -> dict | None:
+def get_node_snapshot(marketplace: str, node_id_path: str, period: str,
+                      *, grain: str = MONTH) -> dict | None:
     db._ensure()
     with db.connect() as conn:
         row = conn.execute(
             "SELECT * FROM market_node_snapshots "
-            "WHERE marketplace = ? AND node_id_path = ? AND period = ?",
-            (marketplace, node_id_path, period),
+            "WHERE marketplace = ? AND node_id_path = ? AND period = ? AND grain = ?",
+            (marketplace, node_id_path, period, grain),
         ).fetchone()
     if not row:
         return None
@@ -199,8 +215,9 @@ def get_node_snapshot(marketplace: str, node_id_path: str, period: str) -> dict 
     return out
 
 
-def list_node_snapshots(marketplace: str, period: str) -> list[dict]:
-    """Every tracked node's row for one month — the global board's raw input."""
+def list_node_snapshots(marketplace: str, period: str,
+                        *, grain: str = MONTH) -> list[dict]:
+    """Every tracked node's row for one period and grain."""
     db._ensure()
     with db.connect() as conn:
         rows = _rows(conn.execute(
@@ -208,8 +225,36 @@ def list_node_snapshots(marketplace: str, period: str) -> list[dict]:
             "FROM market_node_snapshots s "
             "JOIN market_nodes n ON n.marketplace = s.marketplace "
             "                   AND n.node_id_path = s.node_id_path "
-            "WHERE s.marketplace = ? AND s.period = ? ORDER BY s.total_revenue DESC",
-            (marketplace, period),
+            "WHERE s.marketplace = ? AND s.period = ? AND s.grain = ? "
+            "ORDER BY s.total_revenue DESC",
+            (marketplace, period, grain),
+        ))
+    for row in rows:
+        row["missing"] = _json_load(row.pop("missing_json", "[]"), [])
+    return rows
+
+
+def latest_pulse(marketplace: str) -> list[dict]:
+    """The most recent live reading for every tracked node.
+
+    One row per node, newest first by observation time — a pulse taken a week
+    apart for two nodes is still the newest each has, and dropping the older one
+    would silently shrink the panel.
+    """
+    db._ensure()
+    with db.connect() as conn:
+        rows = _rows(conn.execute(
+            "SELECT s.*, n.node_label_path, n.label, n.tier, n.brand_category "
+            "FROM market_node_snapshots s "
+            "JOIN market_nodes n ON n.marketplace = s.marketplace "
+            "                   AND n.node_id_path = s.node_id_path "
+            "JOIN (SELECT node_id_path, MAX(observed_at) AS seen "
+            "      FROM market_node_snapshots WHERE marketplace = ? AND grain = ? "
+            "      GROUP BY node_id_path) latest "
+            "  ON latest.node_id_path = s.node_id_path AND latest.seen = s.observed_at "
+            "WHERE s.marketplace = ? AND s.grain = ? "
+            "ORDER BY s.observed_at DESC, s.node_id_path ASC",
+            (marketplace, PULSE, marketplace, PULSE),
         ))
     for row in rows:
         row["missing"] = _json_load(row.pop("missing_json", "[]"), [])
@@ -250,12 +295,14 @@ def latest_period(marketplace: str, node_id_path: str | None = None,
         if usable_only:
             row = conn.execute(
                 f"SELECT MAX(period) AS period FROM market_node_snapshots "
-                f"WHERE {where} AND {_USABLE_COLUMN} IS NOT NULL", params,
+                f"WHERE {where} AND grain = '{MONTH}' "
+                f"AND {_USABLE_COLUMN} IS NOT NULL", params,
             ).fetchone()
             if row and row["period"]:
                 return str(row["period"])
         row = conn.execute(
-            f"SELECT MAX(period) AS period FROM market_node_snapshots WHERE {where}",
+            f"SELECT MAX(period) AS period FROM market_node_snapshots "
+            f"WHERE {where} AND grain = '{MONTH}'",
             params,
         ).fetchone()
     return row["period"] if row and row["period"] else None
@@ -269,7 +316,7 @@ def snapshot_history(marketplace: str, node_id_path: str, *, limit: int = 24) ->
             "SELECT period, total_revenue, total_units, avg_price, avg_rating, "
             "       return_ratio, glance_views, new_ratio_l12 "
             "FROM market_node_snapshots "
-            "WHERE marketplace = ? AND node_id_path = ? "
+            "WHERE marketplace = ? AND node_id_path = ? AND grain = 'month' "
             "ORDER BY period DESC LIMIT ?",
             (marketplace, node_id_path, limit),
         ))
@@ -944,7 +991,8 @@ def due_jobs(marketplace: str, *, now: float | None = None, limit: int = 200) ->
         ))
 
 
-def park_future_jobs(marketplace: str, period: str) -> int:
+def park_future_jobs(marketplace: str, period: str,
+                     *, exempt_kinds: Sequence[str] = ()) -> int:
     """Park pending jobs for months newer than the one being collected.
 
     The vendor publishes a month's aggregates only after it closes, so jobs
@@ -956,13 +1004,16 @@ def park_future_jobs(marketplace: str, period: str) -> int:
     the target, and the row keeps its history.
     """
     db._ensure()
+    sql = ("UPDATE market_jobs SET status = 'parked', last_error = 'period not closed' "
+           "WHERE marketplace = ? AND status = 'pending' AND period > ?")
+    params: list[Any] = [marketplace, period]
+    if exempt_kinds:
+        # The pulse jobs target the open month on purpose; parking them would
+        # retire the only view of it that exists.
+        sql += f" AND job_kind NOT IN ({', '.join('?' for _ in exempt_kinds)})"
+        params += list(exempt_kinds)
     with db.connect() as conn:
-        cursor = conn.execute(
-            "UPDATE market_jobs SET status = 'parked', last_error = 'period not closed' "
-            "WHERE marketplace = ? AND status = 'pending' AND period > ?",
-            (marketplace, period),
-        )
-        return cursor.rowcount
+        return conn.execute(sql, params).rowcount
 
 
 def queue_depth(marketplace: str) -> int:

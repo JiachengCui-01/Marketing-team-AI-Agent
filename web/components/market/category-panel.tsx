@@ -11,6 +11,7 @@ import {
   refreshMarketCategory,
   type MarketCategoryRow,
   type MarketConfigResponse,
+  type MarketCurrent,
   type MarketOpportunity,
   type MarketPrd,
   type MarketReport,
@@ -33,12 +34,14 @@ import {
 import {
   BiTable,
   ConfidenceNote,
+  CurrentPanel,
   DataGapCard,
   EvidenceChip,
   GapList,
   KpiRow,
   MonitorBoard,
   Section,
+  SplitTabs,
   VerdictChip,
   useScoreLabels,
 } from "@/components/market/shared";
@@ -63,6 +66,8 @@ export function MarketCategoryPanel({
   const [categories, setCategories] = useState<MarketCategoryRow[]>([]);
   const [node, setNode] = useState<string>(initialNode?.nodeKey ?? "");
   const [report, setReport] = useState<MarketReport | null>(null);
+  const [current, setCurrent] = useState<MarketCurrent | undefined>(undefined);
+  const [half, setHalf] = useState<"monthly" | "current">("monthly");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<"" | "render" | "collect" | "prd">("");
   const [error, setError] = useState<string | null>(null);
@@ -98,6 +103,7 @@ export function MarketCategoryPanel({
     try {
       const body = await getMarketCategory(nodeKey);
       setReport(body.report);
+      setCurrent(body.report?.dashboard?.current ?? body.current);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -113,7 +119,9 @@ export function MarketCategoryPanel({
     setBusy(collect ? "collect" : "render");
     setError(null);
     try {
-      setReport(await refreshMarketCategory({ node, collect, language: locale }));
+      const next = await refreshMarketCategory({ node, collect, language: locale });
+      setReport(next);
+      setCurrent(next.dashboard?.current);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -158,6 +166,7 @@ export function MarketCategoryPanel({
             </option>
           ))}
         </select>
+        <SplitTabs value={half} onChange={setHalf} />
         <div className="ml-auto flex items-center gap-2">
           <button onClick={() => refresh(false)} disabled={!node || busy !== ""}
                   className="btn-ghost h-8 px-2 text-xs">
@@ -174,7 +183,9 @@ export function MarketCategoryPanel({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {error ? <p className="mb-3 text-sm text-danger">{error}</p> : null}
-        {!node ? (
+        {node && half === "current" ? (
+          <CurrentPanel current={current} showNode={false} />
+        ) : !node ? (
           <div className="rounded-xl border border-border p-5 text-center">
             <p className="text-sm font-medium">{t.cdPick}</p>
             <p className="mt-1 text-xs text-fg-muted">{t.cdPickHint}</p>

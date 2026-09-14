@@ -492,10 +492,16 @@ CREATE TABLE IF NOT EXISTS market_node_snapshots (
     missing_json TEXT NOT NULL DEFAULT '[]',
     schema_version INTEGER NOT NULL DEFAULT 1,
     ingested_at REAL NOT NULL,
-    updated_at REAL NOT NULL
+    updated_at REAL NOT NULL,
+    -- 'month' is the vendor's closed-month aggregate; 'pulse' is a point-in-time
+    -- reading of the live listing snapshot, taken while the month is still open.
+    -- They share every column but mean different things, and mixing them is what
+    -- made a half-collected September outrank a complete August.
+    grain TEXT NOT NULL DEFAULT 'month',
+    observed_at REAL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_market_node_snapshots_key
-    ON market_node_snapshots(marketplace, node_id_path, period);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_market_node_snapshots_grain
+    ON market_node_snapshots(marketplace, node_id_path, period, grain);
 CREATE INDEX IF NOT EXISTS idx_market_node_snapshots_period
     ON market_node_snapshots(marketplace, period);
 
@@ -861,6 +867,7 @@ def init() -> None:
             _migrate_calendar_status(conn)
             _migrate_selection_overview(conn)
             _migrate_market_traffic_mix(conn)
+            _migrate_snapshot_grain(conn)
             _seed_image_templates(conn)
         _INITIALIZED = True
 
@@ -924,6 +931,25 @@ def _migrate_market_traffic_mix(conn: sqlite3.Connection) -> None:
     for column in ("natural_proportion", "ad_proportion", "recommendation_proportion"):
         if column not in cols:
             conn.execute(f"ALTER TABLE market_product_metrics ADD COLUMN {column} REAL")
+
+
+def _migrate_snapshot_grain(conn: sqlite3.Connection) -> None:
+    """Separate the closed-month aggregate from the live reading of an open month.
+
+    The old unique key was (marketplace, node, period), which forced both kinds
+    of fact into one row. Existing rows are all month-grain, so the default
+    backfills them correctly; the old index is dropped last so the new one is in
+    place before anything can insert a duplicate.
+    """
+    cols = _table_columns(conn, "market_node_snapshots")
+    if "grain" not in cols:
+        conn.execute("ALTER TABLE market_node_snapshots "
+                     "ADD COLUMN grain TEXT NOT NULL DEFAULT 'month'")
+    if "observed_at" not in cols:
+        conn.execute("ALTER TABLE market_node_snapshots ADD COLUMN observed_at REAL")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_market_node_snapshots_grain "
+                 "ON market_node_snapshots(marketplace, node_id_path, period, grain)")
+    conn.execute("DROP INDEX IF EXISTS idx_market_node_snapshots_key")
 
 
 def _migrate_calendar_status(conn: sqlite3.Connection) -> None:

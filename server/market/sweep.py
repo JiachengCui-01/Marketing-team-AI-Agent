@@ -71,10 +71,15 @@ def run_daily_sweep(marketplace: str = "US", *, budget: int | None = None) -> di
 
     taxonomy.ensure_nodes(marketplace)
     planned = jobs.plan_period(marketplace, period)
-    # Anything queued against a month newer than the target cannot be served yet.
-    # Retrying it three times per node is most of a day's budget spent proving the
-    # calendar. Parked now, woken by plan_period once that month closes.
-    parked = store.park_future_jobs(marketplace, period)
+    # One cheap live reading per node per week, against the month still in
+    # progress. It is the only thing the board can say about today.
+    planned += jobs.plan_pulse(marketplace)
+    # Anything else queued against a month newer than the target cannot be served
+    # yet. Retrying it three times per node is most of a day's budget spent
+    # proving the calendar. Parked now, woken by plan_period once that month
+    # closes.
+    parked = store.park_future_jobs(marketplace, period,
+                                    exempt_kinds=jobs.PULSE_KINDS)
 
     done = failed = 0
     status = "complete"

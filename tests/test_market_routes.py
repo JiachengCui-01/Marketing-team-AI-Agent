@@ -125,6 +125,24 @@ class MarketRouteTests(unittest.TestCase):
         self.assertLessEqual(dashboard["coverage"]["present"],
                              dashboard["coverage"]["total"])
 
+    def test_the_current_month_layer_is_computed_on_read(self) -> None:
+        """Baked into the stored board it would be as stale as the last render,
+        which defeats the only thing it is for."""
+        from server.market import gateway as market_gateway
+        store.upsert_node_snapshot("US", BUFFETS, market_gateway.current_period(),
+                                   {"avg_price": 199.0, "avg_revenue": 80_000.0},
+                                   grain=store.PULSE)
+        body = self.client.get("/api/market/overview", headers=self.headers).json()
+        current = (body.get("report") or {}).get("dashboard", {}).get("current")             or body.get("current")
+        self.assertTrue(current["available"])
+        self.assertEqual(current["period"], market_gateway.current_period())
+        self.assertTrue(current["rows"])
+
+    def test_the_current_layer_reports_absence_rather_than_an_empty_shell(self) -> None:
+        body = self.client.get("/api/market/overview", headers=self.headers).json()
+        current = (body.get("report") or {}).get("dashboard", {}).get("current")             or body.get("current")
+        self.assertFalse(current["available"])
+
     def test_collect_without_a_vendor_key_is_a_502(self) -> None:
         with mock.patch.object(routes, "sellersprite_configured", return_value=False):
             response = self.client.post("/api/market/overview/refresh",

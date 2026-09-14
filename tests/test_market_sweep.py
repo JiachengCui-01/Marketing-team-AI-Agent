@@ -75,13 +75,46 @@ class PlanningTests(SweepTestCase):
         planned = jobs.plan_period("US", PERIOD)
         leaves = len(taxonomy.leaf_nodes())
         flagships = len([n for n in taxonomy.leaf_nodes() if n["tier"] == 1])
+        # The pulse is weekly and keyed by week, so plan_pulse owns it.
         per_leaf = len([s for s in jobs.CATALOG
-                        if s.scope == "node" and s.tier is None and s.subject_kind == "node"])
+                        if s.scope == "node" and s.tier is None
+                        and s.subject_kind == "node" and s.kind not in jobs.PULSE_KINDS])
         tier1_only = len([s for s in jobs.CATALOG if s.tier == 1])
         department = len([s for s in jobs.CATALOG if s.scope == "department"])
         self.assertEqual(planned,
                          leaves * per_leaf + flagships * tier1_only + department)
         self.assertEqual(store.queue_depth("US"), planned)
+
+    def test_the_monthly_plan_never_queues_a_pulse(self) -> None:
+        """Keyed by month, a weekly job would collide with its own first run."""
+        jobs.plan_period("US", PERIOD)
+        self.assertEqual([j for j in store.due_jobs("US", limit=500)
+                          if j["job_kind"] in jobs.PULSE_KINDS], [])
+
+    def test_the_pulse_is_planned_once_per_week_per_node(self) -> None:
+        added = jobs.plan_pulse("US")
+        self.assertEqual(added, len(taxonomy.leaf_nodes()))
+        self.assertEqual(jobs.plan_pulse("US"), 0)      # same week, idempotent
+        queued = [j for j in store.due_jobs("US", limit=500)
+                  if j["job_kind"] == "category_pulse"]
+        self.assertEqual({j["period"] for j in queued}, {jobs.week_stamp()})
+
+    def test_a_new_week_reopens_the_pulse(self) -> None:
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo("America/Los_Angeles")
+        now = datetime(2026, 9, 10, tzinfo=tz)
+        jobs.plan_pulse("US", now)
+        self.assertEqual(jobs.plan_pulse("US", now + timedelta(days=7)),
+                         len(taxonomy.leaf_nodes()))
+
+    def test_the_pulse_is_not_parked_for_targeting_the_open_month(self) -> None:
+        """Parking it would retire the only view of the month in progress."""
+        jobs.plan_pulse("US")
+        parked = store.park_future_jobs("US", "202608", exempt_kinds=jobs.PULSE_KINDS)
+        self.assertEqual(parked, 0)
+        self.assertTrue([j for j in store.due_jobs("US", limit=500)
+                         if j["job_kind"] == "category_pulse"])
 
     def test_replanning_the_same_month_adds_nothing(self) -> None:
         first = jobs.plan_period("US", PERIOD)

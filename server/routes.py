@@ -22,6 +22,7 @@ from server.market import deepdive as market_deepdive
 from server.market import gateway as market_gateway
 from server.market import prd as market_prd
 from server.market import render as market_render
+from server.market import panels as market_panels
 from server.market import scoring as market_scoring
 from server.market import store as market_store
 from server.market import sweep as market_sweep
@@ -571,6 +572,22 @@ async def refresh_selection(request: Request) -> dict:
 # working, for the same reason the legacy DELETE shim does.
 
 
+def _with_current(record: dict | None, language: str,
+                  node_id_path: str | None = None) -> dict | None:
+    """Attach the live current-month layer to a stored monthly dashboard.
+
+    Computed on read, never baked into the saved record. The monthly half is
+    re-rendered on demand and can sit for days; the current half is the part that
+    is supposed to be fresh, and a fresh panel frozen at render time would be
+    worse than no panel. It is a pure SQLite read, so this costs nothing.
+    """
+    if record is None:
+        return None
+    record["dashboard"]["current"] = market_panels.build_current(
+        "US", language, node_id_path=node_id_path)
+    return record
+
+
 def _market_language(payload: dict, config: dict | None) -> str:
     language = str(payload.get("language")
                    or (config or {}).get("language") or "zh").lower()
@@ -624,8 +641,10 @@ def market_overview(request: Request) -> dict:
     record = market_store.latest_dashboard(marketplace="US", scope="overview",
                                            language=language)
     if record is None:
-        return {"report": None, "available": sellersprite_configured()}
-    return {"report": record, "available": sellersprite_configured()}
+        return {"report": None, "current": market_panels.build_current("US", language),
+                "available": sellersprite_configured()}
+    return {"report": _with_current(record, language),
+            "available": sellersprite_configured()}
 
 
 @router.post("/market/overview/refresh")
@@ -654,7 +673,7 @@ async def refresh_market_overview(request: Request) -> dict:
     record = await asyncio.to_thread(
         market_render.render_overview, marketplace="US", period=period,
         language=language, client=client)
-    return {"report": record}
+    return {"report": _with_current(record, language)}
 
 
 @router.get("/market/categories")
@@ -694,8 +713,11 @@ def market_category(request: Request) -> dict:
     record = market_store.latest_dashboard(marketplace="US", scope="category",
                                            language=language, node_id_path=node)
     if record is None:
-        return {"report": None, "available": sellersprite_configured()}
-    return {"report": record, "available": sellersprite_configured()}
+        return {"report": None,
+                "current": market_panels.build_current("US", language, node_id_path=node),
+                "available": sellersprite_configured()}
+    return {"report": _with_current(record, language, node),
+            "available": sellersprite_configured()}
 
 
 @router.post("/market/category/refresh")
@@ -732,7 +754,7 @@ async def refresh_market_category(request: Request) -> dict:
         market_render.render_category, node_id_path=node, marketplace="US",
         period=period, language=language, client=client,
         user_id=user["id"])
-    return {"report": record}
+    return {"report": _with_current(record, language, node)}
 
 
 @router.get("/market/evidence")

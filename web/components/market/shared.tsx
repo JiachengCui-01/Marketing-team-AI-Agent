@@ -8,12 +8,16 @@ import {
   getMarketEvidence,
   type MarketAlert,
   type MarketCoverage,
+  type MarketCurrent,
   type MarketEvidence,
   type MarketKpi,
   type MarketMonitor,
+  type MarketPulseMetric,
+  type MarketPulseRow,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { Modal } from "@/components/modal";
+import { fmtMoney } from "@/components/market/charts";
 import { CitationMarkdown } from "@/components/citation-markdown";
 
 export function Section({
@@ -455,5 +459,166 @@ export function CoverageStrip({ coverage }: { coverage?: MarketCoverage }) {
         ))}
       </div>
     </Section>
+  );
+}
+
+/** The two halves of every market surface.
+ *
+ * Not a view switch over one dataset — that is what the persona toggle was, and
+ * it was removed for hiding facts. These are two genuinely different statements:
+ * a closed month the vendor has settled, and a live reading of the month in
+ * flight. They cannot be merged, because the current month has no revenue, no
+ * return rate and no concentration at all until it ends.
+ */
+export function SplitTabs({
+  value,
+  onChange,
+}: {
+  value: "monthly" | "current";
+  onChange: (next: "monthly" | "current") => void;
+}) {
+  const { t } = useI18n();
+  const options: { id: "monthly" | "current"; label: string; hint: string }[] = [
+    { id: "monthly", label: t.splitMonthly, hint: t.splitMonthlyHint },
+    { id: "current", label: t.splitCurrent, hint: t.splitCurrentHint },
+  ];
+  return (
+    <div className="seg" role="tablist" aria-label="period">
+      {options.map((option) => (
+        <button
+          key={option.id}
+          role="tab"
+          aria-selected={option.id === value}
+          title={option.hint}
+          onClick={() => onChange(option.id)}
+          className={`seg-item ${option.id === value ? "seg-item-active" : ""}`}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function PaceChip({ pace }: { pace: MarketPulseRow["implied_pace"] }) {
+  const { t } = useI18n();
+  if (!pace) return null;
+  const up = pace.ratio >= 1;
+  return (
+    <span className={`bi-chip ${up ? "bi-chip-low" : "bi-chip-high"}`} title={t.pcPaceHint}>
+      {t.pcPace} {pace.ratio.toFixed(2)}×
+      <span className="bi-chip bi-chip-estimated ml-1">{t.evEstimated}</span>
+    </span>
+  );
+}
+
+function DeltaText({ value }: { value: number | null }) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return <span className="text-fg-subtle">—</span>;
+  }
+  const up = value >= 0;
+  return (
+    <span className={up ? "text-ok" : "text-danger"} style={{ fontVariantNumeric: "tabular-nums" }}>
+      {up ? "+" : ""}
+      {value.toFixed(1)}%
+    </span>
+  );
+}
+
+function metricText(metric: MarketPulseMetric, which: "now" | "baseline"): string {
+  const value = metric[which];
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  if (metric.unit === "$") return fmtMoney(value);
+  if (metric.unit === "%") return `${value.toFixed(1)}%`;
+  if (metric.unit === "★") return `${value.toFixed(2)}★`;
+  // Counts and per-listing rates. The vendor sends these with more precision
+  // than they carry — a seller count of 57.9996 is 58 sellers, and printing the
+  // decimals makes a real number look like a bug.
+  return Math.abs(value) >= 100
+    ? Math.round(value).toLocaleString()
+    : value.toFixed(1).replace(/\.0$/, "");
+}
+
+/** The month in flight: what the live shelf says, against last month, plus the
+ * early warnings that come out of the comparison. */
+export function CurrentPanel({
+  current,
+  onDrill,
+  showNode = true,
+}: {
+  current?: MarketCurrent;
+  onDrill?: (node: { nodeKey: string; label: string }) => void;
+  showNode?: boolean;
+}) {
+  const { t, locale } = useI18n();
+  if (!current || !current.available) {
+    return (
+      <div className="rounded-xl border border-border p-5 text-center">
+        <p className="text-sm font-medium">{t.pcEmpty}</p>
+        <p className="mt-1 text-xs text-fg-muted">{t.pcEmptyHint}</p>
+      </div>
+    );
+  }
+  const observed = current.observed_at
+    ? new Date(current.observed_at * 1000).toLocaleString(locale === "zh" ? "zh-CN" : "en-US")
+    : null;
+
+  return (
+    <>
+      <Section
+        title={t.pcTitle}
+        hint={t.pcHint}
+        right={
+          <span className="text-[10px] text-fg-subtle">
+            {observed ? `${t.pcObserved} ${observed}` : null}
+            {current.baseline_period ? ` · ${t.pcBaseline} ${current.baseline_period}` : null}
+          </span>
+        }
+      >
+        <p className="rounded-lg border border-border bg-bg-subtle px-3 py-2 text-[11px] leading-relaxed text-fg-muted">
+          {t.pcNoAggregate}
+        </p>
+      </Section>
+
+      <MonitorBoard monitor={current.monitor} onDrill={onDrill} showNode={showNode} />
+
+      {(current.rows ?? []).map((row) => (
+        <Section
+          key={row.node_key}
+          title={showNode ? row.label : t.pcTitle}
+          right={<PaceChip pace={row.implied_pace} />}
+        >
+          <BiTable
+            rows={row.metrics}
+            onPick={
+              showNode && onDrill
+                ? () => onDrill({ nodeKey: row.node_key, label: row.label })
+                : undefined
+            }
+            columns={[
+              { key: "label", label: "" },
+              {
+                key: "now",
+                label: t.pcNow,
+                numeric: true,
+                render: (m: MarketPulseMetric) => metricText(m, "now"),
+              },
+              {
+                key: "baseline",
+                label: t.pcLast,
+                numeric: true,
+                render: (m: MarketPulseMetric) => metricText(m, "baseline"),
+              },
+              {
+                key: "delta_pct",
+                label: t.pcDelta,
+                numeric: true,
+                render: (m: MarketPulseMetric) => <DeltaText value={m.delta_pct} />,
+              },
+            ]}
+          />
+        </Section>
+      ))}
+    </>
   );
 }

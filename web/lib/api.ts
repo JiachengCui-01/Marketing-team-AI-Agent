@@ -1629,6 +1629,38 @@ export type MarketMonitor = {
   };
 };
 
+export type MarketPulseMetric = {
+  key: string;
+  label: string;
+  unit: string;
+  now: number | null;
+  baseline: number | null;
+  delta_pct: number | null;
+};
+
+export type MarketPulseRow = {
+  node_key: string;
+  label: string;
+  observed_at: number | null;
+  metrics: MarketPulseMetric[];
+  implied_pace: {
+    ratio: number;
+    now: number;
+    baseline: number;
+    delta_pct: number | null;
+    estimated: boolean;
+  } | null;
+};
+
+export type MarketCurrent = {
+  available: boolean;
+  period: string;
+  baseline_period: string | null;
+  observed_at?: number | null;
+  rows?: MarketPulseRow[];
+  monitor?: MarketMonitor;
+};
+
 export type MarketCoverage = {
   present: number;
   total: number;
@@ -1796,6 +1828,9 @@ export type MarketDashboard = {
   score_model: MarketScoreModel;
   monitor?: MarketMonitor;
   monitor_summary?: string;
+  // Attached on read, never stored: the monthly board can sit for days
+  // and this is the half that is supposed to be fresh.
+  current?: MarketCurrent;
   coverage?: MarketCoverage;
   gaps?: string[];
   headline?: { kpis: MarketKpi[] };
@@ -1980,6 +2015,7 @@ export async function saveMarketConfig(
 
 export async function getMarketOverview(): Promise<{
   report: MarketReport | null;
+  current?: MarketCurrent;
   available: boolean;
 }> {
   const res = await fetch(`${API_BASE}/api/market/overview`, {
@@ -2012,6 +2048,7 @@ export async function getMarketCategories(): Promise<MarketCategoryRow[]> {
 
 export async function getMarketCategory(node: string): Promise<{
   report: MarketReport | null;
+  current?: MarketCurrent;
   available: boolean;
 }> {
   const url = `${API_BASE}/api/market/category?node=${encodeURIComponent(node)}`;
