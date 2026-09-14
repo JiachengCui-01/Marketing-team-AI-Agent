@@ -61,18 +61,24 @@ def _config_timezone(config: dict) -> ZoneInfo:
 
 
 async def _run_due_selection_job(config: dict) -> None:
+    """Project the (already collected) market board into this user's legacy report.
+
+    Spends no vendor credits: collection is the market sweep's job below, and it
+    runs once for the whole workspace. This used to be a per-user sweep, which
+    meant the same US furniture market was bought once per user per day.
+    """
     try:
         await asyncio.to_thread(selection.generate_report, config)
         logger.info("Generated selection analysis for user %s", config.get("user_id"))
     except Exception as exc:  # noqa: BLE001 - keep the scheduler alive
-        # Same reasoning as the news job: count the attempt so a persistent vendor
-        # failure does not retry every minute. Manual refresh stays available.
+        # Count the attempt so a persistent failure does not retry every minute.
+        # Manual refresh stays available.
         db.set_selection_config_last_run(config["user_id"], datetime.now().timestamp())
         logger.warning("Selection analysis failed for user %s: %s", config.get("user_id"), exc)
 
 
 async def _automation_scheduler() -> None:
-    """Background loop for both automation jobs: daily news digest and selection analysis.
+    """Background loop for the automation jobs: news digest, market sweep, selection report.
 
     NOTE: assumes a single server worker (Render default). With multiple workers this
     would run per worker; add a DB lock before scaling out.
@@ -86,20 +92,22 @@ async def _automation_scheduler() -> None:
         except Exception as exc:  # noqa: BLE001 - never let the loop die
             logger.warning("News scheduler tick failed: %s", exc)
         try:
-            for config in db.list_enabled_selection_configs():
-                if selection.is_due(config, datetime.now(_config_timezone(config))):
-                    await _run_due_selection_job(config)
-        except Exception as exc:  # noqa: BLE001 - never let the loop die
-            logger.warning("Selection scheduler tick failed: %s", exc)
-        try:
-            # The market warehouse is global, so this runs once per day for the
-            # whole workspace rather than once per user. The day is claimed with a
-            # unique index, so a second worker is a no-op rather than a double bill.
+            # Collection first: the per-user job below only *reads* the warehouse,
+            # so on a fresh day it should read today's rows rather than yesterday's.
+            # The warehouse is global, so this runs once for the whole workspace.
+            # The day is claimed with a unique index, so a second worker is a no-op
+            # rather than a double bill.
             if market_sweep.is_due("US"):
                 await asyncio.to_thread(market_sweep.run_daily_sweep, "US")
             await asyncio.to_thread(market_store.prune_market_history)
         except Exception as exc:  # noqa: BLE001 - never let the loop die
             logger.warning("Market sweep tick failed: %s", exc)
+        try:
+            for config in db.list_enabled_selection_configs():
+                if selection.is_due(config, datetime.now(_config_timezone(config))):
+                    await _run_due_selection_job(config)
+        except Exception as exc:  # noqa: BLE001 - never let the loop die
+            logger.warning("Selection scheduler tick failed: %s", exc)
         await asyncio.sleep(_SCHEDULER_INTERVAL_SECONDS)
 
 
@@ -116,7 +124,7 @@ def _expire_cancelled_configs() -> None:
             logger.info("Reverted cancelled news task for user %s", config.get("user_id"))
     for config in db.list_cancelled_selection_configs():
         if selection.is_cancel_expired(config, now_ts):
-            db.delete_selection_data(config["user_id"])
+            selection.purge_user_data(config["user_id"])
             logger.info("Reverted cancelled selection task for user %s", config.get("user_id"))
 
 

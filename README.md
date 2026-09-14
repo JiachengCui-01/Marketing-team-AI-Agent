@@ -229,7 +229,7 @@ server/                       FastAPI 后端
   routes.py                   全部 /api 端点        db.py  SQLite 结构与数据访问
   streaming.py                同步回调 → 异步 SSE 桥  auth.py  密码/令牌/资料校验
   kb_retrieval.py, reranker.py, embeddings.py, query_rewrite.py   KB RAG 管线
-  news.py                     行业简报生成      selection.py  旧版选品分析（兼容外壳）
+  news.py                     行业简报生成      selection.py  旧接口兼容层（投影市场看板，零厂商调用）
   market/                     家具市场决策系统
     taxonomy.py               家具浏览树目录（真实 nodeIdPath，引导零调用）
     fields.py                 returnFields 白名单（唯一能从源头压缩 payload 的杠杆）

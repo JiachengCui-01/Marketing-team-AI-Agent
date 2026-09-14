@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 _FALSEY = {"0", "false", "no", "off", ""}
 
 MARKETPLACE = "US"
-# The vendor's own clock. ``selection.collect_vendor_data`` used the server's local
+# The vendor's own clock. The collector this replaced used the server's local
 # month, so a China- or UTC-hosted box asked for a month the US marketplace had not
 # entered yet and got empty replies for the first hours of every month.
 SWEEP_TZ = os.environ.get("MARKETING_AGENT_MARKET_TZ", "America/Los_Angeles")

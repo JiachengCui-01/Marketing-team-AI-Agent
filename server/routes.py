@@ -445,7 +445,7 @@ def _resolved_selection_config(user_id: str) -> dict | None:
         return None
     if selection.is_cancelled(config):
         if selection.is_cancel_expired(config, time.time()):
-            db.delete_selection_data(user_id)
+            selection.purge_user_data(user_id)
             return None
         config = {**config, "revert_at": selection.cancellation_revert_ts(config)}
     return config
@@ -744,6 +744,26 @@ def market_evidence(request: Request) -> dict:
     if not ids:
         raise HTTPException(400, "缺少证据编号。")
     return {"evidence": market_store.get_evidence(ids)}
+
+
+@router.get("/market/runs")
+def market_runs(request: Request) -> dict:
+    """The last sweep and what the queue still owes.
+
+    A board that is thin because the month is young looks exactly like a board
+    that is thin because collection broke; this is how you tell them apart.
+    """
+    auth.require_user(request)
+    run = market_store.latest_run("US")
+    # The call log is for the run's *own* date, not today's: a sweep that finished
+    # three days ago listed beside today's empty ledger reads as a broken sweep.
+    run_date = str((run or {}).get("run_date") or market_gateway.run_date())
+    return {
+        "run": run,
+        "run_date": run_date,
+        "queue_depth": market_store.queue_depth("US"),
+        "calls": market_store.call_log("US", run_date, limit=50) if run else [],
+    }
 
 
 @router.get("/market/budget")

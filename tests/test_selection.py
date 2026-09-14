@@ -1,7 +1,9 @@
-"""Tests for the automated product-selection analysis.
+"""Tests for the legacy product-selection surface.
 
-Offline throughout: the vendor is faked at ``sellersprite.call_tool`` and the model
-at ``llm.get_client``.
+Collection moved to ``server/market/`` — what is left here is the schedule, the
+cancellation grace period, the category picker, and the projection of the market
+board into the legacy response shape. Offline throughout; the point of most of
+these is that no vendor call happens at all.
 """
 from __future__ import annotations
 
@@ -12,9 +14,11 @@ from unittest import mock
 
 from fastapi.testclient import TestClient
 
-from marketing_agent.tools.mcp_client import McpToolError, McpUnavailable
 from server import db, selection
 from server.main import app
+from server.market import gateway, store as market_store
+
+BUFFETS = "1055398:1063306:3733781:3733831"
 
 
 def _tool_use_response(name: str, payload: dict):
@@ -98,108 +102,6 @@ class NodePickingTests(unittest.TestCase):
         self.assertIsNone(selection.pick_node(json.dumps({"data": []}), "desks"))
 
 
-class VendorSweepTests(unittest.TestCase):
-    def test_sweep_resolves_the_node_first_and_drives_everything_off_it(self) -> None:
-        calls: list[tuple[str, dict]] = []
-
-        def fake_call(tool, arguments=None):
-            calls.append((tool, arguments or {}))
-            if tool == "product_node":
-                return _NODE_REPLY
-            return json.dumps({"ok": True})
-
-        with mock.patch.object(selection.sellersprite, "call_tool", side_effect=fake_call):
-            observations, tools_used = selection.collect_vendor_data(
-                ["sofas and sectionals"], "US"
-            )
-
-        # Node lookup must come first; the rest is keyed off its id.
-        self.assertEqual(
-            [c[0] for c in calls],
-            ["product_node", "market_research", "product_research", "market_product_demand_trend"],
-        )
-        node = "1055398:1063306:1063318:3733551"
-        for tool, args in calls[1:]:
-            self.assertEqual(args["request"]["nodeIdPath"], node, tool)
-        # No free-text keyword reaches the data tools — that is what returned
-        # toilet paper for a furniture query.
-        self.assertTrue(all("keyword" not in a["request"] for _, a in calls[1:]))
-        # Child nodes are included so a parent node still yields sectionals.
-        product_args = next(a for t, a in calls if t == "product_research")
-        self.assertEqual(product_args["request"]["nodeIdPathEqual"], "false")
-        self.assertEqual(set(tools_used), {c[0] for c in calls})
-        self.assertTrue(any(o.get("node") for o in observations))
-
-        # The browse tree is a resolution step, not evidence. Inlining its ~20k-char
-        # reply crowded out the payloads that actually carry the numbers, so only the
-        # picked node is recorded.
-        node_obs = [o for o in observations if o["tool"] == "product_node"]
-        self.assertEqual(len(node_obs), 1)
-        self.assertEqual(node_obs[0]["purpose"], "resolved browse node")
-        self.assertNotIn("Office Products", node_obs[0]["payload"])
-        self.assertIn(node, node_obs[0]["payload"])
-
-    def test_the_prompt_carries_the_resolved_node_not_the_whole_tree(self) -> None:
-        def fake_call(tool, arguments=None):
-            return _NODE_REPLY if tool == "product_node" else json.dumps({"ok": True})
-
-        with mock.patch.object(selection.sellersprite, "call_tool", side_effect=fake_call):
-            observations, _ = selection.collect_vendor_data(["sofas and sectionals"], "US")
-        content = selection._user_content(observations, ["sofas and sectionals"], "US", "zh")
-        self.assertIn("Sofas & Couches", content)
-        self.assertNotIn("Chairs & Sofas", content)  # the office-furniture row
-
-    def test_an_unresolved_node_skips_the_data_calls_and_reports_a_gap(self) -> None:
-        def fake_call(tool, arguments=None):
-            if tool == "product_node":
-                return json.dumps({"data": [
-                    {"nodeIdPath": "x", "nodeLabelPath": "Health & Household:Toilet Paper",
-                     "products": 5000},
-                ]})
-            return json.dumps({"ok": True})
-
-        with mock.patch.object(selection.sellersprite, "call_tool", side_effect=fake_call) as call:
-            observations, tools_used = selection.collect_vendor_data(["desks"], "US")
-
-        # Better a stated gap than an analysis of the wrong category.
-        self.assertEqual([c.args[0] for c in call.call_args_list], ["product_node"])
-        self.assertEqual(tools_used, ["product_node"])
-        self.assertTrue(any(o["status"] == "unresolved" for o in observations))
-
-    def test_a_rejected_tool_does_not_sink_the_run(self) -> None:
-        def fake_call(tool, arguments=None):
-            if tool == "product_node":
-                return _NODE_REPLY
-            if tool == "market_research":
-                raise McpToolError("marketplace is required")
-            return json.dumps({"ok": True})
-
-        with mock.patch.object(selection.sellersprite, "call_tool", side_effect=fake_call):
-            observations, tools_used = selection.collect_vendor_data(["sofas"], "US")
-
-        self.assertNotIn("market_research", tools_used)
-        self.assertIn("product_research", tools_used)
-        self.assertEqual(
-            [o["tool"] for o in observations if o["status"] == "rejected"], ["market_research"]
-        )
-
-    def test_an_outage_propagates_rather_than_producing_a_thin_report(self) -> None:
-        with mock.patch.object(
-            selection.sellersprite, "call_tool", side_effect=McpUnavailable("gateway down")
-        ):
-            with self.assertRaises(McpUnavailable):
-                selection.collect_vendor_data(["sofas"], "US")
-
-    def test_the_call_budget_is_enforced_across_categories(self) -> None:
-        with mock.patch.object(
-            selection.sellersprite, "call_tool", return_value=_NODE_REPLY
-        ) as call:
-            selection.collect_vendor_data(
-                [f"sofas {i}" for i in range(selection.MAX_CATEGORIES)], "US"
-            )
-        self.assertLessEqual(call.call_count, selection.MAX_VENDOR_CALLS)
-
-
 class ScheduleTests(unittest.TestCase):
     def _now(self, hour: int, minute: int = 0) -> datetime:
         return datetime(2026, 9, 2, hour, minute, tzinfo=timezone.utc)
@@ -231,6 +133,30 @@ class ScheduleTests(unittest.TestCase):
 
 
 class GenerationTests(unittest.TestCase):
+    """The legacy report is now a projection of the market board, not a sweep."""
+
+    BOARD = {
+        "headline": {"kpis": [{"label": "家具大盘月销售额", "value": "$7.92M",
+                               "hint": "", "estimated": True}]},
+        "board": [
+            {"node_key": BUFFETS, "label": "Buffets & Sideboards",
+             "node_label_path": "Furniture:Buffets & Sideboards",
+             "category_score": 71, "score_breakdown": {"demand_scale": 8.0},
+             "score_confidence": 0.9, "revenue_est": 7_920_000.0, "growth_pct": 4.0,
+             "median_price": 214.0, "top5_brand_share_pct": 18.0,
+             "new_revenue_share_pct": 38.4, "return_ratio_pct": 1.77,
+             "return_ratio_avg_pct": 3.31, "return_risk": 0.0,
+             "completeness": 1.0, "missing": []},
+        ],
+        "verdicts": {BUFFETS: {"verdict": "enter", "rationale": "集中度低、退货优于同级",
+                               "evidence_ids": []}},
+        "trend": [{"period": "202607", "value": 7_000_000.0},
+                  {"period": "202608", "value": 7_920_000.0}],
+        "thesis": "餐边柜是本期最值得做的方向。",
+        "monitor_summary": "退货率只有同级的 0.54 倍。",
+        "gaps": ["评论痛点未采集"],
+    }
+
     def setUp(self) -> None:
         db.reset_for_tests()
         self.user = db.create_user(
@@ -247,92 +173,131 @@ class GenerationTests(unittest.TestCase):
     def tearDown(self) -> None:
         db.reset_for_tests()
 
-    def test_generation_requires_the_vendor_and_never_falls_back(self) -> None:
-        # A product recommendation not grounded in marketplace data would be a guess
-        # dressed as analysis, so this feature has no web-search fallback.
-        with mock.patch.object(selection.sellersprite, "is_configured", return_value=False):
-            with self.assertRaises(selection.SelectionGenerationError) as ctx:
-                selection.generate_report(self.config)
-        self.assertIn("SELLERSPRITE_SECRET_KEY", str(ctx.exception))
+    def _store_board(self, language: str = "zh") -> dict:
+        return market_store.save_dashboard(
+            user_id=None, marketplace="US", scope="overview", node_id_path=None,
+            period="202608", language=language, status="ok", dashboard=self.BOARD,
+            summary=self.BOARD["thesis"], evidence=[],
+            vendor_tools=["market_research", "product_research"],
+            data_as_of=None, completeness=1.0)
 
-    def test_a_vendor_that_answers_nothing_fails_loudly(self) -> None:
-        with mock.patch.object(selection.sellersprite, "is_configured", return_value=True), \
-                mock.patch.object(selection.sellersprite, "call_tool", return_value="  "), \
-                mock.patch.object(selection.llm, "get_client", return_value=mock.Mock()):
-            with self.assertRaises(selection.SelectionGenerationError) as ctx:
-                selection.generate_report(self.config)
-        self.assertIn("没有返回任何可用数据", str(ctx.exception))
+    def test_a_report_costs_no_vendor_call_at_all(self) -> None:
+        """The whole point of the rewrite: collection is global and already paid for."""
+        self._store_board()
+        with mock.patch.object(gateway.sellersprite, "call_tool") as vendor:
+            record = selection.generate_report(self.config)
+        vendor.assert_not_called()
+        self.assertTrue(record["dashboard"]["recommendations"])
 
-    def test_successful_run_persists_the_dashboard_and_its_provenance(self) -> None:
-        dashboard = {
-            "kpis": [{"label": "类目均价", "value": "$899", "estimated": False}],
-            "recommendations": [
-                {"title": "实木餐桌", "category": "dining", "score": 78, "reason": "需求稳"}
-            ],
-            "trends": [
-                {"category": "dining", "label": "月销量", "points": [
-                    {"period": "202607", "value": 10}, {"period": "202608", "value": 14}
-                ], "change_pct": 40.0}
-            ],
-            "market": [{"category": "dining", "verdict": "值得进入"}],
-            "notes": ["desks 无数据"],
-            "summary": "## 结论\n优先做实木餐桌。",
-        }
+    def test_a_stored_board_is_reused_instead_of_re_rendered(self) -> None:
+        """N users must cost one render, not N model calls."""
+        self._store_board()
         client = mock.Mock()
-        client.messages.create.return_value = _tool_use_response(
-            selection._TOOL_NAME, dashboard
-        )
-        with mock.patch.object(selection.sellersprite, "is_configured", return_value=True), \
-                mock.patch.object(selection.sellersprite, "call_tool", return_value=_NODE_REPLY):
-            record = selection.generate_report(self.config, client)
+        selection.generate_report(self.config, client)
+        selection.generate_report(self.config, client)
+        client.messages.create.assert_not_called()
 
-        recommendation = record["dashboard"]["recommendations"][0]
-        # The server ignores the model's 78 and applies the deterministic formula.
-        self.assertEqual(recommendation["score"], 20)
-        self.assertEqual(recommendation["score_breakdown"]["growth"], 20.0)
-        self.assertIn("优先做实木餐桌", record["summary"])
-        # Provenance is appended by the system, not written by the model.
-        self.assertIn("## 数据来源", record["summary"])
+    def test_an_empty_warehouse_fails_loudly_rather_than_guessing(self) -> None:
+        with mock.patch.object(selection.llm, "get_client", return_value=None):
+            with self.assertRaises(selection.SelectionGenerationError) as ctx:
+                selection.generate_report(self.config)
+        self.assertIn("DEEPSEEK_API_KEY", str(ctx.exception))
+
+    def test_a_data_gap_board_is_an_error_not_an_empty_dashboard(self) -> None:
+        market_store.save_dashboard(
+            user_id=None, marketplace="US", scope="overview", node_id_path=None,
+            period="202608", language="zh", status="data_gap",
+            dashboard={"gaps": ["本期没有任何类目快照"]}, summary="没有可用数据。",
+            evidence=[], vendor_tools=[], data_as_of=None, completeness=0.0)
+        with self.assertRaises(selection.SelectionGenerationError) as ctx:
+            selection.generate_report(self.config)
+        self.assertIn("没有可用数据", str(ctx.exception))
+
+    def test_the_projection_carries_the_boards_own_numbers(self) -> None:
+        self._store_board()
+        record = selection.generate_report(self.config)
+        dashboard = record["dashboard"]
+        row = dashboard["recommendations"][0]
+        self.assertEqual(row["title"], "Buffets & Sideboards")
+        self.assertEqual(row["score"], 71)
+        self.assertEqual(row["reason"], "集中度低、退货优于同级")
+        # 18% of revenue in the top five brands is a low-concentration market.
+        self.assertEqual(row["competition"], "low")
+        self.assertEqual(dashboard["market"][0]["brand_concentration"], "18.0%")
+        self.assertEqual(dashboard["kpis"], self.BOARD["headline"]["kpis"])
+        self.assertEqual(dashboard["notes"], ["评论痛点未采集"])
+
+    def test_the_monitoring_summary_reaches_the_legacy_summary(self) -> None:
+        self._store_board()
+        record = selection.generate_report(self.config)
+        self.assertIn("餐边柜是本期最值得做的方向", record["summary"])
+        self.assertIn("退货率只有同级的 0.54 倍", record["summary"])
+
+    def test_provenance_is_still_appended(self) -> None:
+        self._store_board()
+        record = selection.generate_report(self.config)
         self.assertIn("卖家精灵", record["summary"])
-        self.assertTrue(record["vendor_tools"])
-        # The scheduler must see the run so it does not immediately re-fire.
-        self.assertIsNotNone(db.get_selection_config(self.user["id"])["last_run_at"])
+        self.assertEqual(record["vendor_tools"], ["market_research", "product_research"])
 
-    def test_opportunity_score_uses_fixed_weights_and_ignores_model_score(self) -> None:
-        dashboard = {
-            "recommendations": [{
-                "title": "Sofa", "category": "sofas", "score": 1,
-                "price": "$600", "monthly_sales": "5,000",
-                "monthly_revenue": "$500,000", "reviews": "100",
-                "rating": "4.2", "competition": "low", "reason": "strong",
-            }],
-            "trends": [{"category": "sofas", "change_pct": 20}],
-        }
-        selection.calculate_opportunity_scores(dashboard)
-        rec = dashboard["recommendations"][0]
-        self.assertEqual(rec["score"], 100)
-        self.assertEqual(rec["score_breakdown"], {
-            "demand": 30.0,
-            "growth": 20.0,
-            "aov_fit": 20.0,
-            "competition": 20.0,
-            "quality_fit": 10.0,
-        })
+    def test_the_run_stamps_the_config_so_it_is_not_due_again_today(self) -> None:
+        self._store_board()
+        selection.generate_report(self.config)
+        config = db.get_selection_config(self.user["id"])
+        self.assertIsNotNone(config["last_run_at"])
+        now = datetime.fromtimestamp(config["last_run_at"], tz=timezone.utc)
+        self.assertFalse(selection.is_due(config, now))
 
-    def test_missing_evidence_contributes_zero_instead_of_a_guessed_score(self) -> None:
-        dashboard = {"recommendations": [{
-            "title": "Unknown", "category": "storage", "score": 99, "reason": "gap",
-        }]}
-        selection.calculate_opportunity_scores(dashboard)
-        self.assertEqual(dashboard["recommendations"][0]["score"], 0)
 
-    def test_a_model_that_skips_the_tool_call_is_an_error_not_an_empty_report(self) -> None:
-        client = mock.Mock()
-        client.messages.create.return_value = mock.Mock(content=[mock.Mock(type="text")])
-        with mock.patch.object(selection.sellersprite, "is_configured", return_value=True), \
-                mock.patch.object(selection.sellersprite, "call_tool", return_value=_NODE_REPLY):
-            with self.assertRaises(selection.SelectionGenerationError):
-                selection.generate_report(self.config, client)
+class PurgeTests(unittest.TestCase):
+    """Turning the task off has to take the user's market artifacts with it."""
+
+    def setUp(self) -> None:
+        db.reset_for_tests()
+        self.user = db.create_user(
+            account="purge@example.com", password_hash="hash", username="P",
+            real_name="Test User", id_card="11010519491231002X")
+
+    def tearDown(self) -> None:
+        db.reset_for_tests()
+
+    def test_purge_removes_the_users_dashboards_and_prds(self) -> None:
+        db.upsert_selection_config(self.user["id"], scope="all", refresh_time="09:00")
+        market_store.save_dashboard(
+            user_id=self.user["id"], marketplace="US", scope="category",
+            node_id_path=BUFFETS, period="202608", language="zh", status="ok",
+            dashboard={"board": []}, summary="", evidence=[], vendor_tools=[],
+            data_as_of=None, completeness=1.0)
+        market_store.add_prd(
+            user_id=self.user["id"], marketplace="US", node_id_path=BUFFETS,
+            period="202608", language="zh", opportunity_id="op", title="T",
+            prd={}, assumptions=[],
+            evidence_ids=[], notes=[])
+
+        selection.purge_user_data(self.user["id"])
+
+        self.assertIsNone(db.get_selection_config(self.user["id"]))
+        with db.connect() as conn:
+            left = conn.execute(
+                "SELECT COUNT(*) FROM market_dashboards WHERE user_id = ?",
+                (self.user["id"],)).fetchone()[0]
+        self.assertEqual(left, 0)
+        self.assertEqual(market_store.list_prds(self.user["id"]), [])
+
+    def test_the_global_warehouse_survives_a_purge(self) -> None:
+        """It is nobody's personal data and re-collecting it costs real credits."""
+        db.upsert_selection_config(self.user["id"], scope="all", refresh_time="09:00")
+        market_store.upsert_node_snapshot("US", BUFFETS, "202608",
+                                          {"total_revenue": 1.0})
+        market_store.save_dashboard(
+            user_id=None, marketplace="US", scope="overview", node_id_path=None,
+            period="202608", language="zh", status="ok", dashboard={"board": []},
+            summary="", evidence=[], vendor_tools=[], data_as_of=None, completeness=1.0)
+
+        selection.purge_user_data(self.user["id"])
+
+        self.assertIsNotNone(market_store.get_node_snapshot("US", BUFFETS, "202608"))
+        self.assertIsNotNone(market_store.latest_dashboard(
+            marketplace="US", scope="overview", language="zh"))
 
 
 class SelectionRouteTests(unittest.TestCase):
@@ -493,100 +458,3 @@ class SelectionRouteTests(unittest.TestCase):
         ):
             response = getattr(self.client, method)(path, headers=self.headers)
             self.assertEqual(response.status_code, 404, f"{method} {path}")
-
-
-class ModelOutageTests(unittest.TestCase):
-    """A 503 from the model must not discard the metered vendor sweep."""
-
-    def setUp(self) -> None:
-        db.reset_for_tests()
-        selection.clear_sweep_cache()
-        self.user = db.create_user(
-            account="outage@example.com", password_hash="hash", username="O",
-            real_name="Test User", id_card="11010519491231002X",
-        )
-        self.config = db.upsert_selection_config(
-            self.user["id"], scope="all", refresh_time="09:00", timezone="UTC", language="zh"
-        )
-
-    def tearDown(self) -> None:
-        selection.clear_sweep_cache()
-        db.reset_for_tests()
-
-    @staticmethod
-    def _overloaded(status=503):
-        exc = RuntimeError("503 Server Overloaded")
-        exc.status_code = status
-        return exc
-
-    def test_transient_status_is_retried(self) -> None:
-        client = mock.Mock()
-        client.messages.create.side_effect = [
-            self._overloaded(), self._overloaded(),
-            _tool_use_response(selection._TOOL_NAME,
-                               {"kpis": [], "recommendations": [], "summary": "ok"}),
-        ]
-        with mock.patch.object(selection.sellersprite, "is_configured", return_value=True),                 mock.patch.object(selection.sellersprite, "call_tool", return_value=_NODE_REPLY),                 mock.patch.object(selection.time, "sleep"):
-            record = selection.generate_report(self.config, client)
-        self.assertEqual(client.messages.create.call_count, 3)
-        self.assertIn("ok", record["summary"])
-
-    def test_a_non_transient_error_is_not_retried(self) -> None:
-        exc = RuntimeError("401 bad key")
-        exc.status_code = 401
-        client = mock.Mock()
-        client.messages.create.side_effect = exc
-        with mock.patch.object(selection.sellersprite, "is_configured", return_value=True),                 mock.patch.object(selection.sellersprite, "call_tool", return_value=_NODE_REPLY):
-            with self.assertRaises(selection.SelectionGenerationError):
-                selection.generate_report(self.config, client)
-        self.assertEqual(client.messages.create.call_count, 1)
-
-    def test_persistent_overload_names_the_model_not_the_vendor(self) -> None:
-        client = mock.Mock()
-        client.messages.create.side_effect = self._overloaded()
-        with mock.patch.object(selection.sellersprite, "is_configured", return_value=True),                 mock.patch.object(selection.sellersprite, "call_tool", return_value=_NODE_REPLY),                 mock.patch.object(selection.time, "sleep"):
-            with self.assertRaises(selection.SelectionGenerationError) as ctx:
-                selection.generate_report(self.config, client)
-        message = str(ctx.exception)
-        # "503" alone reads as if the data vendor were down.
-        self.assertIn("DeepSeek", message)
-        self.assertIn("缓存", message)
-
-    def test_a_retry_after_an_outage_reuses_the_sweep_instead_of_paying_again(self) -> None:
-        client = mock.Mock()
-        client.messages.create.side_effect = self._overloaded()
-        with mock.patch.object(selection.sellersprite, "is_configured", return_value=True),                 mock.patch.object(
-                    selection.sellersprite, "call_tool", return_value=_NODE_REPLY
-                ) as call,                 mock.patch.object(selection.time, "sleep"):
-            with self.assertRaises(selection.SelectionGenerationError):
-                selection.generate_report(self.config, client)
-            first_calls = call.call_count
-            self.assertGreater(first_calls, 0)
-
-            # Second attempt: the model recovers, and the vendor is not touched again.
-            client.messages.create.side_effect = None
-            client.messages.create.return_value = _tool_use_response(
-                selection._TOOL_NAME, {"kpis": [], "recommendations": [], "summary": "ok"}
-            )
-            record = selection.generate_report(self.config, client)
-
-        self.assertEqual(call.call_count, first_calls, "vendor was charged twice")
-        self.assertIn("ok", record["summary"])
-
-    def test_an_expired_cache_re_runs_the_sweep(self) -> None:
-        client = mock.Mock()
-        client.messages.create.return_value = _tool_use_response(
-            selection._TOOL_NAME, {"kpis": [], "recommendations": [], "summary": "ok"}
-        )
-        with mock.patch.object(selection.sellersprite, "is_configured", return_value=True),                 mock.patch.object(
-                    selection.sellersprite, "call_tool", return_value=_NODE_REPLY
-                ) as call:
-            selection.generate_report(self.config, client)
-            first = call.call_count
-            with mock.patch.object(selection, "SWEEP_CACHE_TTL_SECONDS", -1):
-                selection.generate_report(self.config, client)
-        self.assertGreater(call.call_count, first)
-
-
-if __name__ == "__main__":
-    unittest.main()
