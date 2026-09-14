@@ -30,7 +30,7 @@ from marketing_agent.domain import NEVER_FABRICATE
 from marketing_agent.source_policy import data_gap_message
 
 from . import evidence as ev
-from . import gateway, render, scoring, store, taxonomy
+from . import gateway, render, store, taxonomy
 
 logger = logging.getLogger(__name__)
 

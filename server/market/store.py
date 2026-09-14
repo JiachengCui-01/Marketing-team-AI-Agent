@@ -1328,8 +1328,13 @@ def prune_market_history(*, retained: int = RETAINED_SNAPSHOTS) -> dict[str, int
     deleted: dict[str, int] = {}
     now = _now()
     with db.connect() as conn:
+        # Monthly grain only. A pulse row sits in the month still in progress,
+        # which is not a month the vendor has closed; counting it as one shifts
+        # the cutoff forward and quietly retains 23 months instead of 24 — the
+        # exact silent shortening this function exists to prevent.
         periods = [r["period"] for r in conn.execute(
-            "SELECT DISTINCT period FROM market_node_snapshots ORDER BY period DESC")]
+            "SELECT DISTINCT period FROM market_node_snapshots WHERE grain = ? "
+            "ORDER BY period DESC", (MONTH,))]
         if len(periods) > retained:
             cutoff = periods[retained - 1]
             for table, column in _PERIOD_TABLES:

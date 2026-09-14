@@ -67,6 +67,10 @@ class JobSpec:
     handler: Callable[..., JobResult]
     tier: int | None = None     # None = every tracked node; 1 = flagships only
     scope: str = "node"         # node | department
+    # True for the jobs that deliberately read the month still in progress. Every
+    # other job is keyed to a month the vendor has closed and must be parked until
+    # that month ends; these must not be, or the open month has no view at all.
+    targets_open_month: bool = False
 
 
 def _request(**kwargs) -> dict:
@@ -489,7 +493,8 @@ def _offamazon_trend(*, marketplace: str, period: str, subject_id: str,
 CATALOG: tuple[JobSpec, ...] = (
     # The pulse runs first: it is one cheap call and it is the only thing on the
     # board that can describe today rather than last month.
-    JobSpec("category_pulse", "node", 15, 1, "week", _category_pulse),
+    JobSpec("category_pulse", "node", 15, 1, "week", _category_pulse,
+            targets_open_month=True),
     JobSpec("department_roll", "department", 20, 1, "month", _department_roll,
             scope="department"),
     JobSpec("category_structure", "node", 30, 2, "month", _category_structure),
@@ -515,10 +520,8 @@ CATALOG: tuple[JobSpec, ...] = (
 
 BY_KIND: dict[str, JobSpec] = {spec.kind: spec for spec in CATALOG}
 
-# Jobs that deliberately target the *current* month. Everything else is keyed to a
-# closed month and must be parked until that month ends; these must not be.
 PULSE_KINDS: tuple[str, ...] = tuple(
-    spec.kind for spec in CATALOG if spec.cadence == "week" and spec.kind == "category_pulse")
+    spec.kind for spec in CATALOG if spec.targets_open_month)
 
 # The steps a node's month is considered to consist of, for ``completeness``.
 NODE_PACK = ("category_structure", "category_demand", "category_price_bands",

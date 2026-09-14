@@ -386,6 +386,35 @@ class MarketStoreTests(unittest.TestCase):
         self.assertEqual(len(kept), 14)  # fewer than 24 exist, so nothing is dropped
         self.assertIn("202401", kept)
 
+    def test_a_live_pulse_does_not_shorten_the_retained_window(self) -> None:
+        """A pulse sits in the month still in progress, which is not a closed
+        month; counting it as one retains 23 months while claiming 24."""
+        periods = [f"2024{m:02d}" for m in range(1, 13)] +                   [f"2025{m:02d}" for m in range(1, 13)]
+        for period in periods:
+            store.upsert_node_snapshot("US", self.NODE, period, {"avg_price": 1.0})
+        store.upsert_node_snapshot("US", self.NODE, "202601", {"avg_price": 2.0},
+                                   grain=store.PULSE)
+        store.prune_market_history()
+        with db.connect() as conn:
+            kept = [r["period"] for r in conn.execute(
+                "SELECT DISTINCT period FROM market_node_snapshots "
+                "WHERE grain = 'month' ORDER BY period")]
+        self.assertEqual(len(kept), 24)
+        self.assertIn("202401", kept)
+        self.assertIsNotNone(
+            store.get_node_snapshot("US", self.NODE, "202601", grain=store.PULSE))
+
+    def test_a_pulse_from_a_dropped_month_goes_with_it(self) -> None:
+        """Last year's live reading is not worth keeping once its month is gone."""
+        periods = [f"2024{m:02d}" for m in range(1, 13)] +                   [f"2025{m:02d}" for m in range(1, 13)] + ["202601", "202602"]
+        for period in periods:
+            store.upsert_node_snapshot("US", self.NODE, period, {"avg_price": 1.0})
+        store.upsert_node_snapshot("US", self.NODE, "202401", {"avg_price": 2.0},
+                                   grain=store.PULSE)
+        store.prune_market_history()
+        self.assertIsNone(
+            store.get_node_snapshot("US", self.NODE, "202401", grain=store.PULSE))
+
     def test_pruning_is_idempotent_and_cheap_when_there_is_nothing_to_do(self) -> None:
         store.upsert_node_snapshot("US", self.NODE, "202608", {"avg_price": 1.0})
         self.assertEqual(store.prune_market_history(), {})

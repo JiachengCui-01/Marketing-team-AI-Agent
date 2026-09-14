@@ -239,8 +239,8 @@ server/                       FastAPI 后端
     jobs.py, sweep.py         任务目录与每日扫描（到期队列 + 每日封顶）
     deepdive.py               按需品类深研（独立钱包）
     scoring.py                确定性机会分（模型的 tool schema 里没有分数字段）
-    monitor.py                风险与机会信号（21 条确定性规则，模型只做归纳）
-    panels.py                 两个仪表盘的确定性内容（先于模型算完）
+    monitor.py                风险与机会信号（21 条月度 + 9 条当月预警，模型只做归纳）
+    panels.py                 两个仪表盘的确定性内容（月度层 + 当月实时层）
     evidence.py, render.py    证据与引用校验 / 两个仪表盘的渲染
     prd.py, lookup.py         产品定义书 / 对话用的免费仓库读取工具
   memory*.py, clarify.py, im_hub.py, uploads.py, image_*.py
@@ -248,6 +248,7 @@ web/                          Next.js 14 前端
   app/page.tsx                单页工作台外壳 + SSE 处理
   components/*.tsx            各功能面板 + chat/preview/auth UI
     automation-panel.tsx      自动化入口（行业新闻 / 全盘发现 / 品类深度 三个标签）
+                              后两者各分「上月完整分析」与「本月实时动态」
     market/                   全盘看板、品类深度、风险机会监控、证据抽屉、PRD、手写 SVG 图表
   lib/*                       api、sse、i18n、stores(sessions/im)、oa-drafts
 tests/                        pytest 套件（见 §9）
