@@ -1553,6 +1553,27 @@ select.field:focus {
   .bi-swatch-alt {
     background: rgb(var(--feature-selection) / 0.32);
   }
+  .bi-swatch-empty {
+    background: rgb(var(--border));
+  }
+  .bi-swatch-risk {
+    background: rgb(var(--danger) / 0.75);
+  }
+  .bi-swatch-down {
+    background: rgb(var(--danger) / 0.16);
+    border: 1px solid rgb(var(--danger) / 0.8);
+  }
+  /* The band where revenue outruns listings — the one a price is set from. */
+  .bi-band-lead {
+    background: rgb(var(--feature-selection) / 0.62);
+    outline: 1px solid rgb(var(--feature-selection));
+    outline-offset: -1px;
+  }
+  .bi-spark-end {
+    fill: rgb(var(--feature-selection));
+    stroke: rgb(var(--bg-elevated));
+    stroke-width: 2;
+  }
   .bi-share-bar {
     @apply flex h-3 w-full overflow-hidden rounded-full;
     background: rgb(var(--bg-subtle));
@@ -1565,19 +1586,35 @@ select.field:focus {
     @apply h-full;
     background: rgb(var(--border));
   }
+  /* A 2px surface ring, so overlapping dots stay countable instead of merging
+     into one blob. */
   .bi-dot {
     fill: rgb(var(--feature-selection) / 0.55);
-    stroke: rgb(var(--feature-selection));
-    stroke-width: 1;
+    stroke: rgb(var(--bg-elevated));
+    stroke-width: 2;
   }
   .bi-dot-risk {
-    fill: rgb(var(--danger) / 0.45);
-    stroke: rgb(var(--danger));
+    fill: rgb(var(--danger) / 0.5);
+    stroke: rgb(var(--bg-elevated));
   }
   .bi-axis {
     stroke: rgb(var(--border));
     stroke-width: 1;
-    stroke-dasharray: 3 3;
+  }
+  /* A reference line a reader is meant to measure against, not a gridline. */
+  .bi-axis-solid {
+    stroke: rgb(var(--fg-subtle) / 0.55);
+    stroke-width: 1;
+  }
+  .bi-axis-tick {
+    fill: rgb(var(--fg-subtle));
+    font-size: 9px;
+    font-variant-numeric: tabular-nums;
+  }
+  .bi-quadrant-name {
+    fill: rgb(var(--fg-subtle) / 0.85);
+    font-size: 9px;
+    font-weight: 600;
   }
   .bi-quadrant-label {
     fill: rgb(var(--fg-subtle));
@@ -1656,23 +1693,27 @@ select.field:focus {
   /* Treemap: area carries the share, opacity carries it again for anyone who
      reads size poorly, and a declining tile is outlined rather than recoloured
      so colour is never the only channel. */
+  /* One flat fill: area already encodes the share, so tinting by share would
+     say it twice and spend the only free channel on nothing. */
   .bi-tree-tile {
-    fill: rgb(var(--feature-selection));
+    fill: rgb(var(--feature-selection) / 0.42);
     stroke: rgb(var(--bg));
-    stroke-width: 0.3;
+    stroke-width: 0.4;
   }
   .bi-tree-down {
-    stroke: rgb(var(--danger) / 0.7);
-    stroke-width: 0.5;
+    fill: rgb(var(--danger) / 0.16);
+    stroke: rgb(var(--danger) / 0.8);
+    stroke-width: 0.55;
   }
   .bi-tree-label {
     fill: rgb(var(--fg));
-    font-size: 3.1px;
+    font-size: 11px;
     font-weight: 600;
   }
   .bi-tree-sub {
     fill: rgb(var(--fg-muted));
-    font-size: 2.6px;
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
   }
   .bi-radar-shape {
     fill: rgb(var(--feature-selection) / 0.22);

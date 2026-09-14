@@ -185,7 +185,7 @@ export function MarketOverviewPanel({
 
             <div className="grid gap-4 lg:grid-cols-2 empty:hidden">
               <Section title={t.gmTreemap} hint={t.gmTreemapHint} data={dashboard?.treemap}>
-                <Treemap items={dashboard?.treemap ?? []} onPick={pick} />
+                <Treemap items={dashboard?.treemap ?? []} onPick={pick} fallingLabel={t.gmFalling} />
               </Section>
               <Section title={t.gmTrend}
                        data={[(dashboard?.trend ?? []).length > 1 ? dashboard?.trend : null,
@@ -194,7 +194,7 @@ export function MarketOverviewPanel({
                        data={(dashboard?.trend ?? []).length > 1 ? dashboard?.trend : null}>
                   <Sparkline points={(dashboard?.trend ?? []).map((p) => ({
                     period: p.period, value: p.value,
-                  }))} height={96} />
+                  }))} height={96} valueLabel={fmtMoney} />
                 </Block>
                 <div className="mt-3">
                   <Movers dashboard={dashboard} onDrill={onDrill} inline />
@@ -204,6 +204,8 @@ export function MarketOverviewPanel({
 
             <Section title={t.gmMap} data={(dashboard?.map ?? []).filter((p) => p.growth_pct !== null)}>
               <Quadrant points={dashboard?.map ?? []} xLabel={t.gmMapX} yLabel={t.gmMapY}
+                        quadrants={[t.gmQuadEnter, t.gmQuadCrowdedUp,
+                                    t.gmQuadCrowdedDown, t.gmQuadOpenDown]}
                         onPick={pick} />
             </Section>
 
@@ -229,7 +231,8 @@ export function MarketOverviewPanel({
             <Section title={t.gmPrice} data={dashboard?.price}>
               <BandHistogram bands={dashboard?.price ?? []}
                              listingLabel={t.gmPriceListings}
-                             revenueLabel={t.gmPriceRevenue} />
+                             revenueLabel={t.gmPriceRevenue}
+                             leadLabel={t.gmBandLead} />
             </Section>
 
             <Section title={t.gmNewProduct} data={dashboard?.newproduct}>

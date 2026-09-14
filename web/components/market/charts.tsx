@@ -17,6 +17,12 @@ export type Point = { period: string; value: number };
 
 const ACCENT = "rgb(var(--feature-selection))";
 
+/** Fit a label to a character budget, with an ellipsis rather than a hard cut. */
+function truncate(text: string, budget: number): string {
+  if (budget < 3) return "";
+  return text.length > budget ? `${text.slice(0, budget - 1)}…` : text;
+}
+
 function niceNumber(value: number | null | undefined, digits = 1): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
@@ -34,12 +40,25 @@ export function fmtPct(value: number | null | undefined, digits = 1): string {
   return `${value.toFixed(digits)}%`;
 }
 
-/** A line, not bars. These series move inside a narrow band and bars anchored at
- * zero flatten that to invisibility, while bars on a truncated axis overstate it
- * because a bar's area reads as magnitude. A line carries no area claim. */
-export function Sparkline({ points, height = 72 }: { points: Point[]; height?: number }) {
+/** A line with a readable scale, not just a shape.
+ *
+ * The end labels said which period and what value; the axis said nothing, so
+ * the height of the line meant nothing. Now the top and bottom of the plotted
+ * band are labelled and the last point is called out, which is the one a reader
+ * actually wants.
+ */
+export function Sparkline({
+  points,
+  height = 72,
+  valueLabel,
+}: {
+  points: Point[];
+  height?: number;
+  valueLabel?: (value: number) => string;
+}) {
   const values = points.map((p) => Number(p.value)).filter((v) => Number.isFinite(v));
   if (values.length < 2) return null;
+  const fmt = valueLabel ?? ((v: number) => niceNumber(v));
   const width = 260;
   const pad = 6;
   const min = Math.min(...values);
@@ -56,39 +75,57 @@ export function Sparkline({ points, height = 72 }: { points: Point[]; height?: n
   const line = coords
     .map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`)
     .join(" ");
-  const area = `${line} L${coords[coords.length - 1][0].toFixed(1)},${height - pad} L${coords[0][0].toFixed(1)},${height - pad} Z`;
+  const area = `${line} L${coords[coords.length - 1][0].toFixed(1)},${height - pad} `
+    + `L${coords[0][0].toFixed(1)},${height - pad} Z`;
+  const last = coords[coords.length - 1];
 
   return (
     <div>
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        className="w-full"
-        style={{ height }}
-        preserveAspectRatio="none"
-        role="img"
-        aria-label={points.map((p) => `${p.period}: ${p.value}`).join(", ")}
-      >
-        <line className="bi-grid-line" x1={pad} x2={width - pad} y1={height - pad} y2={height - pad} />
-        <path className="bi-spark-area" d={area} />
-        <path className="bi-spark-line" d={line} vectorEffect="non-scaling-stroke" />
-        {coords.map(([x, y], i) => (
-          <circle key={i} cx={x} cy={y} r={i === coords.length - 1 ? 3 : 2} fill={ACCENT}
-                  opacity={i === coords.length - 1 ? 1 : 0.45} />
-        ))}
-      </svg>
+      <div className="flex items-start gap-1.5">
+        {/* The scale, so the line's height is a quantity rather than a mood. */}
+        <div className="flex shrink-0 flex-col justify-between text-[9px] tabular-nums
+                        text-fg-subtle" style={{ height }}>
+          <span>{fmt(max)}</span>
+          <span>{fmt(min)}</span>
+        </div>
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="w-full"
+          style={{ height }}
+          preserveAspectRatio="none"
+          role="img"
+          aria-label={points.map((p) => `${p.period}: ${fmt(Number(p.value))}`).join(", ")}
+        >
+          <line className="bi-grid-line" x1={pad} x2={width - pad}
+                y1={height - pad} y2={height - pad} />
+          <path className="bi-spark-area" d={area} />
+          <path className="bi-spark-line" d={line} vectorEffect="non-scaling-stroke" />
+          {/* One marker, at the end — the point a reader is looking for. */}
+          <circle cx={last[0]} cy={last[1]} r={4} className="bi-spark-end" />
+        </svg>
+      </div>
       <div className="mt-1 flex items-center justify-between text-[9px] text-fg-subtle">
-        <span className="truncate">{points[0]?.period} · {niceNumber(points[0]?.value)}</span>
-        <span className="truncate">
-          {points[points.length - 1]?.period} · {niceNumber(points[points.length - 1]?.value)}
+        <span className="truncate">{points[0]?.period}</span>
+        <span className="truncate text-fg">
+          {points[points.length - 1]?.period} · {fmt(Number(points[points.length - 1]?.value))}
         </span>
       </div>
     </div>
   );
 }
 
-/** A horizontal score bar plus the weighted breakdown, rendered from the weight
- * table the API ships. Nothing here hardcodes "/30", so changing a weight on the
- * server cannot desync the chart. */
+/** The score, and the two or three things that actually made it.
+ *
+ * This was a strip of anonymous segments whose only labels were `title`
+ * tooltips — so the number the whole board ranks on could not be explained
+ * without hovering, one factor at a time. A tooltip may enhance a value; it may
+ * never be the only way to read one.
+ *
+ * What a reader needs from a score is not all seven factors: it is *why this
+ * one is higher than that one*. So the bar names its biggest contributors and
+ * its biggest shortfall by name, with the points each is worth, and leaves the
+ * full breakdown to the table view.
+ */
 export function ScoreBar({
   score,
   breakdown,
@@ -96,6 +133,7 @@ export function ScoreBar({
   riskKey = "return_risk",
   labels = {},
   compact = false,
+  topN = 2,
 }: {
   score: number;
   breakdown: Record<string, number>;
@@ -103,79 +141,140 @@ export function ScoreBar({
   riskKey?: string;
   labels?: Record<string, string>;
   compact?: boolean;
+  topN?: number;
 }) {
-  const total = Object.values(weights).reduce((a, b) => a + b, 0) || 100;
   const risk = Math.abs(breakdown[riskKey] ?? 0);
+  const factors = Object.entries(weights).map(([key, weight]) => ({
+    key,
+    label: labels[key] ?? key,
+    earned: breakdown[key] ?? 0,
+    weight,
+    // Points forgone is what separates two scores; a factor worth 20 that
+    // earned 4 costs more than one worth 8 that earned 0.
+    lost: weight - (breakdown[key] ?? 0),
+  }));
+  const best = [...factors].sort((a, b) => b.earned - a.earned).slice(0, topN)
+    .filter((f) => f.earned > 0);
+  const worst = [...factors].sort((a, b) => b.lost - a.lost)[0];
+
   return (
     <div>
-      <div className="bi-score-track" role="img" aria-label={`score ${score} of 100`}>
+      <div className="bi-score-track" role="img"
+           aria-label={`score ${score} of 100; ${factors
+             .map((f) => `${f.label} ${f.earned.toFixed(1)} of ${f.weight}`)
+             .join(", ")}${risk ? `; risk -${risk.toFixed(1)}` : ""}`}>
         <div className="bi-score-fill" style={{ width: `${Math.max(0, Math.min(100, score))}%` }} />
       </div>
       {compact ? null : (
-        <div className="bi-seg-strip mt-1.5">
-          {Object.entries(weights).map(([key, weight]) => {
-            const earned = breakdown[key] ?? 0;
-            const share = (weight / total) * 100;
-            return (
-              <div key={key} className="bi-seg" style={{ width: `${share}%` }}
-                   title={`${labels[key] ?? key}: ${earned.toFixed(1)} / ${weight}`}>
-                <div className="bi-seg-fill"
-                     style={{ height: `${Math.max(0, Math.min(100, (earned / weight) * 100))}%` }} />
-              </div>
-            );
-          })}
-          {risk > 0 ? (
-            <div className="bi-seg bi-seg-risk" style={{ width: "12%" }}
-                 title={`${labels[riskKey] ?? riskKey}: -${risk.toFixed(1)}`}>
-              <div className="bi-seg-fill-risk"
-                   style={{ height: `${Math.min(100, (risk / 15) * 100)}%` }} />
-            </div>
+        <ul className="mt-1 space-y-0.5 text-[10px] leading-tight">
+          {best.map((factor) => (
+            <li key={factor.key} className="flex items-baseline gap-1 text-fg-muted">
+              <i className="bi-swatch shrink-0" />
+              <span className="truncate">{factor.label}</span>
+              <span className="ml-auto shrink-0 tabular-nums text-fg">
+                +{factor.earned.toFixed(0)}
+              </span>
+            </li>
+          ))}
+          {worst && worst.lost >= 3 ? (
+            <li className="flex items-baseline gap-1 text-fg-subtle">
+              <i className="bi-swatch bi-swatch-empty shrink-0" />
+              <span className="truncate">{worst.label}</span>
+              <span className="ml-auto shrink-0 tabular-nums">
+                {worst.earned.toFixed(0)}/{worst.weight}
+              </span>
+            </li>
           ) : null}
-        </div>
+          {risk > 0 ? (
+            <li className="flex items-baseline gap-1 text-danger">
+              <i className="bi-swatch bi-swatch-risk shrink-0" />
+              <span className="truncate">{labels[riskKey] ?? riskKey}</span>
+              <span className="ml-auto shrink-0 tabular-nums">−{risk.toFixed(0)}</span>
+            </li>
+          ) : null}
+        </ul>
       )}
     </div>
   );
 }
 
-/** Paired columns: how listings and revenue sit differently across price bands.
- * The gap between the two is the point — a band holding more revenue than
- * listings is where the market pays up. */
+/** Where the listings are against where the money is.
+ *
+ * The gap between the two bars is the whole point of this chart — a band
+ * holding more revenue than listings is the market saying it will pay up — so
+ * the gap is now stated rather than left to be eyeballed: bands where revenue
+ * leads are marked, and the leading band is called out underneath.
+ */
 export function BandHistogram({
   bands,
   listingLabel,
   revenueLabel,
+  leadLabel,
 }: {
   bands: { bucket_key: string; listing_share_pct?: number; revenue_share_pct?: number;
            units_ratio?: number | null }[];
   listingLabel: string;
   revenueLabel: string;
+  /** e.g. "这个价格带愿意付钱" — names what the marked gap means. */
+  leadLabel?: string;
 }) {
   const rows = bands.map((b) => ({
     key: b.bucket_key,
     listing: b.listing_share_pct ?? (b.units_ratio ?? 0) * 100,
     revenue: b.revenue_share_pct ?? 0,
   }));
+  if (!rows.length) return null;
   const max = Math.max(1, ...rows.flatMap((r) => [r.listing, r.revenue]));
+  const leader = rows.reduce((best, r) =>
+    r.revenue - r.listing > best.revenue - best.listing ? r : best, rows[0]);
+  const leads = leader.revenue - leader.listing;
+
   return (
-    <div role="img"
-         aria-label={rows.map((r) => `${r.key}: ${r.listing.toFixed(1)}% / ${r.revenue.toFixed(1)}%`).join(", ")}>
-      <div className="flex items-end gap-2 overflow-x-auto pb-1" style={{ height: 118 }}>
-        {rows.map((row) => (
-          <div key={row.key} className="flex min-w-[46px] flex-1 flex-col items-center justify-end gap-1">
-            <div className="flex h-[86px] w-full items-end justify-center gap-[3px]">
-              <div className="bi-band" style={{ height: `${(row.listing / max) * 100}%` }}
-                   title={`${listingLabel} ${row.listing.toFixed(1)}%`} />
-              <div className="bi-band-alt" style={{ height: `${(row.revenue / max) * 100}%` }}
-                   title={`${revenueLabel} ${row.revenue.toFixed(1)}%`} />
-            </div>
-            <span className="truncate text-[9px] text-fg-subtle">{row.key}</span>
-          </div>
-        ))}
-      </div>
-      <div className="mt-1 flex items-center gap-3 text-[10px] text-fg-subtle">
+    <div>
+      <div className="flex items-center gap-3 text-[10px] text-fg-subtle">
         <span className="flex items-center gap-1"><i className="bi-swatch" />{listingLabel}</span>
-        <span className="flex items-center gap-1"><i className="bi-swatch bi-swatch-alt" />{revenueLabel}</span>
+        <span className="flex items-center gap-1">
+          <i className="bi-swatch bi-swatch-alt" />{revenueLabel}
+        </span>
+        <span className="ml-auto tabular-nums">{max.toFixed(0)}%</span>
       </div>
+      <div role="img"
+           aria-label={rows
+             .map((r) => `${r.key}: ${listingLabel} ${r.listing.toFixed(1)}%, `
+               + `${revenueLabel} ${r.revenue.toFixed(1)}%`)
+             .join("; ")}>
+        <div className="flex items-end gap-2 overflow-x-auto pb-1" style={{ height: 124 }}>
+          {rows.map((row) => {
+            const ahead = row.revenue - row.listing >= 3;
+            return (
+              <div key={row.key}
+                   className="flex min-w-[52px] flex-1 flex-col items-center justify-end gap-1">
+                <span className={`text-[9px] tabular-nums ${ahead ? "text-fg" : "text-fg-subtle"}`}>
+                  {ahead ? `+${(row.revenue - row.listing).toFixed(0)}` : ""}
+                </span>
+                <div className="flex h-[80px] w-full items-end justify-center gap-[2px]">
+                  <div className="bi-band" style={{ height: `${(row.listing / max) * 100}%` }}
+                       title={`${listingLabel} ${row.listing.toFixed(1)}%`} />
+                  <div className={ahead ? "bi-band-alt bi-band-lead" : "bi-band-alt"}
+                       style={{ height: `${(row.revenue / max) * 100}%` }}
+                       title={`${revenueLabel} ${row.revenue.toFixed(1)}%`} />
+                </div>
+                <span className="w-full truncate text-center text-[9px] text-fg-subtle"
+                      title={row.key}>{row.key}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      {leadLabel && leads >= 3 ? (
+        <p className="mt-1 text-[10px] text-fg-muted">
+          <span className="font-medium text-fg">{leader.key}</span> · {leadLabel}
+          <span className="ml-1 tabular-nums">
+            ({revenueLabel} {leader.revenue.toFixed(0)}% / {listingLabel}{" "}
+            {leader.listing.toFixed(0)}%)
+          </span>
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -202,31 +301,52 @@ export function ShareBar({
         {rest > 0 ? <div className="bi-share-rest" style={{ width: `${rest}%` }} title={restLabel} /> : null}
       </div>
       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-fg-subtle">
-        {rows.slice(0, 5).map((row) => (
-          <span key={row.label}>{row.label} {row.share.toFixed(1)}%</span>
+        {rows.slice(0, 5).map((row, i) => (
+          <span key={row.label} className="flex items-center gap-1">
+            <i className="bi-swatch shrink-0" style={{ opacity: 1 - i * 0.11 }} />
+            {row.label} <span className="tabular-nums text-fg-muted">{row.share.toFixed(1)}%</span>
+          </span>
         ))}
+        {rest > 0 ? (
+          <span className="flex items-center gap-1">
+            <i className="bi-swatch bi-swatch-empty shrink-0" />
+            {restLabel} <span className="tabular-nums">{rest.toFixed(1)}%</span>
+          </span>
+        ) : null}
       </div>
     </div>
   );
 }
 
-/** Demand growth against ease of entry, sized by revenue and tinted by return
- * risk. Upper-right is where a freight-shipped furniture brand wants to be. */
+/** Demand growth against ease of entry — and which corner you are in.
+ *
+ * A scatter only pays for itself if the reader can name the region a dot sits
+ * in. So the two reference lines are labelled with their values, each quadrant
+ * is named for the decision it implies, and only the notable points carry a
+ * label: past four or five, labels collide and the chart becomes the thing you
+ * squint at instead of the thing you read.
+ */
 export function Quadrant({
   points,
   xLabel,
   yLabel,
+  quadrants,
   onPick,
+  labelTop = 4,
 }: {
   points: { node_key: string; label: string; competition: number; growth_pct: number | null;
             revenue_est: number | null; return_risk: number }[];
   xLabel: string;
   yLabel: string;
+  /** Clockwise from top-right: open+growing, crowded+growing, crowded+shrinking,
+   *  open+shrinking. Named so a dot's position is a recommendation, not a mood. */
+  quadrants: [string, string, string, string];
   onPick?: (nodeKey: string) => void;
+  labelTop?: number;
 }) {
   const width = 420;
-  const height = 250;
-  const pad = 26;
+  const height = 270;
+  const pad = 34;
   const usable = points.filter((p) => p.growth_pct !== null);
   if (!usable.length) return null;
   const growths = usable.map((p) => p.growth_pct as number);
@@ -238,28 +358,81 @@ export function Quadrant({
   const py = (growth: number) =>
     height - pad - ((growth - yMin) / (yMax - yMin || 1)) * (height - pad * 2);
 
+  // Label the ones worth naming, biggest first — but never two labels on top of
+  // each other. Categories routinely share a growth rate or a concentration, so
+  // their dots coincide; stacked labels then read as a smudge and the chart
+  // stops being readable exactly where it is densest. The unlabelled ones keep
+  // their tooltip, and every row is in the board below.
+  const named = new Set<string>();
+  const placed: [number, number][] = [];
+  for (const point of [...usable].sort((a, b) => (b.revenue_est ?? 0) - (a.revenue_est ?? 0))) {
+    if (named.size >= labelTop) break;
+    const cx = px(point.competition);
+    const cy = py(point.growth_pct as number);
+    if (placed.some(([ox, oy]) => Math.abs(ox - cx) < 70 && Math.abs(oy - cy) < 16)) continue;
+    named.add(point.node_key);
+    placed.push([cx, cy]);
+  }
+
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full" style={{ height: 250 }}
+    <svg viewBox={`0 0 ${width} ${height}`} className="w-full" style={{ height: 270 }}
          role="img"
-         aria-label={usable.map((p) => `${p.label}: ${xLabel} ${p.competition.toFixed(0)}, ${yLabel} ${(p.growth_pct as number).toFixed(1)}%`).join("; ")}>
-      <line className="bi-axis" x1={pad} x2={width - pad} y1={py(0)} y2={py(0)} />
-      <line className="bi-axis" x1={px(50)} x2={px(50)} y1={pad} y2={height - pad} />
-      <text className="bi-quadrant-label" x={width - pad} y={pad - 8} textAnchor="end">
-        {xLabel} ↑ / {yLabel} ↑
+         aria-label={usable.map((p) =>
+           `${p.label}: ${xLabel} ${p.competition.toFixed(0)}, ${yLabel} ${(p.growth_pct as number).toFixed(1)}%`).join("; ")}>
+      {/* Reference lines carry their own values, so a position can be read. */}
+      <line className="bi-axis-solid" x1={pad} x2={width - pad} y1={py(0)} y2={py(0)} />
+      <line className="bi-axis-solid" x1={px(50)} x2={px(50)} y1={pad} y2={height - pad} />
+      <text className="bi-axis-tick" x={pad - 4} y={py(0) + 3} textAnchor="end">0%</text>
+      <text className="bi-axis-tick" x={pad - 4} y={pad + 3} textAnchor="end">
+        {yMax.toFixed(0)}%
       </text>
-      {usable.map((point) => {
-        const r = 4 + Math.sqrt((point.revenue_est ?? 0) / maxRevenue) * 9;
+      <text className="bi-axis-tick" x={pad - 4} y={height - pad + 3} textAnchor="end">
+        {yMin.toFixed(0)}%
+      </text>
+      <text className="bi-axis-tick" x={px(50)} y={height - pad + 13} textAnchor="middle">50</text>
+      <text className="bi-axis-tick" x={width - pad} y={height - pad + 13} textAnchor="end">
+        100 · {xLabel}
+      </text>
+      <text className="bi-axis-tick" x={pad} y={height - pad + 13} textAnchor="start">0</text>
+      {/* Horizontal and clear of the ticks. A rotated axis title that lands on
+          top of "14%" costs more legibility than it buys. */}
+      <text className="bi-axis-tick" x={pad - 4} y={14} textAnchor="start">{yLabel} ↑</text>
+
+      <text className="bi-quadrant-name" x={width - pad - 2} y={pad + 9} textAnchor="end">
+        {quadrants[0]}
+      </text>
+      <text className="bi-quadrant-name" x={pad + 2} y={pad + 9} textAnchor="start">
+        {quadrants[1]}
+      </text>
+      <text className="bi-quadrant-name" x={pad + 2} y={height - pad - 4} textAnchor="start">
+        {quadrants[2]}
+      </text>
+      <text className="bi-quadrant-name" x={width - pad - 2} y={height - pad - 4} textAnchor="end">
+        {quadrants[3]}
+      </text>
+
+      {[...usable]
+        .sort((a, b) => (b.revenue_est ?? 0) - (a.revenue_est ?? 0))
+        .map((point) => {
+        const r = 5 + Math.sqrt((point.revenue_est ?? 0) / maxRevenue) * 9;
+        const cx = px(point.competition);
+        const cy = py(point.growth_pct as number);
         return (
           <g key={point.node_key} onClick={() => onPick?.(point.node_key)}
              style={{ cursor: onPick ? "pointer" : "default" }}>
+            {/* The hit target is bigger than the mark; an 8px dot is not a button. */}
+            <circle cx={cx} cy={cy} r={Math.max(14, r + 8)} fill="transparent" />
             <circle className={point.return_risk > 8 ? "bi-dot bi-dot-risk" : "bi-dot"}
-                    cx={px(point.competition)} cy={py(point.growth_pct as number)} r={r}>
-              <title>{`${point.label} · ${xLabel} ${point.competition.toFixed(0)} · ${yLabel} ${(point.growth_pct as number).toFixed(1)}%`}</title>
+                    cx={cx} cy={cy} r={r}>
+              <title>{`${point.label} · ${xLabel} ${point.competition.toFixed(0)} · `
+                + `${yLabel} ${(point.growth_pct as number).toFixed(1)}% · `
+                + fmtMoney(point.revenue_est)}</title>
             </circle>
-            <text className="bi-quadrant-label" x={px(point.competition)}
-                  y={py(point.growth_pct as number) - r - 3} textAnchor="middle">
-              {point.label.length > 14 ? `${point.label.slice(0, 13)}…` : point.label}
-            </text>
+            {named.has(point.node_key) ? (
+              <text className="bi-quadrant-label" x={cx} y={cy - r - 4} textAnchor="middle">
+                {point.label.length > 16 ? `${point.label.slice(0, 15)}…` : point.label}
+              </text>
+            ) : null}
           </g>
         );
       })}
@@ -386,64 +559,91 @@ function squarify(items: TreeItem[], width: number, height: number): Tile[] {
  * A treemap rather than a bar chart because the question it answers is "how is
  * the department's money divided", and division reads faster as area than as a
  * row of bars the eye has to add up.
+ *
+ * One flat fill, deliberately. Tinting each tile by its own share would encode
+ * the same number twice — area already says it — and spend the only free
+ * channel on nothing. The channel goes to *change* instead, which area cannot
+ * show: a declining category is outlined and carries its own ▼.
  */
 export function Treemap({
   items,
   onPick,
+  fallingLabel,
 }: {
   items: TreeItem[];
   onPick?: (nodeKey: string) => void;
+  fallingLabel: string;
 }) {
-  // clipPath ids are document-global, so two treemaps on one page would collide.
   const clipId = useId().replace(/:/g, "");
   const rows = items.filter((i) => i.value > 0).sort((a, b) => b.value - a.value);
   if (!rows.length) return null;
   const total = rows.reduce((sum, r) => sum + r.value, 0);
-  const width = 100;
-  const height = 62;
+  // Real pixel units and a uniform scale. A 100x62 viewBox stretched with
+  // `preserveAspectRatio="none"` scales x and y by different factors, which
+  // stretches the type — the labels came out twice as wide as they should be
+  // and ran off their tiles.
+  const width = 680;
+  const height = 210;
   const tiles = squarify(rows, width, height);
+  const falling = rows.filter((r) => (r.growth_pct ?? 0) < 0).length;
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full" style={{ height: 210 }}
-         preserveAspectRatio="none" role="img"
-         aria-label={rows
-           .map((r) => `${r.label} ${((r.value / total) * 100).toFixed(1)}%`)
-           .join(", ")}>
-      <defs>
-        {/* Clip each label to its own tile. Estimating how many characters fit
-            from the font size fails as soon as the viewBox is stretched or the
-            label is CJK; clipping cannot be wrong. */}
-        {tiles.map(({ item, x, y, w, h }, index) => (
-          <clipPath key={item.node_key} id={`tree-${clipId}-${index}`}>
-            <rect x={x + 0.5} y={y} width={Math.max(0, w - 1)} height={h} />
-          </clipPath>
-        ))}
-      </defs>
-      {tiles.map(({ item, x, y, w, h }, index) => {
-        const share = (item.value / total) * 100;
-        const growth = item.growth_pct ?? null;
-        return (
-          <g key={item.node_key} onClick={() => onPick?.(item.node_key)}
-             style={{ cursor: onPick ? "pointer" : "default" }}>
-            <rect
-              className={growth !== null && growth < 0 ? "bi-tree-tile bi-tree-down" : "bi-tree-tile"}
-              x={x + 0.25} y={y + 0.25}
-              width={Math.max(0, w - 0.5)} height={Math.max(0, h - 0.5)}
-              style={{ fillOpacity: 0.18 + Math.min(0.55, share / 45) }}>
-              <title>{`${item.label} · ${share.toFixed(1)}% · ${fmtMoney(item.value)}`}</title>
-            </rect>
-            {w > 11 && h > 8 ? (
-              <g clipPath={`url(#tree-${clipId}-${index})`}>
-                <text className="bi-tree-label" x={x + 1.2} y={y + 4.2}>{item.label}</text>
-                <text className="bi-tree-sub" x={x + 1.2} y={y + 7.8}>
-                  {share.toFixed(0)}%
-                </text>
-              </g>
-            ) : null}
-          </g>
-        );
-      })}
-    </svg>
+    <div>
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full" style={{ height }}
+           preserveAspectRatio="xMidYMid meet" role="img"
+           aria-label={rows
+             .map((r) => `${r.label} ${fmtMoney(r.value)}, ${((r.value / total) * 100).toFixed(1)}%`)
+             .join("; ")}>
+        <defs>
+          {tiles.map(({ item }, index) => {
+            const tile = tiles[index];
+            return (
+              <clipPath key={item.node_key} id={`tree-${clipId}-${index}`}>
+                <rect x={tile.x + 4} y={tile.y} width={Math.max(0, tile.w - 8)}
+                      height={tile.h} />
+              </clipPath>
+            );
+          })}
+        </defs>
+        {tiles.map(({ item, x, y, w, h }, index) => {
+          const share = (item.value / total) * 100;
+          const growth = item.growth_pct ?? null;
+          const down = growth !== null && growth < 0;
+          return (
+            <g key={item.node_key} onClick={() => onPick?.(item.node_key)}
+               style={{ cursor: onPick ? "pointer" : "default" }}>
+              <rect className={down ? "bi-tree-tile bi-tree-down" : "bi-tree-tile"}
+                    x={x + 1} y={y + 1} rx={3}
+                    width={Math.max(0, w - 2)} height={Math.max(0, h - 2)}>
+                <title>
+                  {`${item.label} · ${fmtMoney(item.value)} · ${share.toFixed(1)}%`
+                    + (growth !== null ? ` · ${growth >= 0 ? "+" : ""}${growth.toFixed(1)}%` : "")}
+                </title>
+              </rect>
+              {w > 74 && h > 34 ? (
+                <g clipPath={`url(#tree-${clipId}-${index})`}>
+                  {/* Measured, not clipped: a name cut mid-word reads as a bug.
+                      ~6.2px per character at 11px in this face. */}
+                  <text className="bi-tree-label" x={x + 6} y={y + 17}>
+                    {truncate(item.label, Math.floor((w - 12) / 6.2))}
+                  </text>
+                  <text className="bi-tree-sub" x={x + 6} y={y + 30}>
+                    {fmtMoney(item.value)} · {share.toFixed(0)}%
+                    {down ? ` ▼${Math.abs(growth as number).toFixed(0)}%` : ""}
+                  </text>
+                </g>
+              ) : null}
+            </g>
+          );
+        })}
+      </svg>
+      {falling ? (
+        <div className="mt-1 flex items-center gap-1 text-[10px] text-fg-subtle">
+          <i className="bi-swatch bi-swatch-down" />
+          {fallingLabel} · {falling}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -524,7 +724,7 @@ export function StackedRows({
           <button key={row.node_key ?? row.label} type="button"
                   onClick={() => row.node_key && onPick?.(row.node_key)}
                   className="flex w-full items-center gap-2 text-left">
-            <span className="w-28 shrink-0 truncate text-[11px]">{row.label}</span>
+            <span className="w-24 shrink-0 truncate text-[11px]">{row.label}</span>
             <span className="bi-share-bar flex-1" role="img"
                   aria-label={parts.map((p) => `${p.label} ${p.value.toFixed(1)}%`).join(", ")}>
               {parts.map((part, i) => (
@@ -535,6 +735,10 @@ export function StackedRows({
               {used < 100 ? (
                 <span className="bi-share-rest" style={{ width: `${100 - used}%` }} />
               ) : null}
+            </span>
+            {/* The leading share, stated. A stacked bar read by eye is a guess. */}
+            <span className="w-20 shrink-0 text-right text-[10px] tabular-nums text-fg-muted">
+              {parts[0]?.label} {parts[0]?.value.toFixed(0)}%
             </span>
           </button>
         );
@@ -585,6 +789,9 @@ export function Radar({
         return <line key={axis.key} className="bi-axis" x1={c} y1={c} x2={px} y2={py} />;
       })}
       <path className="bi-radar-parity" d={path(() => r * 0.5)} />
+      {/* Without this the rings are decoration: 50 is parity with the median,
+          and that is the only number on the chart that means anything. */}
+      <text className="bi-axis-tick" x={c + 2} y={c - r * 0.5 - 2}>{parityLabel}</text>
       <path className="bi-radar-shape" vectorEffect="non-scaling-stroke"
             d={path((axis) => (Math.max(0, Math.min(100, axis.score)) / 100) * r)} />
       {axes.map((axis, i) => {

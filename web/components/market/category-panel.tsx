@@ -266,7 +266,8 @@ export function MarketCategoryPanel({
                 <Block label={t.cdPriceBands} data={dashboard?.structure?.price_bands}>
                   <BandHistogram bands={dashboard?.structure?.price_bands ?? []}
                                  listingLabel={t.gmPriceListings}
-                                 revenueLabel={t.gmPriceRevenue} />
+                                 revenueLabel={t.gmPriceRevenue}
+                                 leadLabel={t.gmBandLead} />
                 </Block>
                 <Block label={t.cdBrands} data={dashboard?.structure?.brands}>
                   <ShareBar
@@ -281,7 +282,7 @@ export function MarketCategoryPanel({
                          ? dashboard?.structure?.trend : null}>
                   <Sparkline points={(dashboard?.structure?.trend ?? []).map((p) => ({
                     period: p.period, value: p.value,
-                  }))} />
+                  }))} valueLabel={fmtMoney} />
                 </Block>
               </Section>
             </div>
