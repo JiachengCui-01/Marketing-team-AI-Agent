@@ -385,7 +385,17 @@ function BoardRow({
             <p className="mt-0.5 text-[11px] text-fg-muted">{verdict.rationale}</p>
           ) : null}
           <div className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px] text-fg-muted sm:grid-cols-4">
-            <span>{fmtMoney(row.revenue_est)}*</span>
+            <span title={row.product_pool
+              ? `${t.gmCoverage} ${row.covered_asins}/${row.product_pool}`
+              : undefined}>
+              {fmtMoney(row.covered_revenue ?? row.revenue_est)}*
+              {row.covered_asins ? (
+                <span className="ml-1 text-fg-subtle">
+                  ({row.covered_asins}
+                  {row.product_pool ? `/${row.product_pool.toLocaleString()}` : ""})
+                </span>
+              ) : null}
+            </span>
             <span>{fmtPct(row.growth_pct)}</span>
             <span>{fmtMoney(row.median_price)}</span>
             <span>{fmtPct(row.top5_brand_share_pct)}</span>

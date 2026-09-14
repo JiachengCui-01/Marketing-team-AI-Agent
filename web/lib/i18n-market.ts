@@ -154,6 +154,7 @@ export const marketMessages = {
     prdCompetitorRef: "竞品参考",
     prdEmpty: "还没有生成产品定义书。",
     prdClose: "关闭",
+    gmCoverage: "覆盖 ASIN",
 
     splitMonthly: "上月完整分析",
     splitCurrent: "本月实时动态",
@@ -383,6 +384,7 @@ export const marketMessages = {
     prdCompetitorRef: "Competitor reference",
     prdEmpty: "No product definition generated yet.",
     prdClose: "Close",
+    gmCoverage: "ASINs covered",
 
     splitMonthly: "Last closed month",
     splitCurrent: "This month, live",

@@ -17,6 +17,7 @@ pack lands. ``product_pack`` enqueues them for the tier-1 nodes it just filled.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Callable
 
@@ -36,16 +37,36 @@ MAX_ATTEMPTS = 3
 # How many ASINs per tier-1 node get the expensive per-ASIN packs.
 FLAGSHIP_ASINS = 2
 PRODUCT_PAGE_SIZE = 50
+# How many pages of the ranked ASIN list the roll-up collects per node.
+#
+# The vendor's category totals cover only its ~100 head listings, so the board's
+# "summary" was really a head-listing figure wearing a market-wide label. Summing
+# the ASINs we actually hold is the wider and statable alternative, and each page
+# is one call that widens it by fifty. Revenue is steeply skewed, so the first
+# pages carry most of the money — but how much is data, not an assumption, and
+# the panel reports the coverage it achieved rather than claiming completeness.
+PRODUCT_PAGES = int(os.environ.get("MARKETING_AGENT_MARKET_PRODUCT_PAGES", "3"))
 KEYWORD_SEED_BATCH = 10
 
-# The rotating slot: one extra distribution per tier-1 node per month, cycled so the
-# full picture is a quarter deep instead of one month wide.
-_ROTATION = (
-    ("market_seller_type_concentration", "seller_type", "concentration"),
-    ("market_ratings_count_distribution", "ratings_count", "distribution"),
-    ("market_ebc_distribution", "ebc", "distribution"),
-    ("market_seller_country_distribution", "seller_country", "distribution"),
-    ("market_rating_distribution", "rating", "distribution"),
+# Every structural distribution and concentration the vendor offers, for every
+# tracked node, every month.
+#
+# This used to be a rotating slot — one of the five per flagship per month — on
+# the reasoning that buying all of them would double the structure budget. That
+# was the right trade at 45 calls a day and it is the wrong one now: a rotation
+# makes the deep dive's structure section a different shape each month, so the
+# one thing it cannot show is a change. At ~11 calls a day steady state the whole
+# set is affordable, and a comparable month beats a cheaper one.
+_STRUCTURE_DISTRIBUTIONS = (
+    ("market_rating_distribution", "rating"),
+    ("market_ratings_count_distribution", "ratings_count"),
+    ("market_ebc_distribution", "ebc"),
+    ("market_seller_country_distribution", "seller_country"),
+)
+_STRUCTURE_CONCENTRATIONS = (
+    ("market_seller_concentration", "seller"),
+    ("market_seller_type_concentration", "seller_type"),
+    ("market_product_concentration", "product"),
 )
 
 
@@ -272,47 +293,57 @@ def _concentration_job(tool: str, kind: str, *, top_n: int | None = 15):
     return handler
 
 
-def _rotating_slot(*, marketplace: str, period: str, subject_id: str,
-                   bucket: str) -> JobResult:
-    """One extra distribution per flagship per month, cycled through the set.
-
-    Buying all five every month would double the structure budget for signals that
-    move slowly; cycling makes the picture a quarter deep instead of a month wide.
-    """
-    try:
-        offset = int(period) % len(_ROTATION)
-    except ValueError:
-        offset = 0
-    tool, kind, family = _ROTATION[offset]
-    handler = (_distribution_job if family == "distribution" else _concentration_job)(tool, kind)
-    result = handler(marketplace=marketplace, period=period, subject_id=subject_id,
-                     bucket=bucket)
-    return JobResult(status=result.status, calls=result.calls,
-                     detail=f"{kind}: {result.detail}")
-
-
 def _product_pack(*, marketplace: str, period: str, subject_id: str,
                   bucket: str) -> JobResult:
-    """Fifty ASINs of full metrics in one call — the best calls-to-facts ratio here.
+    """The ranked ASIN list for one node, several pages deep.
+
+    Fifty ASINs of full metrics per call is the best calls-to-facts ratio in the
+    catalog, and it is also the only route to a revenue figure that covers more
+    than the vendor's ~100 head listings. Pages are collected newest-ranked
+    first and the loop stops as soon as the vendor runs out, so a small category
+    costs one call rather than ``PRODUCT_PAGES``.
 
     Also the node's evidence for who the incumbents are, and the trigger that
     enqueues the per-ASIN packs for a flagship.
     """
-    reply = gateway.call(
-        "product_research",
-        _request(marketplace=marketplace, nodeIdPath=subject_id, nodeIdPathEqual="false",
-                 month=period, size=PRODUCT_PAGE_SIZE,
-                 order={"field": "total_amount", "desc": True}),
-        bucket=bucket, purpose="product pack", marketplace=marketplace)
-    if not _ok(reply):
-        return JobResult(status="pending", calls=int(reply.billable), detail=reply.detail)
-
+    calls = 0
     index = EvidenceIndex(marketplace=marketplace, period=period)
-    products, metrics = extract.extract_products(
-        reply, node_id_path=subject_id, period=period, marketplace=marketplace, index=index)
-    store.upsert_products(products)
-    store.upsert_product_metrics(metrics)
+    metrics: list[dict] = []
+    collected = 0
+    pool: int | None = None
+
+    for page in range(1, max(1, PRODUCT_PAGES) + 1):
+        reply = gateway.call(
+            "product_research",
+            _request(marketplace=marketplace, nodeIdPath=subject_id,
+                     nodeIdPathEqual="false", month=period, size=PRODUCT_PAGE_SIZE,
+                     page=page, order={"field": "total_amount", "desc": True}),
+            bucket=bucket, purpose=f"product pack p{page}", marketplace=marketplace)
+        calls += int(reply.billable)
+        if not _ok(reply):
+            if page == 1:
+                return JobResult(status="pending", calls=calls, detail=reply.detail)
+            break
+        if pool is None:
+            pool = extract.product_pool(reply)
+        page_products, page_metrics = extract.extract_products(
+            reply, node_id_path=subject_id, period=period, marketplace=marketplace,
+            index=index if page == 1 else None)
+        if not page_products:
+            break
+        store.upsert_products(page_products)
+        store.upsert_product_metrics(page_metrics)
+        collected += len(page_products)
+        metrics.extend(page_metrics)
+        if len(page_products) < PRODUCT_PAGE_SIZE:
+            break               # the vendor has nothing more to give
+
+    if not collected:
+        return JobResult(status="pending", calls=calls, detail="no products")
     store.record_evidence(index.all_rows())
+    if pool is not None:
+        store.upsert_node_snapshot(marketplace, subject_id, period,
+                                   {"product_pool": int(pool)})
 
     followups = 0
     if subject_id in taxonomy.TIER1_PATHS:
@@ -324,8 +355,9 @@ def _product_pack(*, marketplace: str, period: str, subject_id: str,
                                   subject_kind="asin", subject_id=row["asin"],
                                   period=period, priority=priority, est_calls=1)
                 followups += 1
-    return JobResult(status="done", calls=int(reply.billable),
-                     detail=f"{len(products)} products", followups=followups)
+    return JobResult(status="done", calls=calls,
+                     detail=f"{collected} products of {pool or '?'}",
+                     followups=followups)
 
 
 def _product_newcomers(*, marketplace: str, period: str, subject_id: str,
@@ -505,12 +537,17 @@ CATALOG: tuple[JobSpec, ...] = (
             _distribution_job("market_listing_date_distribution", "listing_date")),
     JobSpec("category_brands", "node", 40, 1, "month",
             _concentration_job("market_brand_concentration", "brand")),
-    JobSpec("product_pack", "node", 25, 1, "week", _product_pack),
+    JobSpec("product_pack", "node", 25, PRODUCT_PAGES, "week", _product_pack),
     JobSpec("product_newcomers", "node", 45, 1, "month", _product_newcomers),
     JobSpec("keyword_aba", "department", 50, 1, "month", _keyword_aba, scope="department"),
     JobSpec("keyword_demand", "node", 55, 1, "month", _keyword_demand),
-    JobSpec("category_rotating", "node", 60, 1, "month", _rotating_slot, tier=1),
-    JobSpec("offamazon_trend", "node", 70, 1, "month", _offamazon_trend, tier=1),
+    *(JobSpec(f"category_dist_{kind}", "node", 60, 1, "month",
+              _distribution_job(tool, kind))
+      for tool, kind in _STRUCTURE_DISTRIBUTIONS),
+    *(JobSpec(f"category_conc_{kind}", "node", 62, 1, "month",
+              _concentration_job(tool, kind))
+      for tool, kind in _STRUCTURE_CONCENTRATIONS),
+    JobSpec("offamazon_trend", "node", 70, 1, "month", _offamazon_trend),
     # Per-ASIN, enqueued by product_pack once the ASINs are known.
     JobSpec("flagship_history", "asin", 65, 1, "month", _flagship_history),
     JobSpec("flagship_traffic", "asin", 75, 1, "month", _flagship_traffic),

@@ -365,6 +365,39 @@ class PanelTests(unittest.TestCase):
             {"entity": "FBA", "rank": 1, "revenue_ratio": 0.72},
         ])
 
+    def test_the_rollup_states_its_coverage_rather_than_implying_totality(self) -> None:
+        """The vendor's own total covers ~100 head listings; a label that reads
+        as market-wide is the mistake, not the number."""
+        store.upsert_node_snapshot("US", BUFFETS, PERIOD, {"product_pool": 13781})
+        store.upsert_product_metrics([
+            {"marketplace": "US", "asin": f"B{i:04d}", "node_id_path": BUFFETS,
+             "period": PERIOD, "revenue": 100_000.0, "units": 400}
+            for i in range(150)])
+        board = panels.build_overview("US", PERIOD, "zh")
+        stats = board["coverage_stats"]
+        self.assertEqual(stats["asins"], 150)
+        self.assertEqual(stats["pool"], 13781)
+        self.assertEqual(stats["revenue"], 15_000_000.0)
+        coverage = next(k for k in board["headline"]["kpis"] if "覆盖" in k["label"])
+        self.assertEqual(coverage["value"], "150 / 13,781")
+        self.assertFalse(coverage["estimated"])   # a count is observed, not modelled
+
+    def test_money_stays_flagged_as_a_vendor_model_even_for_a_closed_month(self) -> None:
+        """SellerSprite infers every money figure from BSR; Amazon publishes
+        category revenue to nobody. A finished month does not change that."""
+        store.upsert_product_metrics([
+            {"marketplace": "US", "asin": "B1", "node_id_path": BUFFETS,
+             "period": PERIOD, "revenue": 100.0}])
+        board = panels.build_overview("US", PERIOD, "zh")
+        revenue = board["headline"]["kpis"][0]
+        self.assertTrue(revenue["estimated"])
+
+    def test_a_node_with_no_asin_rows_falls_back_to_the_vendor_total(self) -> None:
+        board = panels.build_overview("US", PERIOD, "zh")
+        revenue = board["headline"]["kpis"][0]
+        self.assertNotEqual(revenue["value"], "—")
+        self.assertIn("头部", revenue["hint"])
+
     def test_the_board_carries_the_monitor_and_the_coverage_panel(self) -> None:
         board = panels.build_overview("US", PERIOD, "zh")
         self.assertTrue(board["board"])

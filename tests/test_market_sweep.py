@@ -131,8 +131,23 @@ class PlanningTests(SweepTestCase):
     def test_structure_jobs_outrank_enrichment(self) -> None:
         """Priority is what makes a half-finished month decision-grade."""
         structure = jobs.BY_KIND["category_structure"].priority
-        for kind in ("flagship_reviews", "offamazon_trend", "category_rotating"):
+        for kind in ("flagship_reviews", "offamazon_trend", "category_dist_rating",
+                     "category_conc_seller"):
             self.assertGreater(jobs.BY_KIND[kind].priority, structure)
+
+    def test_every_structural_distribution_runs_for_every_node(self) -> None:
+        """A rotating slot makes each month a different shape, so the one thing
+        the structure section cannot show is a change."""
+        jobs.plan_period("US", PERIOD)
+        queued = store.due_jobs("US", limit=1000)
+        leaves = len(taxonomy.leaf_nodes())
+        for kind in ("category_dist_rating", "category_dist_ratings_count",
+                     "category_dist_ebc", "category_dist_seller_country",
+                     "category_conc_seller", "category_conc_seller_type",
+                     "category_conc_product"):
+            with self.subTest(kind=kind):
+                self.assertEqual(len([j for j in queued if j["job_kind"] == kind]),
+                                 leaves)
 
 
 class JobExecutionTests(SweepTestCase):
@@ -404,7 +419,7 @@ class SweepTests(SweepTestCase):
         self.assertEqual(sweep.target_period(datetime(2026, 1, 3, tzinfo=tz)), "202512")
 
     def test_a_full_sweep_fills_a_node_end_to_end(self) -> None:
-        gateway.DAILY_LIMITS[gateway.BUCKET_SWEEP] = 200
+        gateway.DAILY_LIMITS[gateway.BUCKET_SWEEP] = 500
         with mock.patch.object(gateway.sellersprite, "call_tool", side_effect=fixture_vendor):
             summary = sweep.run_daily_sweep("US")
         self.assertEqual(summary["status"], "complete")
@@ -413,6 +428,9 @@ class SweepTests(SweepTestCase):
         self.assertTrue(store.get_distribution("US", BUFFETS, summary["period"], "price"))
         self.assertTrue(store.get_concentration("US", BUFFETS, summary["period"], "brand"))
         self.assertTrue(store.top_products("US", BUFFETS, summary["period"]))
+        # The wider roll-up needs the listing pool recorded alongside the ASINs.
+        self.assertIsNotNone(snap.get("product_pool"))
+        self.assertTrue(store.product_totals("US", summary["period"]))
 
 
 if __name__ == "__main__":

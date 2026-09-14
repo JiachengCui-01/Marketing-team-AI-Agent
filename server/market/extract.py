@@ -393,6 +393,20 @@ _PRODUCT_METRIC_MAP: tuple[tuple[str, str, str, str], ...] = (
 )
 
 
+def product_pool(reply: Any) -> int | None:
+    """How many listings the vendor says match this query.
+
+    ``product_research`` answers with ``total`` and ``pages`` beside its page of
+    items. That total is the only honest denominator available: the category
+    tools' ``totalRevenue`` covers the ~100 head listings they analyse, so
+    without this the roll-up cannot say what share of the shelf it saw.
+    """
+    content = body(reply)
+    if not isinstance(content, dict):
+        return None
+    return number(content.get("total"))
+
+
 def extract_products(
     reply: Any, *, node_id_path: str, period: str, marketplace: str = "US",
     index: EvidenceIndex | None = None, evidence_top_n: int = 10,

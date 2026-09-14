@@ -1739,6 +1739,9 @@ export type MarketBoardRow = {
   score_breakdown: Record<string, number>;
   score_confidence: number;
   revenue_est: number | null;
+  covered_revenue: number | null;
+  covered_asins: number;
+  product_pool: number | null;
   growth_pct: number | null;
   median_price: number | null;
   top5_brand_share_pct: number | null;
@@ -1828,6 +1831,14 @@ export type MarketDashboard = {
   score_model: MarketScoreModel;
   monitor?: MarketMonitor;
   monitor_summary?: string;
+  // What the summed-ASIN roll-up covers: the figure is only readable
+  // beside the share of the shelf it was computed from.
+  coverage_stats?: {
+    revenue: number | null;
+    asins: number;
+    pool: number | null;
+    nodes_with_products: number;
+  };
   // Attached on read, never stored: the monthly board can sit for days
   // and this is the half that is supposed to be fresh.
   current?: MarketCurrent;

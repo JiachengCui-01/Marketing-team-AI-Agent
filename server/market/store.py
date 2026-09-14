@@ -530,6 +530,28 @@ def top_products(
         ))
 
 
+def product_totals(marketplace: str, period: str) -> dict[str, dict]:
+    """Summed ASIN revenue and units per node, from the rows actually collected.
+
+    The vendor publishes no whole-category total — its ``totalRevenue`` covers
+    the ~100 head listings it analyses — so the only figure the board can state
+    honestly is the one it can point at row by row. Returned with the count so
+    the panel can say what it covered rather than implying it covered
+    everything.
+    """
+    db._ensure()
+    with db.connect() as conn:
+        rows = _rows(conn.execute(
+            "SELECT node_id_path, COUNT(*) AS asins, "
+            "       SUM(revenue) AS revenue, SUM(units) AS units "
+            "FROM market_product_metrics "
+            "WHERE marketplace = ? AND period = ? AND node_id_path IS NOT NULL "
+            "GROUP BY node_id_path",
+            (marketplace, period),
+        ))
+    return {row["node_id_path"]: row for row in rows}
+
+
 def upsert_product_history(rows: Iterable[dict]) -> int:
     db._ensure()
     now = _now()

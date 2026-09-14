@@ -293,6 +293,7 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
         {path: history for path, history in histories.items()
          if path != taxonomy.FURNITURE_ROOT})
 
+    totals = store.product_totals(marketplace, period)
     board: list[dict] = []
     alerts: list[dict] = []
     for node in taxonomy.leaf_nodes(marketplace):
@@ -314,6 +315,10 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
             "score_breakdown": score["breakdown"],
             "score_confidence": score["confidence"],
             "revenue_est": snap.get("total_revenue"),
+            # The wider figure: every ASIN row we hold for this node, summed.
+            "covered_revenue": (totals.get(path) or {}).get("revenue"),
+            "covered_asins": (totals.get(path) or {}).get("asins") or 0,
+            "product_pool": snap.get("product_pool"),
             "growth_pct": scoring.growth_pct(history),
             "median_price": snap.get("avg_price"),
             "top5_brand_share_pct": pct(snap.get("top5_brand_crn")),
@@ -338,9 +343,10 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
     # states "$0 monthly revenue" — a measurement — when the truth is that nothing
     # was collected. Sum only what exists, and report nothing when nothing does.
     observed = [row["revenue_est"] for row in board if row["revenue_est"] is not None]
-    total_revenue = scoring._num(root.get("total_revenue"))
-    if total_revenue is None:
-        total_revenue = sum(observed) if observed else None
+    head_revenue = scoring._num(root.get("total_revenue"))
+    if head_revenue is None:
+        head_revenue = sum(observed) if observed else None
+    coverage_stats = _coverage_totals(board)
     rising = sorted([r for r in board if (r["growth_pct"] or 0) > 0],
                     key=lambda r: r["growth_pct"], reverse=True)[:5]
     declining = sorted([r for r in board if (r["growth_pct"] or 0) < 0],
@@ -349,12 +355,8 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
     families = coverage(marketplace, period, language)
 
     kpis = [
-        tile("追踪类目头部月销售额" if zh else "Head-listing monthly revenue",
-             money(total_revenue),
-             hint=("厂商按各类目头部约 100 个链接统计" if zh
-                   else "vendor totals cover the ~100 head listings per category")
-             if observed else ("本期未取到销售额" if zh else "not collected"),
-             estimated=True),
+        _revenue_tile(coverage_stats, head_revenue, zh),
+        _coverage_tile(coverage_stats, zh),
         tile("追踪子类目" if zh else "Tracked sub-categories", str(len(board))),
         tile("最佳机会类目" if zh else "Top opportunity",
              board[0]["label"] if board else "—",
@@ -374,6 +376,7 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
 
     return {
         "headline": {"kpis": kpis},
+        "coverage_stats": coverage_stats,
         "board": board,
         "monitor": watch,
         "movers": {"rising": rising, "declining": declining},
@@ -382,7 +385,7 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
                  "growth_pct": r["growth_pct"], "revenue_est": r["revenue_est"],
                  "return_risk": r["return_risk"]} for r in board],
         "treemap": [{"node_key": r["node_key"], "label": r["label"],
-                     "value": r["revenue_est"] or 0.0,
+                     "value": r["covered_revenue"] or r["revenue_est"] or 0.0,
                      "growth_pct": r["growth_pct"],
                      "score": r["category_score"]}
                     for r in board if (r["revenue_est"] or 0) > 0],
@@ -409,6 +412,68 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
                        if r["return_ratio_pct"] is not None],
         "coverage": families,
     }
+
+
+def _coverage_totals(board: Sequence[dict]) -> dict:
+    """What the summed-ASIN roll-up actually covers, across the tracked nodes."""
+    revenue = [scoring._num(r.get("covered_revenue")) for r in board]
+    revenue = [v for v in revenue if v is not None]
+    asins = sum(int(r.get("covered_asins") or 0) for r in board)
+    pool = [scoring._num(r.get("product_pool")) for r in board]
+    pool = [v for v in pool if v is not None]
+    return {
+        "revenue": round(sum(revenue), 2) if revenue else None,
+        "asins": asins,
+        "pool": int(sum(pool)) if pool else None,
+        "nodes_with_products": len([r for r in board if (r.get("covered_asins") or 0) > 0]),
+    }
+
+
+def _revenue_tile(stats: Mapping[str, Any], head_revenue: float | None,
+                  zh: bool) -> dict:
+    """The roll-up, stated as what it is.
+
+    Two caveats were previously merged into one "估算" chip and one hint, which
+    made them read as a single hedge about freshness. They are different and both
+    permanent: the vendor *models* every money figure from BSR (Amazon publishes
+    category revenue to nobody), and this sum covers the ASINs collected rather
+    than the whole shelf. The chip carries the first; the hint carries the second;
+    the tile beside it carries the coverage itself.
+    """
+    covered = stats.get("revenue")
+    if covered is None:
+        return tile("追踪类目月销售额" if zh else "Tracked-category revenue",
+                    money(head_revenue) if head_revenue is not None else "—",
+                    ("按厂商头部口径；ASIN 明细未采集" if zh
+                     else "vendor head-listing basis; per-ASIN rows not collected")
+                    if head_revenue is not None
+                    else ("本期未取到销售额" if zh else "not collected"),
+                    estimated=True)
+    return tile("追踪类目月销售额" if zh else "Tracked-category revenue",
+                money(covered),
+                ("已采集 ASIN 逐条求和，非厂商头部口径" if zh
+                 else "summed from the collected ASIN rows, not the vendor head total"),
+                estimated=True)
+
+
+def _coverage_tile(stats: Mapping[str, Any], zh: bool) -> dict:
+    """How much of the shelf that roll-up actually saw.
+
+    A roll-up without its denominator invites being read as the whole market,
+    which is exactly the mistake the old headline made.
+    """
+    asins, pool = stats.get("asins") or 0, stats.get("pool")
+    if not asins:
+        return tile("销售额覆盖" if zh else "Revenue coverage", "—",
+                    "本期未采集 ASIN 明细" if zh else "no ASIN rows collected")
+    if not pool:
+        return tile("销售额覆盖" if zh else "Revenue coverage",
+                    f"{asins:,}",
+                    "个已采集 ASIN" if zh else "ASINs collected")
+    return tile("销售额覆盖" if zh else "Revenue coverage",
+                f"{asins:,} / {pool:,}",
+                ("已采集 ASIN / 厂商报告的在售数" if zh
+                 else "ASINs collected / listings the vendor reports"))
 
 
 def _return_risk_tile(board: Sequence[dict], zh: bool) -> dict:
@@ -673,9 +738,10 @@ def build_category(marketplace: str, node_id_path: str, period: str,
 def _category_kpis(snap: Mapping[str, Any], zh: bool) -> list[dict]:
     new_share = scoring.new_revenue_share_pct(dict(snap))
     return [
-        tile("头部月销售额" if zh else "Head-listing revenue",
+        tile("类目月销售额" if zh else "Category revenue",
              money(snap.get("total_revenue")),
-             "厂商按头部约 100 个链接统计" if zh else "vendor totals cover ~100 head listings",
+             ("厂商按头部约 100 个链接建模估算" if zh
+              else "vendor model over its ~100 head listings"),
              estimated=True),
         tile("均价" if zh else "Average price", money(snap.get("avg_price"))),
         tile("在售 / 卖家 / 品牌" if zh else "Listings / sellers / brands",

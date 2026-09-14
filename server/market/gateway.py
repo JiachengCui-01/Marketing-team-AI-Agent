@@ -53,8 +53,12 @@ BUCKET_DEEPDIVE = "deepdive"
 BUCKET_CHAT = "chat"
 BUCKET_MANUAL = "manual"
 
+# The sweep cap governs how fast a month fills, not how much a month costs —
+# total spend is set by the job catalog (~330 calls a month, ~11 a day steady
+# state). At 45 the month-opening burst took five days to drain, and the board
+# was thin and unrankable for most of that. At 150 it drains in about two.
 DAILY_LIMITS = {
-    BUCKET_SWEEP: int(os.environ.get("MARKETING_AGENT_MARKET_DAILY_CALLS", "45")),
+    BUCKET_SWEEP: int(os.environ.get("MARKETING_AGENT_MARKET_DAILY_CALLS", "150")),
     BUCKET_DEEPDIVE: int(os.environ.get("MARKETING_AGENT_MARKET_DEEPDIVE_DAILY", "120")),
     BUCKET_CHAT: int(os.environ.get("MARKETING_AGENT_MARKET_CHAT_DAILY", "60")),
     BUCKET_MANUAL: int(os.environ.get("MARKETING_AGENT_MARKET_MANUAL_DAILY", "40")),

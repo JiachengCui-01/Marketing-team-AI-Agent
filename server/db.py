@@ -488,6 +488,10 @@ CREATE TABLE IF NOT EXISTS market_node_snapshots (
     -- Head-listing metrics: the entrenchment input.
     hl_avg_ratings REAL, hl_avg_price REAL, hl_avg_revenue REAL,
     new_product_proportion REAL,
+    -- How many listings product_research says match this node. The vendor's own
+    -- totals cover only the ~100 head listings it analyses, so this is the
+    -- denominator that makes the collected coverage statable.
+    product_pool INTEGER,
     completeness REAL NOT NULL DEFAULT 0.0,
     missing_json TEXT NOT NULL DEFAULT '[]',
     schema_version INTEGER NOT NULL DEFAULT 1,
@@ -870,6 +874,7 @@ def init() -> None:
             _migrate_selection_overview(conn)
             _migrate_market_traffic_mix(conn)
             _migrate_snapshot_grain(conn)
+            _migrate_product_pool(conn)
             _seed_image_templates(conn)
         _INITIALIZED = True
 
@@ -952,6 +957,17 @@ def _migrate_snapshot_grain(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_market_node_snapshots_grain "
                  "ON market_node_snapshots(marketplace, node_id_path, period, grain)")
     conn.execute("DROP INDEX IF EXISTS idx_market_node_snapshots_key")
+
+
+def _migrate_product_pool(conn: sqlite3.Connection) -> None:
+    """The listing count the roll-up's coverage is measured against.
+
+    Column only, never an index: this script's statements run before the
+    migrations, so an index over a migration-added column takes down ``init()``
+    on every existing database.
+    """
+    if "product_pool" not in _table_columns(conn, "market_node_snapshots"):
+        conn.execute("ALTER TABLE market_node_snapshots ADD COLUMN product_pool INTEGER")
 
 
 def _migrate_calendar_status(conn: sqlite3.Connection) -> None:
