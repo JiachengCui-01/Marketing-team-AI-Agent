@@ -209,6 +209,36 @@ export function MarketOverviewPanel({
                         onPick={pick} />
             </Section>
 
+            <Section title={t.gmPhysical} hint={t.gmPhysicalHint}
+                     data={dashboard?.physical}>
+              <BiTable
+                rows={dashboard?.physical ?? []}
+                onPick={(row: any) => onDrill({ nodeKey: row.node_key, label: row.label })}
+                columns={[
+                  { key: "label", label: t.gmBoard },
+                  { key: "avg_weight", label: t.gmPhysicalWeight, numeric: true,
+                    render: (row: any) => row.avg_weight == null
+                      ? "\u2014" : `${row.avg_weight} lb` },
+                  { key: "avg_volume", label: t.gmPhysicalVolume, numeric: true,
+                    render: (row: any) => row.avg_volume == null
+                      ? "\u2014" : `${Math.round(row.avg_volume).toLocaleString()} in\u00b3` },
+                  { key: "avg_price", label: t.gmPhysicalPrice, numeric: true,
+                    render: (row: any) => fmtMoney(row.avg_price) },
+                  { key: "price_per_lb", label: t.gmPhysicalDensity, numeric: true,
+                    render: (row: any) => row.price_per_lb == null
+                      ? "\u2014" : `${fmtMoney(row.price_per_lb)}/lb` },
+                  { key: "bar", label: "", render: (row: any) => (
+                    <Bullet value={row.price_per_lb ?? 0}
+                            benchmark={null}
+                            max={Math.max(
+                              ...(dashboard?.physical ?? [])
+                                .map((r: any) => r.price_per_lb ?? 0), 1)}
+                            goodBelow={false} />
+                  ) },
+                ]}
+              />
+            </Section>
+
             <Section title={t.gmReturnRisk} data={dashboard?.returnrisk}>
               <BiTable
                 rows={dashboard?.returnrisk ?? []}

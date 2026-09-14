@@ -154,6 +154,15 @@ def generate_prd(
         raise render.RenderError("no snapshot for this category and period")
 
     payload = render.build_category(marketplace, node_id_path, period, language)
+    # build_category returns the deterministic half only. The design directives
+    # are the category read's conclusion about what to build differently, and
+    # they live on the saved dashboard — carried forward here so the PRD does not
+    # re-derive them from the same evidence one call later and drift.
+    stored = store.latest_dashboard(marketplace=marketplace, scope="category",
+                                    language=language, node_id_path=node_id_path,
+                                    period=period)
+    payload["design_directives"] = (
+        (stored or {}).get("dashboard", {}).get("design_directives") or [])
     opportunity = _pick_opportunity(payload["opportunities"], opportunity_id)
     if opportunity is None:
         raise render.RenderError("no scored opportunity for this category")
@@ -369,6 +378,17 @@ def _opportunity_brief(opportunity: dict, payload: dict, language: str) -> str:
         lines.append("PAIN THEMES: " + ", ".join(
             f"{t['theme']} ({t['mention_count']}/{t['sample_size']}, "
             f"fixable={bool(t['fixable_in_design'])})" for t in payload["pain"]))
+    directives = payload.get("design_directives") or []
+    if directives:
+        lines.append("DESIGN DIRECTIVES FROM THE CATEGORY READ (carry these forward; "
+                     "do not re-derive them):")
+        for item in directives[:6]:
+            lines.append(f"  [{item.get('priority', '')}/{item.get('stage', '')}] "
+                         f"{item.get('directive', '')}")
+    spec = payload.get("spec") or {}
+    if spec.get("tiles"):
+        lines.append("SHELF ENVELOPE (the design has to sit near this): " + " | ".join(
+            f"{t['label']} {t['value']}" for t in spec["tiles"]))
     if payload["keywords"]:
         lines.append("KEYWORDS: " + ", ".join(k["keyword"] for k in payload["keywords"][:10]))
     competitors = payload["competitors"][:5]

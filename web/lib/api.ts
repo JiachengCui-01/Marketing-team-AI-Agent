@@ -1875,6 +1875,18 @@ export type MarketDashboard = {
   // Overview ships a row per node; the deep dive ships one object for the node
   // it is about. Both shapes are read by name, never indexed positionally.
   concentration?: any;
+  /** Each tracked category as a physical object, ranked by price density —
+   *  freight and returns scale with weight, the price does not. */
+  physical?: {
+    node_key: string;
+    label: string;
+    avg_weight: number | null;
+    avg_volume: number | null;
+    avg_price: number | null;
+    price_per_lb: number | null;
+    return_ratio_pct: number | null;
+    return_ratio_avg_pct: number | null;
+  }[];
   supply?: any;
   fulfilment?: any;
   conversion?: any;
@@ -1942,6 +1954,31 @@ export type MarketDashboard = {
   keywords?: Record<string, any>[];
   competitors?: Record<string, any>[];
   pain?: MarketPainTheme[];
+  /** The physical envelope a new product has to fit — weight, volume, variation
+   *  depth, the measured competitor dimensions that bound a design. */
+  spec?: {
+    tiles: MarketKpi[];
+    rows: {
+      asin: string;
+      title: string;
+      price: number | null;
+      weight: number | null;
+      dimension: string;
+      variations: number | null;
+      fulfillment: string;
+    }[];
+  };
+  /** The actionable end of the report: what to change in the product itself. */
+  design_directives?: {
+    directive: string;
+    driver: string;
+    stage: string;
+    priority: string;
+    note?: string;
+    evidence_ids?: string[];
+  }[];
+  spec_reading?: string;
+  entry_cost_reading?: string;
   traffic?: {
     asin: string;
     title: string;

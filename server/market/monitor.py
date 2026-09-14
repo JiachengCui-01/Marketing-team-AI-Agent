@@ -585,6 +585,155 @@ def organic_winnable(facts: NodeFacts) -> Alert | None:
     )
 
 
+# ---- product / design ----------------------------------------------------
+# The signals above read a market; these read the *thing we would have to
+# build*. They exist because the brief this system serves is a product
+# development brief: the decision at the end is "design what, at what size, at
+# what price, with which defect engineered out" — not "buy which keyword".
+#
+# Every one is arithmetic over columns the sweep already pays for: ``avg_weight``
+# and ``avg_volume`` come back with every ``market_research`` call, ``variations``
+# with every ``product_research`` row, and the review themes carry their own
+# ``fixable_in_design`` flag.
+
+# Amazon's oversize handling steps at roughly these weights, and each step moves
+# what a unit may weigh before freight eats the margin. Constants, not
+# inferences — which is why they live in code rather than in a prompt.
+_FREIGHT_TIERS = ((150.0, HIGH), (90.0, MEDIUM), (50.0, LOW))
+
+
+def freight_heavy(facts: NodeFacts) -> Alert | None:
+    """The shelf's average unit is heavy enough to set the cost floor.
+
+    Weight is the one product attribute this business cannot design around after
+    the fact: it fixes the freight tier, the damage rate and the cost of a return
+    at once, and it is decided at the sketch stage.
+    """
+    weight = _snap(facts, "avg_weight")
+    if weight is None:
+        return None
+    severity = _by(_FREIGHT_TIERS, weight)
+    if severity is None:
+        return None
+    return Alert(
+        id="freight_heavy", kind=RISK, family="product", severity=severity,
+        magnitude=min(100.0, weight / 2.0), metric="avg_weight",
+        value=weight, baseline=facts.peers.get("avg_weight"), unit="lb",
+        evidence_metrics=("avg_weight", "avg_volume"),
+        extra={"volume": _fmt(_snap(facts, "avg_volume"), "")},
+    )
+
+
+def variation_depth_expected(facts: NodeFacts) -> Alert | None:
+    """Incumbents sell a range, so a single SKU enters under-equipped.
+
+    Variation count is a product-programme fact, not a marketing one: it decides
+    how many colourways and sizes tooling has to cover before launch.
+    """
+    counts = [c for c in (_num(p.get("variations")) for p in facts.products)
+              if c is not None]
+    depth = _median(counts)
+    if depth is None:
+        return None
+    severity = _by(((6.0, HIGH), (4.0, MEDIUM), (3.0, LOW)), depth)
+    if severity is None:
+        return None
+    return Alert(
+        id="variation_depth_expected", kind=RISK, family="product", severity=severity,
+        magnitude=min(100.0, depth * 12.0), metric="variations",
+        value=depth, unit="", extra={"asins": len(counts)},
+    )
+
+
+def _theme_share(facts: NodeFacts, predicate) -> tuple[float, list[str], int] | None:
+    """Combined share of the negative sample across themes matching ``predicate``.
+
+    Shares are summed rather than maxed because the question a design review asks
+    is "how much of the complaint volume can we engineer away in total", and the
+    classifier puts each review under exactly one theme.
+    """
+    hits = [t for t in facts.themes if predicate(t)]
+    if not hits:
+        return None
+    sample = max((_num(t.get("sample_size")) or 0.0) for t in hits)
+    if sample < 20:
+        # Under twenty negative reviews a "theme" is three people with one problem.
+        return None
+    share = sum((_num(t.get("share_of_negative")) or 0.0) for t in hits) * 100.0
+    ordered = sorted(hits, key=lambda t: _num(t.get("share_of_negative")) or 0.0,
+                     reverse=True)
+    names = [str(t.get("theme_label") or t.get("theme") or "") for t in ordered[:3]]
+    return min(share, 100.0), [n for n in names if n], int(sample)
+
+
+def design_fixable_share(facts: NodeFacts) -> Alert | None:
+    """How much of the complaint volume is a design problem rather than a service one.
+
+    The single number that decides whether a category deserves a product
+    programme at all: complaints about couriers and customer service are somebody
+    else's to fix, a wobbling joint is ours.
+    """
+    found = _theme_share(facts, lambda t: bool(t.get("fixable_in_design")))
+    if found is None:
+        return None
+    share, names, sample = found
+    severity = _by(((60.0, HIGH), (45.0, MEDIUM), (30.0, LOW)), share)
+    if severity is None:
+        return None
+    return Alert(
+        id="design_fixable_share", kind=OPPORTUNITY, family="product", severity=severity,
+        magnitude=min(100.0, share * 1.4), metric="share_of_negative",
+        value=share, unit="%", extra={"themes": names, "sample_size": sample},
+    )
+
+
+_ASSEMBLY = frozenset({"assembly_difficulty", "missing_or_wrong_parts", "instructions"})
+_TRANSIT = frozenset({"damage_in_transit"})
+
+
+def assembly_burden(facts: NodeFacts) -> Alert | None:
+    """Flat-pack assembly is what buyers complain about; it is also cheap to fix.
+
+    Hardware, dowel tolerance and an instruction sheet are the least expensive
+    changes in the whole bill of materials, which makes this the best
+    return-on-effort finding the review sample can produce.
+    """
+    found = _theme_share(facts, lambda t: t.get("category") in _ASSEMBLY)
+    if found is None:
+        return None
+    share, names, sample = found
+    severity = _by(((25.0, HIGH), (15.0, MEDIUM), (8.0, LOW)), share)
+    if severity is None:
+        return None
+    return Alert(
+        id="assembly_burden", kind=OPPORTUNITY, family="product", severity=severity,
+        magnitude=min(100.0, share * 3.0), metric="share_of_negative",
+        value=share, unit="%", extra={"themes": names, "sample_size": sample},
+    )
+
+
+def transit_damage_load(facts: NodeFacts) -> Alert | None:
+    """Damage in transit: a packaging brief, and a return this brand pays twice for.
+
+    Paired with ``freight_heavy`` on purpose — a heavy category that also arrives
+    broken is the combination that turns a good margin negative.
+    """
+    found = _theme_share(facts, lambda t: t.get("category") in _TRANSIT)
+    if found is None:
+        return None
+    share, names, sample = found
+    severity = _by(((20.0, HIGH), (12.0, MEDIUM), (6.0, LOW)), share)
+    if severity is None:
+        return None
+    return Alert(
+        id="transit_damage_load", kind=RISK, family="product", severity=severity,
+        magnitude=min(100.0, share * 3.5), metric="share_of_negative",
+        value=share, unit="%", evidence_metrics=("avg_weight",),
+        extra={"themes": names, "sample_size": sample,
+               "weight": _fmt(_snap(facts, "avg_weight"), "")},
+    )
+
+
 # --------------------------------------------------------------- pulse layer ----
 # A pulse is a live reading taken while the month is still open, compared
 # like-for-like against the last month the vendor closed. It cannot see revenue
@@ -653,6 +802,8 @@ def scan_pulse(pulse: Mapping[str, Any], baseline: Mapping[str, Any]) -> list[Al
 
 
 SIGNALS: tuple[Signal, ...] = (
+    freight_heavy, variation_depth_expected,
+    design_fixable_share, assembly_burden, transit_damage_load,
     return_above_peers, return_below_peers, return_rising,
     demand_falling, demand_accelerating, conversion_weakening, offamazon_leading,
     price_erosion, premium_headroom,
@@ -682,6 +833,36 @@ _EXCLUSIVE: tuple[frozenset[str], ...] = (
 # to fix it.
 
 _TEXT: dict[str, dict[str, tuple[str, str]]] = {
+    "freight_heavy": {
+        "zh": ("平均单件 {value} lb，运费把成本下限定死了",
+               "货架平均重量 {value} lb、平均体积 {volume} in³。重量在草图阶段就决定了运费档、破损率和退货成本，量产后改不动。"),
+        "en": ("Average unit {value} lb — freight sets the cost floor",
+               "Shelf average {value} lb and {volume} in³. Weight fixes the freight tier, the damage rate and the cost of a return, and it is decided at the sketch stage."),
+    },
+    "variation_depth_expected": {
+        "zh": ("货架按系列卖，不是按单品",
+               "头部 ASIN 变体数中位 {value}（{asins} 个样本）。只上一个 SKU 等于拿单品对打整个系列，开模和备货要按系列算。"),
+        "en": ("The shelf sells ranges, not single SKUs",
+               "Median {value} variations across the head ASINs ({asins} sampled). A one-SKU launch competes against a full range; tooling and stock have to be planned that way."),
+    },
+    "design_fixable_share": {
+        "zh": ("{value}% 的差评是设计能解决的",
+               "可设计解决的主题合计占差评样本 {value}%（样本 {sample_size} 条）：{themes}。这部分归我们改，不归客服改。"),
+        "en": ("{value}% of the complaints are design problems",
+               "Design-fixable themes cover {value}% of the negative sample ({sample_size} reviews): {themes}. That share is ours to fix, not customer service's."),
+    },
+    "assembly_burden": {
+        "zh": ("装配和缺件占差评 {value}%",
+               "装配难、缺件、说明书三类合计 {value}%（样本 {sample_size} 条）：{themes}。五金件、公差和一张说明书是整份 BOM 里最便宜的改动。"),
+        "en": ("Assembly and missing parts are {value}% of complaints",
+               "Assembly difficulty, missing parts and instructions total {value}% ({sample_size} reviews): {themes}. Hardware, tolerance and an instruction sheet are the cheapest changes in the BOM."),
+    },
+    "transit_damage_load": {
+        "zh": ("运输破损占差评 {value}%",
+               "破损类差评 {value}%（样本 {sample_size} 条），货架平均重量 {weight} lb。这是包装课题，而且破损退货这门生意要付两次运费。"),
+        "en": ("Transit damage is {value}% of complaints",
+               "Damage themes cover {value}% of the negative sample ({sample_size} reviews) at a {weight} lb shelf average. That is a packaging brief, and a damaged return is freight paid twice."),
+    },
     "return_above_peers": {
         "zh": ("退货率是同级的 {multiple} 倍",
                "本期 {value}%，同级类目均值 {baseline}%。大件家具一次退货通常吃掉整单毛利。"),
@@ -943,6 +1124,8 @@ def peer_medians(
         "avg_price": median_of("avg_price"),
         "avg_rating": median_of("avg_rating"),
         "return_ratio": median_of("return_ratio"),
+        "avg_weight": median_of("avg_weight"),
+        "avg_volume": median_of("avg_volume"),
         "top5_brand_crn": median_of("top5_brand_crn"),
         "new_ratio_l12": median_of("new_ratio_l12"),
     }

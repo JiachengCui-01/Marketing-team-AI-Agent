@@ -418,6 +418,7 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
                            "top5_product_share_pct":
                                pct((snapshots.get(r["node_key"]) or {}).get("top5_product_crn"))}
                           for r in board if r["top5_brand_share_pct"] is not None],
+        "physical": _physical_rows(board, snapshots),
         "supply": _supply_rows(board, snapshots),
         "fulfilment": _fulfilment_rows(board, snapshots),
         "quality": _quality_rows(board, snapshots),
@@ -621,6 +622,36 @@ def _newproduct_rows(board: Sequence[dict], snapshots: Mapping[str, dict]) -> li
     return rows
 
 
+def _physical_rows(board: Sequence[dict], snapshots: Mapping[str, dict]) -> list[dict]:
+    """Each tracked category as a physical object, ranked by price density.
+
+    ``price_per_lb`` is the whole point of the row. Freight and the cost of a
+    return scale with weight while the price does not, so two categories with the
+    same revenue and the same growth can have opposite economics — and nothing
+    else on this board would show it.
+    """
+    rows = []
+    for row in board:
+        snap = snapshots.get(row["node_key"]) or {}
+        weight = scoring._num(snap.get("avg_weight"))
+        price = scoring._num(snap.get("avg_price"))
+        if weight is None and price is None:
+            continue
+        rows.append({
+            "node_key": row["node_key"], "label": row["label"],
+            "avg_weight": round(weight, 1) if weight is not None else None,
+            "avg_volume": scoring._num(snap.get("avg_volume")),
+            "avg_price": price,
+            "price_per_lb": (round(price / weight, 2)
+                             if price is not None and weight else None),
+            "return_ratio_pct": row.get("return_ratio_pct"),
+            "return_ratio_avg_pct": row.get("return_ratio_avg_pct"),
+        })
+    # Best freight economics first: the row a product decision starts from.
+    rows.sort(key=lambda r: (r["price_per_lb"] is None, -(r["price_per_lb"] or 0.0)))
+    return rows
+
+
 def _overview_price_bands(marketplace: str, period: str,
                           board: Sequence[dict]) -> list[dict]:
     """Price bands summed across the tracked nodes, weighted by their revenue."""
@@ -719,6 +750,7 @@ def build_category(marketplace: str, node_id_path: str, period: str,
             "glance_views": [{"period": p["period"], "value": p.get("glance_views")}
                              for p in history if p.get("glance_views") is not None],
         },
+        "spec": _spec_envelope(snap, products, zh),
         "distributions": _distribution_panels(distributions, zh),
         "concentration": _concentration_panels(concentration, zh),
         "benchmark": _benchmark(snap, history, peers, zh),
@@ -753,6 +785,67 @@ def build_category(marketplace: str, node_id_path: str, period: str,
     }
 
 
+def _spec_envelope(snap: Mapping[str, Any], products: Sequence[Mapping[str, Any]],
+                   zh: bool) -> dict:
+    """The physical envelope a new product would have to fit inside.
+
+    Every figure here is a decision an engineer makes before a drawing exists:
+    how heavy, how bulky, how many variants, who fulfils it. The vendor returns
+    all of it with calls the sweep already makes — ``avgWeight`` / ``avgVolume``
+    on ``market_research``, ``weight`` / ``dimension`` / ``variations`` on every
+    ``product_research`` row — and until now it sat in the warehouse unread while
+    the dashboard led with traffic mix.
+
+    Medians rather than means: one 400 lb sectional in a set of ten drags a mean
+    somewhere no real product sits.
+    """
+    weights = [scoring._num(p.get("weight")) for p in products]
+    variations = [scoring._num(p.get("variations")) for p in products]
+    prices = [scoring._num(p.get("price")) for p in products]
+    head_weight = scoring._median([w for w in weights if w is not None])
+    head_variations = scoring._median([v for v in variations if v is not None])
+
+    rows = []
+    for product in products[:MAX_COMPETITORS]:
+        weight = scoring._num(product.get("weight"))
+        rows.append({
+            "asin": product["asin"],
+            "title": (product.get("title") or "")[:70],
+            "price": scoring._num(product.get("price")),
+            "weight": round(weight, 1) if weight is not None else None,
+            "dimension": product.get("dimension") or "",
+            "variations": scoring._num(product.get("variations")),
+            "fulfillment": product.get("fulfillment") or "",
+        })
+
+    return {
+        "tiles": filled([
+            tile("货架平均重量" if zh else "Shelf average weight",
+                 f"{round(scoring._num(snap.get('avg_weight')), 1)} lb"
+                 if scoring._num(snap.get("avg_weight")) is not None else "",
+                 "决定运费档、破损率和退货成本" if zh
+                 else "sets the freight tier, damage rate and return cost"),
+            tile("货架平均体积" if zh else "Shelf average volume",
+                 f"{int(scoring._num(snap.get('avg_volume'))):,} in³"
+                 if scoring._num(snap.get("avg_volume")) is not None else "",
+                 "决定装箱、仓储分档" if zh else "drives cartoning and storage tier"),
+            tile("头部重量中位" if zh else "Head-set median weight",
+                 f"{round(head_weight, 1)} lb" if head_weight is not None else "",
+                 "实际在卖的产品有多重" if zh else "what actually sells, not the long tail"),
+            tile("头部变体数中位" if zh else "Head-set median variations",
+                 f"{round(head_variations, 1)}" if head_variations is not None else "",
+                 "一次要开几个 SKU" if zh else "how many SKUs a launch has to cover"),
+            tile("头部价格区间" if zh else "Head-set price range",
+                 f"{money(min(p for p in prices if p is not None))}–"
+                 f"{money(max(p for p in prices if p is not None))}"
+                 if any(p is not None for p in prices) else "",
+                 "新品定价要落在这里面" if zh else "a new product has to price into this"),
+        ]),
+        "rows": [r for r in rows if r["weight"] is not None or r["dimension"]
+                 or r["variations"] is not None],
+    }
+
+
 def _category_kpis(snap: Mapping[str, Any], zh: bool) -> list[dict]:
     new_share = scoring.new_revenue_share_pct(dict(snap))
     return [
@@ -761,7 +854,25 @@ def _category_kpis(snap: Mapping[str, Any], zh: bool) -> list[dict]:
              ("厂商按头部约 100 个链接建模估算" if zh
               else "vendor model over its ~100 head listings"),
              estimated=True),
-        tile("均价" if zh else "Average price", money(snap.get("avg_price"))),
+        tile("均价" if zh else "Average price", money(snap.get("avg_price")),
+             "新品定价的锚" if zh else "the anchor a new product prices against"),
+        tile("平均重量 / 体积" if zh else "Average weight / volume",
+             f"{round(scoring._num(snap.get('avg_weight')), 1)} lb / "
+             f"{int(scoring._num(snap.get('avg_volume'))):,} in³"
+             if scoring._num(snap.get("avg_weight")) is not None
+             and scoring._num(snap.get("avg_volume")) is not None
+             else (f"{round(scoring._num(snap.get('avg_weight')), 1)} lb"
+                   if scoring._num(snap.get("avg_weight")) is not None else "—"),
+             "运费档与破损率的上游" if zh else "upstream of freight tier and damage rate"),
+        tile("退货率 / 同级均值" if zh else "Return rate vs peers",
+             f"{pct(snap.get('return_ratio'))}% / {pct(snap.get('return_ratio_avg'))}%"
+             if snap.get("return_ratio") is not None else "—",
+             "一次货运退货吃掉整单毛利" if zh
+             else "one freight return costs more than the order's margin"),
+        tile("类目均分" if zh else "Average rating",
+             f"{snap.get('avg_rating')}★" if snap.get("avg_rating") is not None else "—",
+             f"{'头部评论数' if zh else 'head reviews'} {int(snap['hl_avg_ratings'])}"
+             if scoring._num(snap.get("hl_avg_ratings")) else ""),
         tile("在售 / 卖家 / 品牌" if zh else "Listings / sellers / brands",
              " / ".join(str(int(v)) if v is not None else "—"
                         for v in (scoring._num(snap.get("total_products")),
@@ -772,13 +883,6 @@ def _category_kpis(snap: Mapping[str, Any], zh: bool) -> list[dict]:
         tile("Top5 品牌集中度" if zh else "Top-5 brand share",
              f"{pct(snap.get('top5_brand_crn'))}%"
              if snap.get("top5_brand_crn") is not None else "—"),
-        tile("类目均分" if zh else "Average rating",
-             f"{snap.get('avg_rating')}★" if snap.get("avg_rating") is not None else "—",
-             f"{'头部' if zh else 'head'} {int(snap['hl_avg_ratings'])}"
-             if scoring._num(snap.get("hl_avg_ratings")) else ""),
-        tile("退货率 / 同级均值" if zh else "Return rate vs peers",
-             f"{pct(snap.get('return_ratio'))}% / {pct(snap.get('return_ratio_avg'))}%"
-             if snap.get("return_ratio") is not None else "—"),
         tile("近 12 月新品占销额" if zh else "New-entrant revenue share",
              f"{round(new_share, 1)}%" if new_share is not None else "—",
              estimated=True),

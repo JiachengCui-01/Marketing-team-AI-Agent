@@ -238,6 +238,38 @@ export function MarketCategoryPanel({
               </Section>
             ) : null}
 
+            <Section title={t.cdDirectives} hint={t.cdDirectivesHint}
+                     data={dashboard?.design_directives}>
+              <ol className="space-y-1.5">
+                {(dashboard?.design_directives ?? []).map((item, index) => (
+                  <li key={`${item.directive}-${index}`} className="bi-card">
+                    <div className="flex flex-wrap items-baseline gap-1.5">
+                      <span className="shrink-0 text-[11px] tabular-nums text-fg-subtle">
+                        {index + 1}
+                      </span>
+                      <span className="text-sm font-medium">{item.directive}</span>
+                      <span className={`bi-chip bi-chip-${
+                        item.priority === "must_fix" ? "high"
+                        : item.priority === "differentiator" ? "low" : "medium"}`}>
+                        {t.cdPriorityLabel[item.priority] ?? item.priority}
+                      </span>
+                      <span className="bi-chip">
+                        {t.cdStageLabel[item.stage] ?? item.stage}
+                      </span>
+                      <span className="ml-auto text-[10px] text-fg-subtle">
+                        {t.cdDriverLabel[item.driver] ?? item.driver}
+                      </span>
+                    </div>
+                    {item.note ? (
+                      <div className="mt-1 text-xs text-fg-muted">
+                        <CitationMarkdown content={item.note} />
+                      </div>
+                    ) : null}
+                  </li>
+                ))}
+              </ol>
+            </Section>
+
             <MonitorBoard monitor={dashboard?.monitor}
                           summary={dashboard?.monitor_summary}
                           showNode={false} />
@@ -249,6 +281,72 @@ export function MarketCategoryPanel({
                                    opportunity={opportunity} weights={productWeights}
                                    labels={labels} busy={busy === "prd"}
                                    onPrd={() => generatePrd(opportunity)} />
+                ))}
+              </div>
+            </Section>
+
+            <Section title={t.cdSpec} hint={t.cdSpecHint}
+                     data={[dashboard?.spec?.tiles, dashboard?.spec?.rows,
+                            dashboard?.spec_reading]}>
+              <KpiRow kpis={dashboard?.spec?.tiles ?? []} />
+              {dashboard?.spec_reading ? (
+                <div className="mt-2 text-sm leading-relaxed">
+                  <CitationMarkdown content={dashboard.spec_reading} />
+                </div>
+              ) : null}
+              <Block label={t.cdCompetitors} data={dashboard?.spec?.rows}>
+                <BiTable
+                  rows={dashboard?.spec?.rows ?? []}
+                  columns={[
+                    { key: "asin", label: "ASIN" },
+                    { key: "price", label: "$", numeric: true,
+                      render: (row: any) => fmtMoney(row.price) },
+                    { key: "weight", label: t.cdSpecWeight, numeric: true,
+                      render: (row: any) => row.weight == null
+                        ? "\u2014" : `${row.weight} lb` },
+                    { key: "dimension", label: t.cdSpecDim },
+                    { key: "variations", label: t.cdSpecVar, numeric: true },
+                    { key: "fulfillment", label: t.cdSpecFulfil },
+                  ]}
+                />
+              </Block>
+            </Section>
+
+            <Section title={t.cdPain} data={dashboard?.pain}>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {(dashboard?.pain ?? []).map((theme) => (
+                  <div key={theme.theme} className="bi-card">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-sm font-medium">{theme.theme_label}</span>
+                      <span className={`bi-chip bi-chip-${
+                        theme.severity === "blocking" ? "high"
+                        : theme.severity === "major" ? "medium" : "low"}`}>
+                        {theme.severity}
+                      </span>
+                      {theme.fixable_in_design ? (
+                        <span className="bi-chip bi-chip-low">{t.cdPainFixable}</span>
+                      ) : null}
+                      {theme.return_driving ? (
+                        <span className="bi-chip bi-chip-high">{t.cdPainReturn}</span>
+                      ) : null}
+                    </div>
+                    <div className="mt-1 text-[11px] text-fg-muted">
+                      {t.cdPainShare} {fmtPct((theme.share_of_negative ?? 0) * 100)} ·{" "}
+                      {t.cdPainSample} {theme.mention_count}/{theme.sample_size}
+                    </div>
+                    {theme.summary ? (
+                      <p className="mt-1 text-xs text-fg-muted">{theme.summary}</p>
+                    ) : null}
+                    {theme.quotes?.length ? (
+                      <ul className="mt-1 space-y-0.5">
+                        {theme.quotes.map((quote, i) => (
+                          <li key={i} className="text-[11px] italic text-fg-subtle">
+                            “{quote}”
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
                 ))}
               </div>
             </Section>
@@ -372,45 +470,6 @@ export function MarketCategoryPanel({
               </Section>
             </div>
 
-            <Section title={t.cdPain} data={dashboard?.pain}>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {(dashboard?.pain ?? []).map((theme) => (
-                  <div key={theme.theme} className="bi-card">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="text-sm font-medium">{theme.theme_label}</span>
-                      <span className={`bi-chip bi-chip-${
-                        theme.severity === "blocking" ? "high"
-                        : theme.severity === "major" ? "medium" : "low"}`}>
-                        {theme.severity}
-                      </span>
-                      {theme.fixable_in_design ? (
-                        <span className="bi-chip bi-chip-low">{t.cdPainFixable}</span>
-                      ) : null}
-                      {theme.return_driving ? (
-                        <span className="bi-chip bi-chip-high">{t.cdPainReturn}</span>
-                      ) : null}
-                    </div>
-                    <div className="mt-1 text-[11px] text-fg-muted">
-                      {t.cdPainShare} {fmtPct((theme.share_of_negative ?? 0) * 100)} ·{" "}
-                      {t.cdPainSample} {theme.mention_count}/{theme.sample_size}
-                    </div>
-                    {theme.summary ? (
-                      <p className="mt-1 text-xs text-fg-muted">{theme.summary}</p>
-                    ) : null}
-                    {theme.quotes?.length ? (
-                      <ul className="mt-1 space-y-0.5">
-                        {theme.quotes.map((quote, i) => (
-                          <li key={i} className="text-[11px] italic text-fg-subtle">
-                            “{quote}”
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            </Section>
-
             <Section title={t.cdCompetitors} data={dashboard?.competitors}>
               <BiTable
                 rows={dashboard?.competitors ?? []}
@@ -423,6 +482,10 @@ export function MarketCategoryPanel({
                     render: (row: any) => fmtMoney(row.revenue) },
                   { key: "rating", label: "★", numeric: true },
                   { key: "ratings", label: "#", numeric: true },
+                  { key: "weight", label: t.cdSpecWeight, numeric: true,
+                    render: (row: any) => row.weight == null
+                      ? "\u2014" : `${Number(row.weight).toFixed(1)} lb` },
+                  { key: "variations", label: t.cdSpecVar, numeric: true },
                   { key: "available_date", label: "Listed" },
                 ]}
               />
@@ -489,7 +552,14 @@ export function MarketCategoryPanel({
               </Section>
             ) : null}
 
-            <Section title={t.cdTraffic} data={dashboard?.traffic}>
+            <Section title={t.cdEntryCost} hint={t.cdEntryCostHint}
+                     data={[dashboard?.traffic, dashboard?.entry_cost_reading]}>
+              {dashboard?.entry_cost_reading ? (
+                <div className="mb-2 text-sm leading-relaxed">
+                  <CitationMarkdown content={dashboard.entry_cost_reading} />
+                </div>
+              ) : null}
+              <Block label={t.cdTraffic} data={dashboard?.traffic}>
               <div className="space-y-2">
                 {(dashboard?.traffic ?? []).map((row) => (
                   <div key={row.asin}>
@@ -511,6 +581,7 @@ export function MarketCategoryPanel({
                   </div>
                 ))}
               </div>
+              </Block>
             </Section>
 
             <Section title={t.evTitle} data={report.evidence}>

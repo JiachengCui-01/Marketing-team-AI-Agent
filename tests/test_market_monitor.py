@@ -216,6 +216,141 @@ class SignalTests(unittest.TestCase):
         self.assertEqual(first, second)
 
 
+class ProductSignalTests(unittest.TestCase):
+    """The design-facing family: what the thing we would build has to be.
+
+    These read the same warehouse as everything else — ``avg_weight`` and
+    ``avg_volume`` from the category call, ``variations`` from the product call,
+    the classifier's ``fixable_in_design`` flag on each review theme — so they
+    run on literals like the rest of the file.
+    """
+
+    def themes(self, *specs) -> list[dict]:
+        """(category, share, fixable, sample) tuples into theme rows."""
+        return [{"theme": f"t{i}", "theme_label": f"theme {i}", "category": category,
+                 "fixable_in_design": fixable, "return_driving": False,
+                 "share_of_negative": share, "sample_size": sample,
+                 "mention_count": int(share * sample)}
+                for i, (category, share, fixable, sample) in enumerate(specs)]
+
+    # ---- physical envelope -------------------------------------------------
+
+    def test_weight_escalates_through_the_freight_tiers(self) -> None:
+        light = fired(monitor.scan(facts(snapshot={"avg_weight": 60.0})), "freight_heavy")
+        heavy = fired(monitor.scan(facts(snapshot={"avg_weight": 180.0})), "freight_heavy")
+        self.assertEqual(light.severity, monitor.LOW)
+        self.assertEqual(heavy.severity, monitor.HIGH)
+        self.assertEqual(heavy.kind, monitor.RISK)
+        self.assertEqual(heavy.unit, "lb")
+
+    def test_a_parcel_weight_category_says_nothing_about_freight(self) -> None:
+        self.assertIsNone(
+            fired(monitor.scan(facts(snapshot={"avg_weight": 22.0})), "freight_heavy"))
+
+    def test_weight_carries_the_department_median_as_its_baseline(self) -> None:
+        alert = fired(monitor.scan(facts(snapshot={"avg_weight": 120.0},
+                                         peers={"avg_weight": 70.0})), "freight_heavy")
+        self.assertEqual(alert.baseline, 70.0)
+
+    def test_variation_depth_is_a_median_not_a_maximum(self) -> None:
+        """One ten-variant listing must not make the shelf look like a range."""
+        outlier = facts(products=[{"variations": 10}, {"variations": 1},
+                                  {"variations": 1}, {"variations": 1}])
+        self.assertIsNone(fired(monitor.scan(outlier), "variation_depth_expected"))
+        real = facts(products=[{"variations": 6}, {"variations": 7},
+                               {"variations": 5}, {"variations": 8}])
+        alert = fired(monitor.scan(real), "variation_depth_expected")
+        self.assertEqual(alert.severity, monitor.HIGH)
+        self.assertEqual(alert.extra["asins"], 4)
+
+    # ---- what the complaints are made of -----------------------------------
+
+    def test_design_fixable_share_sums_only_the_fixable_themes(self) -> None:
+        alert = fired(monitor.scan(facts(themes=self.themes(
+            ("assembly_difficulty", 0.30, True, 60),
+            ("material_quality", 0.20, True, 60),
+            ("customer_service", 0.40, False, 60),
+        ))), "design_fixable_share")
+        self.assertEqual(alert.kind, monitor.OPPORTUNITY)
+        self.assertAlmostEqual(alert.value, 50.0)
+        self.assertEqual(alert.severity, monitor.MEDIUM)
+
+    def test_a_category_whose_complaints_are_service_problems_stays_quiet(self) -> None:
+        """Couriers and call centres are somebody else's brief."""
+        self.assertIsNone(fired(monitor.scan(facts(themes=self.themes(
+            ("customer_service", 0.55, False, 80),
+            ("instructions", 0.05, False, 80),
+        ))), "design_fixable_share"))
+
+    def test_assembly_and_missing_parts_are_counted_together(self) -> None:
+        alert = fired(monitor.scan(facts(themes=self.themes(
+            ("assembly_difficulty", 0.14, True, 70),
+            ("missing_or_wrong_parts", 0.09, True, 70),
+            ("finish_color", 0.30, True, 70),
+        ))), "assembly_burden")
+        self.assertAlmostEqual(alert.value, 23.0)
+        self.assertEqual(alert.severity, monitor.MEDIUM)
+        self.assertEqual(len(alert.extra["themes"]), 2)
+
+    def test_transit_damage_is_a_risk_and_quotes_the_shelf_weight(self) -> None:
+        alert = fired(monitor.scan(facts(
+            snapshot={"avg_weight": 140.0},
+            themes=self.themes(("damage_in_transit", 0.22, True, 55)),
+        )), "transit_damage_load")
+        self.assertEqual(alert.kind, monitor.RISK)
+        self.assertEqual(alert.severity, monitor.HIGH)
+        self.assertIn("140", str(alert.extra["weight"]))
+
+    def test_a_thin_review_sample_fires_nothing(self) -> None:
+        """Under twenty negatives a theme is three people with one problem."""
+        thin = facts(themes=self.themes(("assembly_difficulty", 0.90, True, 8)))
+        ids = {a.id for a in monitor.scan(thin)}
+        self.assertEqual(
+            ids & {"design_fixable_share", "assembly_burden", "transit_damage_load"},
+            set())
+
+    # ---- the family as a whole ---------------------------------------------
+
+    def test_the_product_family_is_reachable_from_a_full_node(self) -> None:
+        rich = facts(
+            snapshot={"avg_weight": 112.0, "avg_volume": 41_000.0},
+            products=[{"variations": 5}, {"variations": 4}, {"variations": 6}],
+            themes=self.themes(("assembly_difficulty", 0.21, True, 64),
+                               ("damage_in_transit", 0.19, True, 64),
+                               ("missing_or_wrong_parts", 0.11, True, 64)),
+        )
+        family = {a.id for a in monitor.scan(rich) if a.family == "product"}
+        self.assertEqual(family, {"freight_heavy", "variation_depth_expected",
+                                  "design_fixable_share", "assembly_burden",
+                                  "transit_damage_load"})
+
+    def test_every_product_signal_has_both_translations(self) -> None:
+        """A template gap degrades to a bare id on screen, which reads as a bug."""
+        for signal_id in ("freight_heavy", "variation_depth_expected",
+                          "design_fixable_share", "assembly_burden",
+                          "transit_damage_load"):
+            with self.subTest(signal_id):
+                self.assertIn("zh", monitor._TEXT[signal_id])
+                self.assertIn("en", monitor._TEXT[signal_id])
+
+    def test_the_templates_render_with_real_fields(self) -> None:
+        """describe() swallows a KeyError into a bare title; catch it here instead."""
+        rich = facts(
+            snapshot={"avg_weight": 112.0, "avg_volume": 41_000.0},
+            products=[{"variations": 5}, {"variations": 4}, {"variations": 6}],
+            themes=self.themes(("assembly_difficulty", 0.21, True, 64),
+                               ("damage_in_transit", 0.19, True, 64)),
+        )
+        for alert in monitor.scan(rich):
+            if alert.family != "product":
+                continue
+            for language in ("zh", "en"):
+                with self.subTest(alert.id, language=language):
+                    title, detail = monitor.describe(alert, language)
+                    self.assertNotEqual(title, alert.id)
+                    self.assertTrue(detail, "empty detail means a template field is missing")
+
+
 class DescribeTests(unittest.TestCase):
     def test_every_signal_has_both_translations(self) -> None:
         for signal in monitor.SIGNALS:

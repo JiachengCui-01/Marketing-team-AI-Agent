@@ -51,6 +51,9 @@ def seed_warehouse(*, with_products: bool = True, with_keywords: bool = True) ->
         "top5_brand_crn": 0.3929, "new_count_l12": 45.0,
         "new_avg_revenue_l12": 17_000.0, "new_ratio_l12": 0.45,
         "return_ratio": 0.015674, "return_ratio_avg": 0.028763,
+        # Physical columns: market_research returns them with every call and the
+        # freight economics of this business are decided on them.
+        "avg_weight": 96.4, "avg_volume": 38_500.0,
     }, completeness=1.0, missing=[])
     store.upsert_node_snapshot("US", BUFFETS, "202607", {"total_revenue": 5_800_000.0})
     store.replace_distribution("US", BUFFETS, PERIOD, "price", [
@@ -64,9 +67,11 @@ def seed_warehouse(*, with_products: bool = True, with_keywords: bool = True) ->
     ])
     if with_products:
         store.upsert_products([{"marketplace": "US", "asin": "B01", "title": "Oak sideboard",
-                                "brand": "A"},
+                                "brand": "A", "fulfillment": "FBA", "variations": 6,
+                                "dimension": "60 x 18 x 32 inches", "weight": 128.6},
                                {"marketplace": "US", "asin": "B02", "title": "Walnut buffet",
-                                "brand": "B"}])
+                                "brand": "B", "fulfillment": "FBM", "variations": 3,
+                                "dimension": "48 x 16 x 30 inches", "weight": 74.2}])
         store.upsert_product_metrics([
             {"marketplace": "US", "asin": "B01", "period": PERIOD, "node_id_path": BUFFETS,
              "price": 429.0, "units": 1840.0, "revenue": 789_000.0, "bsr": 2140,
@@ -310,6 +315,133 @@ class CategoryTests(RenderTestCase):
                                         period=PERIOD)
         gaps = " ".join(record["dashboard"]["gaps"])
         self.assertIn("category_structure", gaps)
+
+
+class ProductViewTests(RenderTestCase):
+    """The report reads as a product development brief, not a traffic report.
+
+    Three separate mechanisms have to hold for that to be true: the warehouse's
+    physical columns have to reach the panel, the brief has to put them in front
+    of the model ahead of the keyword list, and the directives the model writes
+    back have to survive citation validation.
+    """
+
+    NARRATIVE = {
+        "structure_reading": "中段价格带最厚 [ev_price000001](evidence:ev_price000001)。",
+        "spec_reading": "货架均重 96.4 lb [ev_price000001](evidence:ev_price000001)。",
+        "design_directives": [
+            {"directive": "护角改注塑件", "driver": "packaging", "stage": "packaging",
+             "priority": "must_fix", "note": "破损集中在四角。",
+             "evidence_ids": ["ev_price000001"]},
+            {"directive": "腿部预装", "driver": "assembly", "stage": "engineering",
+             "priority": "differentiator", "note": "",
+             "evidence_ids": ["ev_price000001"]},
+            {"directive": "凭空想出来的改动", "driver": "to_validate", "stage": "concept",
+             "priority": "nice_to_have", "note": "", "evidence_ids": ["ev_invented00"]},
+        ],
+        "entry_cost_reading": "头部广告占比未采集。",
+        "verdict": "enter",
+        "verdict_rationale": "退货率只有同级一半，货运家具最实在的优势",
+        "notes": [],
+    }
+
+    def _client(self) -> FakeClient:
+        return FakeClient({"publish_category_narrative": self.NARRATIVE,
+                           "publish_opportunity_thesis": {"opportunities": []},
+                           "publish_pain_points": {"themes": []}})
+
+    # ---- the warehouse reaches the panel -----------------------------------
+
+    def test_the_spec_envelope_is_built_from_stored_vendor_columns(self) -> None:
+        """weight / dimension / variations were collected and then never shown."""
+        payload = render.build_category("US", BUFFETS, PERIOD, "zh")
+        spec = payload["spec"]
+        labels = {tile["label"]: tile["value"] for tile in spec["tiles"]}
+        self.assertIn("货架平均重量", labels)
+        self.assertEqual(labels["货架平均重量"], "96.4 lb")
+        self.assertEqual(labels["头部变体数中位"], "4.5")
+        by_asin = {row["asin"]: row for row in spec["rows"]}
+        self.assertEqual(by_asin["B01"]["dimension"], "60 x 18 x 32 inches")
+        self.assertEqual(by_asin["B01"]["weight"], 128.6)
+
+    def test_the_kpi_row_leads_with_the_product_constraints(self) -> None:
+        """Weight used to live in a 'supply and logistics' section below the fold."""
+        payload = render.build_category("US", BUFFETS, PERIOD, "zh")
+        labels = [tile["label"] for tile in payload["header"]["kpis"]]
+        self.assertIn("平均重量 / 体积", labels)
+        # Three product constraints — what it sells for, what it weighs, what a
+        # return costs — ahead of the market-structure tiles.
+        self.assertLess(labels.index("平均重量 / 体积"), labels.index("Top5 品牌集中度"))
+        self.assertLess(labels.index("退货率 / 同级均值"), labels.index("类目均分"))
+        self.assertEqual(labels[:4], ["类目月销售额", "均价", "平均重量 / 体积",
+                                      "退货率 / 同级均值"])
+
+    def test_the_department_board_ranks_categories_by_price_density(self) -> None:
+        """Freight scales with weight and the price does not; nothing else showed it."""
+        store.upsert_node_snapshot("US", "1055398:1063306:3733781:3733851", PERIOD, {
+            "total_revenue": 2_000_000.0, "avg_price": 90.0, "avg_weight": 60.0,
+        }, completeness=1.0, missing=[])
+        payload = render.build_overview("US", PERIOD, "zh")
+        rows = payload["physical"]
+        self.assertTrue(rows)
+        densities = [r["price_per_lb"] for r in rows if r["price_per_lb"] is not None]
+        self.assertEqual(densities, sorted(densities, reverse=True))
+        buffets = next(r for r in rows if r["node_key"] == BUFFETS)
+        self.assertAlmostEqual(buffets["price_per_lb"], round(186.91 / 96.4, 2))
+
+    # ---- the brief puts the product problem first --------------------------
+
+    def test_the_brief_leads_with_complaints_and_specs_not_keywords(self) -> None:
+        """What leads the input is what leads the output."""
+        store.replace_review_themes("US", BUFFETS, PERIOD, [{
+            "theme": "四角破损", "theme_label": "四角破损", "category": "damage_in_transit",
+            "severity": "major", "fixable_in_design": True, "return_driving": True,
+            "mention_count": 14, "sample_size": 60, "share_of_negative": 0.2333,
+            "summary": "", "quotes": [], "evidence_ids": [],
+        }])
+        payload = render.build_category("US", BUFFETS, PERIOD, "zh")
+        brief = render._category_brief(payload, "zh")
+        self.assertLess(brief.index("DESIGN-ACTIONABLE COMPLAINTS"),
+                        brief.index("PHYSICAL ENVELOPE"))
+        self.assertLess(brief.index("PHYSICAL ENVELOPE"),
+                        brief.index("DEMAND VOCABULARY"))
+        self.assertIn("fixable_in_design return_driving", brief)
+        self.assertIn("60 x 18 x 32 inches", brief)
+
+    def test_the_brief_survives_a_node_with_no_themes_or_specs(self) -> None:
+        """A gap must drop its heading, not print an empty one."""
+        payload = render.build_category("US", BUFFETS, PERIOD, "zh")
+        payload["pain"] = []
+        payload["spec"] = {"tiles": [], "rows": []}
+        brief = render._category_brief(payload, "zh")
+        self.assertIn("DEMAND VOCABULARY", brief)
+        self.assertNotIn("PHYSICAL ENVELOPE", brief)
+
+    # ---- the model's product output survives the round trip ----------------
+
+    def test_design_directives_reach_the_dashboard(self) -> None:
+        record = render.render_category(node_id_path=BUFFETS, client=self._client(),
+                                        period=PERIOD)
+        directives = record["dashboard"]["design_directives"]
+        self.assertEqual([d["directive"] for d in directives],
+                         ["护角改注塑件", "腿部预装"])
+        self.assertEqual(directives[0]["stage"], "packaging")
+        self.assertEqual(record["dashboard"]["spec_reading"][:4], "货架均重")
+
+    def test_an_uncited_directive_is_dropped_like_every_other_claim(self) -> None:
+        """A directive is an instruction to spend tooling money. It cites or it goes."""
+        record = render.render_category(node_id_path=BUFFETS, client=self._client(),
+                                        period=PERIOD)
+        written = [d["directive"] for d in record["dashboard"]["design_directives"]]
+        self.assertNotIn("凭空想出来的改动", written)
+
+    def test_the_narrative_tool_no_longer_asks_for_a_traffic_reading(self) -> None:
+        """It asked for one for months and no view ever rendered it."""
+        properties = render.TOOL_CATEGORY["input_schema"]["properties"]
+        self.assertNotIn("traffic_reading", properties)
+        self.assertIn("design_directives", properties)
+        self.assertIn("spec_reading", properties)
+        self.assertIn("entry_cost_reading", properties)
 
 
 class EndToEndTests(unittest.TestCase):
