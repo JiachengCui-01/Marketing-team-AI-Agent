@@ -138,27 +138,40 @@ def _category_structure(*, marketplace: str, period: str, subject_id: str,
                  order={"field": "total_amount", "desc": True}),
         bucket=bucket, purpose="category structure", marketplace=marketplace)
     calls += int(reply.billable)
-    if _ok(reply):
-        metrics.update(extract.extract_market_research(
-            reply, node_id_path=subject_id, period=period, index=index))
+    research = extract.extract_market_research(
+        reply, node_id_path=subject_id, period=period, index=index) if _ok(reply) else {}
+    metrics.update(research)
 
     stats = gateway.call(
         "market_research_statistics",
         _request(marketplace=marketplace, nodeIdPath=subject_id, month=period, topN=10),
         bucket=bucket, purpose="category statistics", marketplace=marketplace)
     calls += int(stats.billable)
-    if _ok(stats):
-        # Statistics fills head-listing metrics the roll-up does not carry; where
-        # they overlap the roll-up already won, so only new keys are added.
-        for key, value in extract.extract_market_statistics(
-                stats, node_id_path=subject_id, period=period, index=index).items():
-            metrics.setdefault(key, value)
+    statistics = extract.extract_market_statistics(
+        stats, node_id_path=subject_id, period=period, index=index) if _ok(stats) else {}
+    # Statistics fills head-listing metrics the roll-up does not carry; where they
+    # overlap the roll-up already won, so only new keys are added.
+    for key, value in statistics.items():
+        metrics.setdefault(key, value)
 
     if not metrics:
         return JobResult(status="pending", calls=calls,
                          detail=reply.detail or stats.detail or "no structure data")
     store.upsert_node_snapshot(marketplace, subject_id, period, metrics)
     store.record_evidence(index.all_rows())
+
+    # Keep whatever landed, but do not call the job done when only one half did.
+    # ``market_research`` alone carries revenue, concentration, the return rate and
+    # the newcomer metrics — five of the seven scoring factors. Reporting ``done``
+    # on the statistics half froze the whole month with a permanent hole: nothing
+    # retried it, and ``node_completeness`` read 100% while the score had inputs
+    # for barely a quarter of its weight.
+    missing = [name for name, got in (("market_research", research),
+                                      ("market_research_statistics", statistics))
+               if not got]
+    if missing:
+        return JobResult(status="pending", calls=calls,
+                         detail=f"partial: no rows from {', '.join(missing)}")
     return JobResult(status="done", calls=calls, detail=f"{len(metrics)} metrics")
 
 

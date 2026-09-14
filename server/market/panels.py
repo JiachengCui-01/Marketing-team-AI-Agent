@@ -201,8 +201,13 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
     alerts = [a for a in alerts if a["node_key"] in shown]
 
     root = snapshots.get(taxonomy.FURNITURE_ROOT) or {}
-    total_revenue = root.get("total_revenue") or sum(
-        (row["revenue_est"] or 0.0) for row in board)
+    # Summing `or 0.0` over rows that are all None yields 0.0, and the board then
+    # states "$0 monthly revenue" — a measurement — when the truth is that nothing
+    # was collected. Sum only what exists, and report nothing when nothing does.
+    observed = [row["revenue_est"] for row in board if row["revenue_est"] is not None]
+    total_revenue = scoring._num(root.get("total_revenue"))
+    if total_revenue is None:
+        total_revenue = sum(observed) if observed else None
     rising = sorted([r for r in board if (r["growth_pct"] or 0) > 0],
                     key=lambda r: r["growth_pct"], reverse=True)[:5]
     declining = sorted([r for r in board if (r["growth_pct"] or 0) < 0],
@@ -212,7 +217,9 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
 
     kpis = [
         tile("家具大盘月销售额" if zh else "Furniture monthly revenue",
-             money(total_revenue), estimated=True),
+             money(total_revenue),
+             hint="" if observed else ("本期未取到销售额" if zh else "not collected"),
+             estimated=True),
         tile("追踪子类目" if zh else "Tracked sub-categories", str(len(board))),
         tile("最佳机会类目" if zh else "Top opportunity",
              board[0]["label"] if board else "—",
@@ -225,9 +232,7 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
         tile("高价值机会信号" if zh else "High-value openings",
              str(watch["counts"]["opportunity_high"]),
              f"{watch['counts']['opportunity_total']} " + ("条机会" if zh else "openings")),
-        tile("退货率高于同级的类目" if zh else "Above-average return risk",
-             str(len([r for r in board
-                      if (r["return_ratio_pct"] or 0) > (r["return_ratio_avg_pct"] or 0)]))),
+        _return_risk_tile(board, zh),
         tile("已覆盖数据类型" if zh else "Vendor data families",
              f"{families['present']}/{families['total']}"),
     ]
@@ -269,6 +274,24 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
                        if r["return_ratio_pct"] is not None],
         "coverage": families,
     }
+
+
+def _return_risk_tile(board: Sequence[dict], zh: bool) -> dict:
+    """How many categories return worse than their peers — out of how many we know.
+
+    Counting only the rows that cleared the comparison made a month with no return
+    data read as "zero categories at risk", which is the most reassuring possible
+    way to say "we have no idea". The denominator is the honest part.
+    """
+    known = [r for r in board if r["return_ratio_pct"] is not None
+             and r["return_ratio_avg_pct"] is not None]
+    if not known:
+        return tile("退货率高于同级的类目" if zh else "Above-average return risk", "—",
+                    "本期未取到退货率" if zh else "return rate not collected")
+    worse = [r for r in known if r["return_ratio_pct"] > r["return_ratio_avg_pct"]]
+    return tile("退货率高于同级的类目" if zh else "Above-average return risk",
+                f"{len(worse)} / {len(known)}",
+                ("已知退货率的类目" if zh else "categories with a known rate"))
 
 
 def _department_trend(histories: Mapping[str, Sequence[dict]],

@@ -120,6 +120,43 @@ class JobExecutionTests(SweepTestCase):
         self.assertAlmostEqual(snap["return_ratio"], 0.015674)
         self.assertAlmostEqual(snap["hl_avg_price"], 151.11)  # from statistics
 
+    def test_a_half_empty_structure_job_is_not_called_done(self) -> None:
+        """The production failure this came from: ``market_research`` returned no
+        rows for a month still in progress, statistics answered normally, and the
+        job reported success. Nothing retried it, ``node_completeness`` read 100%,
+        and every board row scored on 27% of its weight for the rest of the month.
+        """
+        def half(tool: str, arguments: dict) -> str:
+            if tool == "market_research":
+                return '{"code": "OK", "data": {"items": [], "total": 0}}'
+            return fixture_vendor(tool, arguments)
+
+        with mock.patch.object(gateway.sellersprite, "call_tool", side_effect=half):
+            result = jobs.run_job(self._job("category_structure"))
+        self.assertEqual(result.status, "pending")
+        self.assertIn("market_research", result.detail)
+
+        # The half that did land is kept — it cost money and it is still true.
+        snap = store.get_node_snapshot("US", BUFFETS, PERIOD)
+        self.assertAlmostEqual(snap["hl_avg_price"], 151.11)
+        self.assertIsNone(snap["total_revenue"])
+
+        # And the node is not reported as fully collected.
+        completeness, missing = jobs.node_completeness("US", BUFFETS, PERIOD)
+        self.assertLess(completeness, 1.0)
+        self.assertIn("category_structure", missing)
+
+    def test_a_board_with_no_revenue_says_so_instead_of_printing_zero(self) -> None:
+        """Summing ``or 0.0`` over absent values states a measurement of $0."""
+        from server.market import panels
+        store.upsert_node_snapshot("US", BUFFETS, PERIOD, {"avg_price": 186.91})
+        board = panels.build_overview("US", PERIOD, "zh")
+        revenue = next(k for k in board["headline"]["kpis"] if "销售额" in k["label"])
+        returns = next(k for k in board["headline"]["kpis"] if "退货" in k["label"])
+        self.assertEqual(revenue["value"], "—")
+        self.assertTrue(revenue["hint"])
+        self.assertEqual(returns["value"], "—")
+
     def test_category_structure_records_evidence_for_every_metric(self) -> None:
         with mock.patch.object(gateway.sellersprite, "call_tool", side_effect=fixture_vendor):
             jobs.run_job(self._job("category_structure"))
@@ -274,14 +311,21 @@ class SweepTests(SweepTestCase):
             sweep.run_daily_sweep("US")
         self.assertFalse(sweep.is_due("US"))
 
-    def test_early_in_the_month_the_sweep_still_collects_last_month(self) -> None:
-        """Otherwise the board goes blank on the 1st and refills, which reads as a
-        market collapse rather than a calendar."""
+    def test_the_sweep_only_ever_collects_a_closed_month(self) -> None:
+        """``market_research`` is a monthly aggregate and the vendor publishes it
+        once the month has ended; asked for a month in progress it returns no rows
+        at all. Targeting the current month left the board holding only the live
+        listing snapshot: $0 revenue and an evidence coverage of 0.27."""
         from datetime import datetime
         from zoneinfo import ZoneInfo
         tz = ZoneInfo("America/Los_Angeles")
-        self.assertEqual(sweep.target_period(datetime(2026, 9, 2, tzinfo=tz)), "202608")
-        self.assertEqual(sweep.target_period(datetime(2026, 9, 20, tzinfo=tz)), "202609")
+        for day in (1, 2, 6, 15, 20, 28):
+            with self.subTest(day=day):
+                self.assertEqual(
+                    sweep.target_period(datetime(2026, 9, day, tzinfo=tz)), "202608")
+        # And it rolls over on the 1st, not mid-month.
+        self.assertEqual(sweep.target_period(datetime(2026, 10, 1, tzinfo=tz)), "202609")
+        self.assertEqual(sweep.target_period(datetime(2026, 1, 3, tzinfo=tz)), "202512")
 
     def test_a_full_sweep_fills_a_node_end_to_end(self) -> None:
         gateway.DAILY_LIMITS[gateway.BUCKET_SWEEP] = 200

@@ -31,14 +31,23 @@ def is_due(marketplace: str = "US") -> bool:
 
 
 def target_period(now=None) -> str:
-    """Which month a sweep should collect.
+    """Which month a sweep should collect: the last **closed** one, always.
 
-    Early in a month the current month has almost nothing in it, so the first days
-    keep filling the previous month — otherwise the board would go blank on the 1st
-    and slowly refill, which reads as a market collapse rather than a calendar.
+    ``market_research`` is a monthly aggregate — revenue, units, brand
+    concentration, the return rate, the newcomer ratios — and the vendor only
+    publishes it once a month has ended. Asked for a month still in progress it
+    returns no rows at all, which is not the same as returning small ones.
+
+    This used to switch to the current month from the 6th, on the theory that by
+    then it had "firmed up". It had not: the board then held only the fields that
+    come from ``market_research_statistics`` (a live listing snapshot, which
+    answers any time), so revenue read as $0, the return rate was unknown for
+    every category, and five of the seven scoring factors scored zero — an
+    evidence coverage of 0.27 on every row.
+
+    A board dated last month is accurate. A board dated this month is empty.
     """
-    moment = now or gateway.sweep_now()
-    return gateway.previous_period(moment) if moment.day <= 5 else gateway.current_period(moment)
+    return gateway.previous_period(now or gateway.sweep_now())
 
 
 def run_daily_sweep(marketplace: str = "US", *, budget: int | None = None) -> dict:
