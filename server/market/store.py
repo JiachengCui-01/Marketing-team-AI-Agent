@@ -216,22 +216,48 @@ def list_node_snapshots(marketplace: str, period: str) -> list[dict]:
     return rows
 
 
-def latest_period(marketplace: str, node_id_path: str | None = None) -> str | None:
-    """The newest month that actually has data.
+# The column that decides whether a month is worth rendering. It is the one the
+# board, the treemap, the trend line and three scoring factors all read, and it
+# only ever arrives from ``market_research`` — the vendor's monthly aggregate.
+_USABLE_COLUMN = "total_revenue"
 
-    Callers used to default to "last month", which silently misses whenever the
-    sweep has already rolled the current month in — the dashboard shows 202609
-    while the PRD endpoint looks in 202608 and reports a data gap for a category
-    plainly on screen.
+
+def latest_period(marketplace: str, node_id_path: str | None = None,
+                  *, usable_only: bool = True) -> str | None:
+    """The newest month worth rendering — not merely the newest month that exists.
+
+    ``MAX(period)`` was the obvious rule and it was wrong at every month
+    boundary. The vendor publishes monthly aggregates only once a month closes,
+    but the live listing snapshot answers immediately, so a partially-collected
+    current month leaves rows holding an average price and nothing else. Ranked
+    by ``MAX(period)`` that stub outranks a complete previous month, and the
+    board renders the emptier of the two: $0 revenue, no return rates, and five
+    of seven scoring factors at zero.
+
+    So prefer the newest month that carries the aggregate. If none does — a fresh
+    install, or a vendor outage across every month — fall back to the newest
+    month with any rows at all, because rendering something honestly marked
+    incomplete beats rendering nothing.
     """
     db._ensure()
-    sql = "SELECT MAX(period) AS period FROM market_node_snapshots WHERE marketplace = ?"
+    where = "marketplace = ?"
     params: list[Any] = [marketplace]
     if node_id_path:
-        sql += " AND node_id_path = ?"
+        where += " AND node_id_path = ?"
         params.append(node_id_path)
+
     with db.connect() as conn:
-        row = conn.execute(sql, params).fetchone()
+        if usable_only:
+            row = conn.execute(
+                f"SELECT MAX(period) AS period FROM market_node_snapshots "
+                f"WHERE {where} AND {_USABLE_COLUMN} IS NOT NULL", params,
+            ).fetchone()
+            if row and row["period"]:
+                return str(row["period"])
+        row = conn.execute(
+            f"SELECT MAX(period) AS period FROM market_node_snapshots WHERE {where}",
+            params,
+        ).fetchone()
     return row["period"] if row and row["period"] else None
 
 
@@ -877,10 +903,13 @@ def enqueue_job(
     *, marketplace: str, job_kind: str, subject_kind: str, subject_id: str, period: str,
     priority: int = 100, est_calls: int = 1, next_due_at: float | None = None,
 ) -> None:
-    """Add a job, or revive one that already exists for the same key.
+    """Add a job, leave an existing one alone, and wake a parked one.
 
-    Re-enqueueing a ``done`` job is how a new month reopens work: the unique key
-    includes ``period``, so last month's completed rows are left alone.
+    A new month reopens work by key: the unique key includes ``period``, so last
+    month's completed rows are untouched. The one row that must change is a
+    **parked** one — parked means "this month had not closed yet", and the whole
+    point is that it eventually does. Without the wake-up, parking a month would
+    silently retire it.
     """
     db._ensure()
     now = _now()
@@ -890,7 +919,16 @@ def enqueue_job(
             "period, priority, est_calls, next_due_at, status, attempts, created_at, "
             "updated_at) VALUES (?,?,?,?,?,?,?,?,?,'pending',0,?,?) "
             "ON CONFLICT(marketplace, job_kind, subject_kind, subject_id, period) "
-            "DO NOTHING",
+            "DO UPDATE SET "
+            "  status = CASE WHEN market_jobs.status = 'parked' THEN 'pending' "
+            "                ELSE market_jobs.status END, "
+            "  attempts = CASE WHEN market_jobs.status = 'parked' THEN 0 "
+            "                  ELSE market_jobs.attempts END, "
+            "  next_due_at = CASE WHEN market_jobs.status = 'parked' THEN excluded.next_due_at "
+            "                     ELSE market_jobs.next_due_at END, "
+            "  last_error = CASE WHEN market_jobs.status = 'parked' THEN NULL "
+            "                    ELSE market_jobs.last_error END, "
+            "  updated_at = excluded.updated_at",
             (uuid.uuid4().hex, marketplace, job_kind, subject_kind, subject_id, period,
              priority, est_calls, next_due_at or now, now, now),
         )
@@ -904,6 +942,27 @@ def due_jobs(marketplace: str, *, now: float | None = None, limit: int = 200) ->
             "AND next_due_at <= ? ORDER BY priority ASC, next_due_at ASC LIMIT ?",
             (marketplace, now or _now(), limit),
         ))
+
+
+def park_future_jobs(marketplace: str, period: str) -> int:
+    """Park pending jobs for months newer than the one being collected.
+
+    The vendor publishes a month's aggregates only after it closes, so jobs
+    queued against a month still in progress can never succeed. Left pending
+    they are retried three times each before blocking — for twelve nodes that is
+    most of a day's budget spent proving that September is not over yet.
+
+    Parked, not deleted: ``plan_period`` re-enqueues the month once it becomes
+    the target, and the row keeps its history.
+    """
+    db._ensure()
+    with db.connect() as conn:
+        cursor = conn.execute(
+            "UPDATE market_jobs SET status = 'parked', last_error = 'period not closed' "
+            "WHERE marketplace = ? AND status = 'pending' AND period > ?",
+            (marketplace, period),
+        )
+        return cursor.rowcount
 
 
 def queue_depth(marketplace: str) -> int:

@@ -146,6 +146,49 @@ class JobExecutionTests(SweepTestCase):
         self.assertLess(completeness, 1.0)
         self.assertIn("category_structure", missing)
 
+    def test_jobs_for_an_unclosed_month_are_parked_not_retried(self) -> None:
+        """Retrying them is a day's budget spent proving the calendar."""
+        store.enqueue_job(marketplace="US", job_kind="category_structure",
+                          subject_kind="node", subject_id=BUFFETS, period="209901",
+                          priority=30, est_calls=2)
+        self.assertEqual(store.park_future_jobs("US", PERIOD), 1)
+        self.assertEqual([j for j in store.due_jobs("US", limit=500)
+                          if j["period"] == "209901"], [])
+
+    def test_a_parked_month_wakes_when_it_closes(self) -> None:
+        """Parking a month must not quietly retire it."""
+        store.enqueue_job(marketplace="US", job_kind="category_structure",
+                          subject_kind="node", subject_id=BUFFETS, period="209901",
+                          priority=30, est_calls=2)
+        store.park_future_jobs("US", PERIOD)
+        jobs.plan_period("US", "209901")
+        woken = [j for j in store.due_jobs("US", limit=500)
+                 if j["period"] == "209901" and j["subject_id"] == BUFFETS
+                 and j["job_kind"] == "category_structure"]
+        self.assertEqual(len(woken), 1)
+        self.assertEqual(woken[0]["attempts"], 0)
+
+    def test_waking_does_not_reopen_a_finished_job(self) -> None:
+        job = self._job("category_structure")
+        store.finish_job(job["id"], status="done")
+        jobs.plan_period("US", PERIOD)
+        reopened = [j for j in store.due_jobs("US", limit=500)
+                    if j["id"] == job["id"]]
+        self.assertEqual(reopened, [])
+
+    def test_the_board_renders_the_newest_usable_month_not_the_newest_one(self) -> None:
+        """A stub current month must not outrank a complete previous month."""
+        store.upsert_node_snapshot("US", BUFFETS, "202608", {
+            "total_revenue": 6_907_337.97, "avg_price": 186.91})
+        store.upsert_node_snapshot("US", BUFFETS, "202609", {"avg_price": 186.91})
+        self.assertEqual(store.latest_period("US", usable_only=False), "202609")
+        self.assertEqual(store.latest_period("US"), "202608")
+
+    def test_a_warehouse_with_no_revenue_anywhere_still_renders_something(self) -> None:
+        """Nothing to prefer is not a reason to show a blank page."""
+        store.upsert_node_snapshot("US", BUFFETS, "202609", {"avg_price": 186.91})
+        self.assertEqual(store.latest_period("US"), "202609")
+
     def test_a_board_with_no_revenue_says_so_instead_of_printing_zero(self) -> None:
         """Summing ``or 0.0`` over absent values states a measurement of $0."""
         from server.market import panels
