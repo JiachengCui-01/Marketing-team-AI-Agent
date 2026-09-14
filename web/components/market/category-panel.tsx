@@ -38,6 +38,7 @@ import {
   DataGapCard,
   EvidenceChip,
   GapList,
+  Block,
   KpiRow,
   MonitorBoard,
   Section,
@@ -241,7 +242,7 @@ export function MarketCategoryPanel({
                           summary={dashboard?.monitor_summary}
                           showNode={false} />
 
-            <Section title={t.cdOpportunities}>
+            <Section title={t.cdOpportunities} data={dashboard?.opportunities}>
               <div className="space-y-2">
                 {(dashboard?.opportunities ?? []).map((opportunity, index) => (
                   <OpportunityCard key={opportunity.id} rank={index + 1}
@@ -252,32 +253,42 @@ export function MarketCategoryPanel({
               </div>
             </Section>
 
-            <div className="grid gap-4 lg:grid-cols-2">
-              <Section title={t.cdBenchmark} hint={t.cdBenchmarkHint}>
+            <div className="grid gap-4 lg:grid-cols-2 empty:hidden">
+              <Section title={t.cdBenchmark} hint={t.cdBenchmarkHint}
+                       data={(dashboard?.benchmark ?? []).length >= 3
+                         ? dashboard?.benchmark : null}>
                 <Radar axes={dashboard?.benchmark ?? []} parityLabel={t.cdBenchmarkParity} />
               </Section>
-              <Section title={t.cdStructure}>
-                <div className="mb-1 text-[11px] text-fg-muted">{t.cdPriceBands}</div>
-                <BandHistogram bands={dashboard?.structure?.price_bands ?? []}
-                               listingLabel={t.gmPriceListings}
-                               revenueLabel={t.gmPriceRevenue} />
-                <div className="mt-3 text-[11px] text-fg-muted">{t.cdBrands}</div>
-                <ShareBar
-                  rows={(dashboard?.structure?.brands ?? []).slice(0, 6).map((b) => ({
-                    label: b.entity, share: (b.revenue_ratio ?? 0) * 100,
-                  }))}
-                  restLabel="other"
-                />
-                <div className="mt-3 text-[11px] text-fg-muted">{t.cdTrend}</div>
-                <Sparkline points={(dashboard?.structure?.trend ?? []).map((p) => ({
-                  period: p.period, value: p.value,
-                }))} />
+              <Section title={t.cdStructure} data={[dashboard?.structure?.price_bands,
+                                      dashboard?.structure?.brands,
+                                      (dashboard?.structure?.trend ?? []).length > 1
+                                        ? dashboard?.structure?.trend : null]}>
+                <Block label={t.cdPriceBands} data={dashboard?.structure?.price_bands}>
+                  <BandHistogram bands={dashboard?.structure?.price_bands ?? []}
+                                 listingLabel={t.gmPriceListings}
+                                 revenueLabel={t.gmPriceRevenue} />
+                </Block>
+                <Block label={t.cdBrands} data={dashboard?.structure?.brands}>
+                  <ShareBar
+                    rows={(dashboard?.structure?.brands ?? []).slice(0, 6).map((b) => ({
+                      label: b.entity, share: (b.revenue_ratio ?? 0) * 100,
+                    }))}
+                    restLabel="other"
+                  />
+                </Block>
+                <Block label={t.cdTrend}
+                       data={(dashboard?.structure?.trend ?? []).length > 1
+                         ? dashboard?.structure?.trend : null}>
+                  <Sparkline points={(dashboard?.structure?.trend ?? []).map((p) => ({
+                    period: p.period, value: p.value,
+                  }))} />
+                </Block>
               </Section>
             </div>
 
             {(dashboard?.distributions ?? []).length ? (
               <Section title={t.cdDistributions}>
-                <div className="grid gap-4 lg:grid-cols-2">
+                <div className="grid gap-4 lg:grid-cols-2 empty:hidden">
                   {(dashboard?.distributions ?? []).map((panel) => (
                     <div key={panel.kind}>
                       <div className="mb-1 text-[11px] text-fg-muted">{panel.label}</div>
@@ -290,7 +301,7 @@ export function MarketCategoryPanel({
 
             {(dashboard?.concentration ?? []).length ? (
               <Section title={t.cdConcentration}>
-                <div className="grid gap-4 lg:grid-cols-2">
+                <div className="grid gap-4 lg:grid-cols-2 empty:hidden">
                   {(dashboard?.concentration ?? []).map((panel: any) => (
                     <div key={panel.kind}>
                       <div className="mb-1 text-[11px] text-fg-muted">{panel.label}</div>
@@ -306,8 +317,8 @@ export function MarketCategoryPanel({
               </Section>
             ) : null}
 
-            <div className="grid gap-4 lg:grid-cols-2">
-              <Section title={t.cdSupply}>
+            <div className="grid gap-4 lg:grid-cols-2 empty:hidden">
+              <Section title={t.cdSupply} data={dashboard?.supply}>
                 <BiTable
                   rows={[
                     { k: t.gmSupplyProducts, v: dashboard?.supply?.products },
@@ -324,7 +335,7 @@ export function MarketCategoryPanel({
                         : "—" },
                   ]}
                 />
-                <div className="mt-3">
+                <Block label={t.gmFulfilment} data={dashboard?.fulfilment}>
                   <StackedRows
                     rows={[{ label: t.gmFulfilment, ...(dashboard?.fulfilment ?? {}) }]}
                     series={[
@@ -333,9 +344,11 @@ export function MarketCategoryPanel({
                       { key: "amazon_self_pct", label: t.gmFulfilmentAmazon },
                     ]}
                   />
-                </div>
+                </Block>
               </Section>
-              <Section title={t.cdOffAmazon} hint={t.cdOffAmazonHint}>
+              <Section title={t.cdOffAmazon} hint={t.cdOffAmazonHint}
+                       data={[dashboard?.offamazon,
+                              dashboard?.structure?.glance_views]}>
                 <IndexedCompare
                   series={[
                     { key: "trend", label: t.cdOffAmazon,
@@ -348,18 +361,17 @@ export function MarketCategoryPanel({
                       })) },
                   ]}
                 />
-                {(dashboard?.structure?.glance_views ?? []).length ? (
-                  <>
-                    <div className="mt-3 text-[11px] text-fg-muted">{t.cdGlanceViews}</div>
-                    <Sparkline points={(dashboard?.structure?.glance_views ?? []).map((p) => ({
-                      period: p.period, value: p.value,
-                    }))} height={60} />
-                  </>
-                ) : null}
+                <Block label={t.cdGlanceViews}
+                       data={(dashboard?.structure?.glance_views ?? []).length > 1
+                         ? dashboard?.structure?.glance_views : null}>
+                  <Sparkline points={(dashboard?.structure?.glance_views ?? []).map((p) => ({
+                    period: p.period, value: p.value,
+                  }))} height={60} />
+                </Block>
               </Section>
             </div>
 
-            <Section title={t.cdPain}>
+            <Section title={t.cdPain} data={dashboard?.pain}>
               <div className="grid gap-2 sm:grid-cols-2">
                 {(dashboard?.pain ?? []).map((theme) => (
                   <div key={theme.theme} className="bi-card">
@@ -398,7 +410,7 @@ export function MarketCategoryPanel({
               </div>
             </Section>
 
-            <Section title={t.cdCompetitors}>
+            <Section title={t.cdCompetitors} data={dashboard?.competitors}>
               <BiTable
                 rows={dashboard?.competitors ?? []}
                 columns={[
@@ -417,7 +429,7 @@ export function MarketCategoryPanel({
 
             {(dashboard?.history ?? []).length ? (
               <Section title={t.cdHistory}>
-                <div className="grid gap-4 lg:grid-cols-2">
+                <div className="grid gap-4 lg:grid-cols-2 empty:hidden">
                   {(dashboard?.history ?? []).map((row) => (
                     <div key={row.asin}>
                       <div className="mb-1 truncate text-[11px] text-fg-muted"
@@ -437,7 +449,7 @@ export function MarketCategoryPanel({
               </Section>
             ) : null}
 
-            <Section title={t.cdKeywords}>
+            <Section title={t.cdKeywords} data={dashboard?.keywords}>
               <BiTable
                 rows={(dashboard?.keywords ?? []).slice(0, 20)}
                 columns={[
@@ -476,7 +488,7 @@ export function MarketCategoryPanel({
               </Section>
             ) : null}
 
-            <Section title={t.cdTraffic}>
+            <Section title={t.cdTraffic} data={dashboard?.traffic}>
               <div className="space-y-2">
                 {(dashboard?.traffic ?? []).map((row) => (
                   <div key={row.asin}>
@@ -500,7 +512,7 @@ export function MarketCategoryPanel({
               </div>
             </Section>
 
-            <Section title={t.evTitle}>
+            <Section title={t.evTitle} data={report.evidence}>
               <BiTable
                 rows={(report.evidence ?? []).slice(0, 40)}
                 columns={[

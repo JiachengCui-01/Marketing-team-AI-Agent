@@ -76,6 +76,24 @@ def tile(label: str, value: str, hint: str = "", estimated: bool = False) -> dic
     return {"label": label, "value": value, "hint": hint, "estimated": estimated}
 
 
+def filled(tiles: Sequence[dict]) -> list[dict]:
+    """Drop the tiles that have no number behind them.
+
+    A KPI reading "—" is not a KPI; it is the absence of one, and a row of them
+    makes the ones that did arrive harder to find. What is missing is still said
+    once — by the coverage strip and the gap list — rather than once per tile.
+    """
+    out = []
+    for item in tiles:
+        value = str(item.get("value") or "")
+        # A composite value like "— / — / —" is just as empty as a bare dash, and
+        # it slips past an equality check.
+        if not value.replace("—", "").replace("/", "").replace("%", "").strip():
+            continue
+        out.append(item)
+    return out
+
+
 def _zh(language: str) -> bool:
     return language != "en"
 
@@ -375,7 +393,7 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
     ]
 
     return {
-        "headline": {"kpis": kpis},
+        "headline": {"kpis": filled(kpis)},
         "coverage_stats": coverage_stats,
         "board": board,
         "monitor": watch,
@@ -689,7 +707,7 @@ def build_category(marketplace: str, node_id_path: str, period: str,
             "score_confidence": score["confidence"],
             "completeness": completeness,
             "missing": missing,
-            "kpis": _category_kpis(snap, zh),
+            "kpis": filled(_category_kpis(snap, zh)),
         },
         "monitor": watch,
         "structure": {
@@ -748,7 +766,9 @@ def _category_kpis(snap: Mapping[str, Any], zh: bool) -> list[dict]:
              " / ".join(str(int(v)) if v is not None else "—"
                         for v in (scoring._num(snap.get("total_products")),
                                   scoring._num(snap.get("sellers")),
-                                  scoring._num(snap.get("brands"))))),
+                                  scoring._num(snap.get("brands"))))
+             if any(snap.get(k) is not None
+                    for k in ("total_products", "sellers", "brands")) else "—"),
         tile("Top5 品牌集中度" if zh else "Top-5 brand share",
              f"{pct(snap.get('top5_brand_crn'))}%"
              if snap.get("top5_brand_crn") is not None else "—"),

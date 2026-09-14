@@ -32,6 +32,7 @@ import {
   BiTable,
   ConfidenceNote,
   CoverageStrip,
+  Block,
   CurrentPanel,
   DataGapCard,
   EvidenceChip,
@@ -182,26 +183,31 @@ export function MarketOverviewPanel({
               </div>
             </Section>
 
-            <div className="grid gap-4 lg:grid-cols-2">
-              <Section title={t.gmTreemap} hint={t.gmTreemapHint}>
+            <div className="grid gap-4 lg:grid-cols-2 empty:hidden">
+              <Section title={t.gmTreemap} hint={t.gmTreemapHint} data={dashboard?.treemap}>
                 <Treemap items={dashboard?.treemap ?? []} onPick={pick} />
               </Section>
-              <Section title={t.gmTrend}>
-                <Sparkline points={(dashboard?.trend ?? []).map((p) => ({
-                  period: p.period, value: p.value,
-                }))} height={96} />
+              <Section title={t.gmTrend}
+                       data={[(dashboard?.trend ?? []).length > 1 ? dashboard?.trend : null,
+                              dashboard?.movers?.rising, dashboard?.movers?.declining]}>
+                <Block label={t.gmTrend}
+                       data={(dashboard?.trend ?? []).length > 1 ? dashboard?.trend : null}>
+                  <Sparkline points={(dashboard?.trend ?? []).map((p) => ({
+                    period: p.period, value: p.value,
+                  }))} height={96} />
+                </Block>
                 <div className="mt-3">
                   <Movers dashboard={dashboard} onDrill={onDrill} inline />
                 </div>
               </Section>
             </div>
 
-            <Section title={t.gmMap}>
+            <Section title={t.gmMap} data={(dashboard?.map ?? []).filter((p) => p.growth_pct !== null)}>
               <Quadrant points={dashboard?.map ?? []} xLabel={t.gmMapX} yLabel={t.gmMapY}
                         onPick={pick} />
             </Section>
 
-            <Section title={t.gmReturnRisk}>
+            <Section title={t.gmReturnRisk} data={dashboard?.returnrisk}>
               <BiTable
                 rows={dashboard?.returnrisk ?? []}
                 onPick={(row: any) => onDrill({ nodeKey: row.node_key, label: row.label })}
@@ -220,13 +226,13 @@ export function MarketOverviewPanel({
               />
             </Section>
 
-            <Section title={t.gmPrice}>
+            <Section title={t.gmPrice} data={dashboard?.price}>
               <BandHistogram bands={dashboard?.price ?? []}
                              listingLabel={t.gmPriceListings}
                              revenueLabel={t.gmPriceRevenue} />
             </Section>
 
-            <Section title={t.gmNewProduct}>
+            <Section title={t.gmNewProduct} data={dashboard?.newproduct}>
               <BiTable
                 rows={dashboard?.newproduct ?? []}
                 onPick={(row: any) => onDrill({ nodeKey: row.node_key, label: row.label })}
@@ -245,8 +251,8 @@ export function MarketOverviewPanel({
               />
             </Section>
 
-            <div className="grid gap-4 lg:grid-cols-2">
-              <Section title={t.gmSupply}>
+            <div className="grid gap-4 lg:grid-cols-2 empty:hidden">
+              <Section title={t.gmSupply} data={dashboard?.supply}>
                 <BiTable
                   rows={dashboard?.supply ?? []}
                   onPick={(row: any) => onDrill({ nodeKey: row.node_key, label: row.label })}
@@ -260,7 +266,7 @@ export function MarketOverviewPanel({
                   ]}
                 />
               </Section>
-              <Section title={t.gmQuality}>
+              <Section title={t.gmQuality} data={dashboard?.quality}>
                 <BiTable
                   rows={dashboard?.quality ?? []}
                   onPick={(row: any) => onDrill({ nodeKey: row.node_key, label: row.label })}
@@ -280,8 +286,8 @@ export function MarketOverviewPanel({
               </Section>
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-2">
-              <Section title={t.gmFulfilment}>
+            <div className="grid gap-4 lg:grid-cols-2 empty:hidden">
+              <Section title={t.gmFulfilment} data={dashboard?.fulfilment}>
                 <StackedRows
                   rows={dashboard?.fulfilment ?? []}
                   onPick={pick}
@@ -292,7 +298,7 @@ export function MarketOverviewPanel({
                   ]}
                 />
               </Section>
-              <Section title={t.gmConversion}>
+              <Section title={t.gmConversion} data={dashboard?.conversion}>
                 <BiTable
                   rows={dashboard?.conversion ?? []}
                   onPick={(row: any) => onDrill({ nodeKey: row.node_key, label: row.label })}
@@ -310,7 +316,7 @@ export function MarketOverviewPanel({
               </Section>
             </div>
 
-            <Section title={t.gmConcentration}>
+            <Section title={t.gmConcentration} data={dashboard?.concentration}>
               <BiTable
                 rows={dashboard?.concentration ?? []}
                 onPick={(row: any) => onDrill({ nodeKey: row.node_key, label: row.label })}

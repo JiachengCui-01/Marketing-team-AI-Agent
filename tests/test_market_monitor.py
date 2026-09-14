@@ -398,6 +398,27 @@ class PanelTests(unittest.TestCase):
         self.assertNotEqual(revenue["value"], "—")
         self.assertIn("头部", revenue["hint"])
 
+    def test_a_kpi_with_nothing_behind_it_is_not_shipped(self) -> None:
+        """Including the composite ones — "— / — / —" slips an equality check."""
+        db.reset_for_tests()
+        taxonomy.ensure_nodes()
+        store.upsert_node_snapshot("US", BUFFETS, PERIOD, {"avg_price": 186.91})
+        header = panels.build_category("US", BUFFETS, PERIOD, "zh")["header"]
+        values = [k["value"] for k in header["kpis"]]
+        self.assertNotIn("—", values)
+        self.assertFalse([v for v in values
+                          if not v.replace("—", "").replace("/", "").strip()])
+        self.assertIn("$187", values)          # the one that did arrive survives
+
+    def test_a_partly_filled_composite_kpi_is_kept(self) -> None:
+        """Two thirds of an answer is still an answer."""
+        db.reset_for_tests()
+        taxonomy.ensure_nodes()
+        store.upsert_node_snapshot("US", BUFFETS, PERIOD,
+                                   {"total_products": 1816, "brands": 59})
+        header = panels.build_category("US", BUFFETS, PERIOD, "zh")["header"]
+        self.assertIn("1816 / — / 59", [k["value"] for k in header["kpis"]])
+
     def test_the_board_carries_the_monitor_and_the_coverage_panel(self) -> None:
         board = panels.build_overview("US", PERIOD, "zh")
         self.assertTrue(board["board"])

@@ -237,16 +237,37 @@ class JobExecutionTests(SweepTestCase):
         store.upsert_node_snapshot("US", BUFFETS, "202609", {"avg_price": 186.91})
         self.assertEqual(store.latest_period("US"), "202609")
 
-    def test_a_board_with_no_revenue_says_so_instead_of_printing_zero(self) -> None:
-        """Summing ``or 0.0`` over absent values states a measurement of $0."""
+    def test_a_board_with_no_revenue_drops_the_tile_rather_than_printing_zero(self) -> None:
+        """Summing ``or 0.0`` over absent values states a measurement of $0.
+
+        The tile is now dropped outright rather than shown as an em-dash: a KPI
+        with nothing behind it is not a KPI, and a row of them buries the ones
+        that did arrive.
+        """
         from server.market import panels
         store.upsert_node_snapshot("US", BUFFETS, PERIOD, {"avg_price": 186.91})
         board = panels.build_overview("US", PERIOD, "zh")
-        revenue = next(k for k in board["headline"]["kpis"] if "销售额" in k["label"])
-        returns = next(k for k in board["headline"]["kpis"] if "退货" in k["label"])
-        self.assertEqual(revenue["value"], "—")
-        self.assertTrue(revenue["hint"])
-        self.assertEqual(returns["value"], "—")
+        labels = [k["label"] for k in board["headline"]["kpis"]]
+        self.assertFalse([label for label in labels if "销售额" in label])
+        self.assertFalse([label for label in labels if "退货" in label])
+        # No money figure may be printed as zero when none was collected. A
+        # *count* of zero is a different thing — "no alerts fired" is an answer,
+        # and dropping it would hide a real result.
+        self.assertFalse([k for k in board["headline"]["kpis"]
+                          if k["value"] in ("$0", "—")])
+        self.assertIn("0", [k["value"] for k in board["headline"]["kpis"]])
+        # The tiles that did arrive still show.
+        self.assertTrue([label for label in labels if "子类目" in label])
+
+    def test_what_was_dropped_is_still_reported_once(self) -> None:
+        """Hiding empty sections must not hide that they are empty."""
+        from server.market import panels
+        store.upsert_node_snapshot("US", BUFFETS, PERIOD, {"avg_price": 186.91})
+        board = panels.build_overview("US", PERIOD, "zh")
+        missing = {f["key"] for f in board["coverage"]["families"] if not f["present"]}
+        self.assertIn("distribution_price", missing)
+        self.assertIn("product_research", missing)
+        self.assertLess(board["coverage"]["present"], board["coverage"]["total"])
 
     def test_category_structure_records_evidence_for_every_metric(self) -> None:
         with mock.patch.object(gateway.sellersprite, "call_tool", side_effect=fixture_vendor):

@@ -20,17 +20,35 @@ import { Modal } from "@/components/modal";
 import { fmtMoney } from "@/components/market/charts";
 import { CitationMarkdown } from "@/components/citation-markdown";
 
+/** True when a section has nothing to show: no rows, no values, all nulls. */
+function isEmpty(data: unknown): boolean {
+  if (data === null || data === undefined || data === false) return true;
+  if (Array.isArray(data)) return data.every((item) => isEmpty(item));
+  if (typeof data === "object") {
+    const values = Object.values(data as Record<string, unknown>);
+    return values.length === 0 || values.every((v) => v === null || v === undefined);
+  }
+  return data === "" || data === "—";
+}
+
 export function Section({
   title,
   hint,
   right,
+  data,
   children,
 }: {
   title: string;
   hint?: string;
   right?: React.ReactNode;
+  /** The section's own data. When it is empty the section is not rendered at
+   *  all — a heading over a blank chart says nothing except that something
+   *  broke. What is missing is still reported once, by the coverage strip and
+   *  the gap list, instead of twelve times as a row of em-dashes. */
+  data?: unknown;
   children: React.ReactNode;
 }) {
+  if (data !== undefined && isEmpty(data)) return null;
   return (
     <section className="bi-section">
       <div className="bi-section-title">
@@ -43,11 +61,34 @@ export function Section({
   );
 }
 
+/** A labelled block inside a composite section, dropped when its data is
+ *  missing. Without this a section survives because one of its three charts has
+ *  data, and the other two leave a heading over nothing. */
+export function Block({
+  label,
+  data,
+  children,
+}: {
+  label: string;
+  data: unknown;
+  children: React.ReactNode;
+}) {
+  if (isEmpty(data)) return null;
+  return (
+    <div className="mt-3 first:mt-0">
+      <div className="mb-1 text-[11px] text-fg-muted">{label}</div>
+      {children}
+    </div>
+  );
+}
+
 export function KpiRow({ kpis }: { kpis: MarketKpi[] }) {
   const { t } = useI18n();
+  const shown = kpis.filter((kpi) => kpi.value && kpi.value !== "—");
+  if (!shown.length) return null;
   return (
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-      {kpis.map((kpi) => (
+      {shown.map((kpi) => (
         <div key={kpi.label} className="bi-tile">
           <div className="flex items-center gap-1">
             <span className="bi-tile-label">{kpi.label}</span>
