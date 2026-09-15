@@ -538,9 +538,22 @@ def extract_keywords(
             "grain": "month",
             "node_id_path": node_id_path,
             "searches": number(item.get("searches")),
-            "searches_growth": number(item.get("growth") or item.get("searchRankGrowthRate")),
+            # Two windows, kept apart. `searchMonthlyCr` is month over month and
+            # `growth` (requested with withYearlyGrowth) is year over year; they
+            # disagree constantly in a seasonal category, which is the point.
+            "searches_mom_pct": number(item.get("searchMonthlyCr")),
+            "searches_yoy_pct": number(item.get("growth")),
+            # Kept for compatibility with rows written before the split, and fed
+            # only from a real search-growth field — never from rank movement.
+            "searches_growth": number(item.get("searchMonthlyCr")
+                                      if item.get("searchMonthlyCr") is not None
+                                      else item.get("growth")),
             "search_rank": number(item.get("searchRank")),
+            # Rank movement, not search movement: lower rank is better, so this is
+            # not a growth percentage and must not be read as one.
             "rank_growth_rate": number(item.get("searchRankGrowthRate")),
+            "rank_4w": number(item.get("w4SearchRank")),
+            "rank_12w": number(item.get("w12SearchRank")),
             "purchases": number(item.get("purchases")),
             "purchase_rate": number(item.get("purchaseRate")),
             "supply_demand_ratio": number(item.get("supplyDemandRatio")),

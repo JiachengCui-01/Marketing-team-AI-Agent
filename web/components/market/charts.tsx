@@ -318,6 +318,159 @@ export function ShareBar({
   );
 }
 
+export type ElementPoint = {
+  key: string;
+  label: string;
+  kind: string;
+  kind_label: string;
+  /** Share of head revenue whose listing title mentions this element. */
+  shelf_pct: number;
+  growth_pct: number;
+  searches: number;
+  asins: number;
+  avg_price: number | null;
+};
+
+/** What to draw, and whether the shelf has already answered.
+ *
+ * The board says which category to work in. This says what the product should
+ * look like, which is the question a design review actually opens with. Both
+ * axes are measured, from calls the sweep already makes: x from the titles of
+ * the listings that hold the revenue, y from the search phrases that carry the
+ * element.
+ *
+ * The cell that matters is top-left — demand rising, shelf thin. Top-right is
+ * real but crowded, bottom-right is what to stop proposing. Those are the
+ * sentences, so they are printed on the chart rather than left to be inferred
+ * from a dot's position.
+ */
+export function ElementMatrix({
+  points,
+  quadrants,
+  xLabel,
+  yLabel,
+  windowNote,
+  sizeNote,
+}: {
+  points: ElementPoint[];
+  /** Clockwise from top-left: rising+thin, rising+proven, cooling+heavy, cooling+thin. */
+  quadrants: [string, string, string, string];
+  xLabel: string;
+  yLabel: string;
+  /** Names the window y was measured over — a month and a year are not the same claim. */
+  windowNote: string;
+  sizeNote: string;
+}) {
+  if (points.length < 2) return null;
+  const width = 680;
+  const height = 300;
+  const padL = 46;
+  const padR = 16;
+  const padT = 20;
+  const padB = 40;
+
+  const shelves = points.map((p) => p.shelf_pct);
+  const growths = points.map((p) => p.growth_pct);
+  const xMax = Math.max(5, ...shelves) * 1.1;
+  const yMin = Math.min(-10, ...growths) * 1.1;
+  const yMax = Math.max(10, ...growths) * 1.1;
+  // The x reference is the median, not an arbitrary round number: "more shelf
+  // presence than half the elements we track" is a claim the data supports.
+  const sorted = [...shelves].sort((a, b) => a - b);
+  const xMid = sorted[Math.floor(sorted.length / 2)];
+  const maxSearches = Math.max(1, ...points.map((p) => p.searches));
+
+  const px = (v: number) => padL + (v / xMax) * (width - padL - padR);
+  const py = (v: number) =>
+    height - padB - ((v - yMin) / (yMax - yMin || 1)) * (height - padT - padB);
+
+  // Biggest first, so a small dot is never hidden under a large one, and so the
+  // labels that get dropped on collision are the least important ones.
+  const ordered = [...points].sort((a, b) => b.searches - a.searches);
+  const placed: { x: number; y: number }[] = [];
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full" style={{ height }}
+           role="img"
+           aria-label={points.map((p) =>
+             `${p.label}: ${xLabel} ${p.shelf_pct.toFixed(1)}%, `
+             + `${yLabel} ${p.growth_pct.toFixed(1)}%`).join("; ")}>
+        <line className="bi-axis-solid" x1={padL} x2={width - padR} y1={py(0)} y2={py(0)} />
+        <line className="bi-axis-solid" x1={px(xMid)} x2={px(xMid)}
+              y1={padT} y2={height - padB} />
+
+        <text className="bi-axis-tick" x={padL - 5} y={py(0) + 3} textAnchor="end">0%</text>
+        <text className="bi-axis-tick" x={padL - 5} y={padT + 8} textAnchor="end">
+          {yMax.toFixed(0)}%
+        </text>
+        <text className="bi-axis-tick" x={padL - 5} y={height - padB} textAnchor="end">
+          {yMin.toFixed(0)}%
+        </text>
+        <text className="bi-axis-tick" x={px(xMid)} y={height - padB + 13} textAnchor="middle">
+          {xMid.toFixed(0)}%
+        </text>
+        <text className="bi-axis-tick" x={padL} y={height - padB + 13} textAnchor="start">0</text>
+        <text className="bi-axis-tick" x={width - padR} y={height - padB + 13} textAnchor="end">
+          {xMax.toFixed(0)}% · {xLabel}
+        </text>
+        <text className="bi-axis-tick" x={padL - 5} y={padT - 8} textAnchor="end">
+          {yLabel}
+        </text>
+
+        <text className="bi-quadrant-name" x={padL + 3} y={padT + 10} textAnchor="start">
+          {quadrants[0]}
+        </text>
+        <text className="bi-quadrant-name" x={width - padR - 3} y={padT + 10} textAnchor="end">
+          {quadrants[1]}
+        </text>
+        <text className="bi-quadrant-name" x={width - padR - 3} y={height - padB - 5}
+              textAnchor="end">{quadrants[2]}</text>
+        <text className="bi-quadrant-name" x={padL + 3} y={height - padB - 5}
+              textAnchor="start">{quadrants[3]}</text>
+
+        {ordered.map((point) => {
+          const r = 5 + Math.sqrt(point.searches / maxSearches) * 10;
+          const cx = px(point.shelf_pct);
+          const cy = py(point.growth_pct);
+          const rising = point.growth_pct >= 0;
+          // Drop a label rather than stack it: two names on top of each other is
+          // worse than one name and a dot you can hover.
+          const clash = placed.some(
+            (seat) => Math.abs(seat.x - cx) < 58 && Math.abs(seat.y - cy) < 13);
+          if (!clash) placed.push({ x: cx, y: cy });
+          return (
+            <g key={point.key}>
+              {/* The hit target is bigger than the mark; an 8px dot is not a button. */}
+              <circle cx={cx} cy={cy} r={Math.max(15, r + 8)} fill="transparent" />
+              <circle className={rising ? "bi-dot" : "bi-dot bi-dot-risk"}
+                      cx={cx} cy={cy} r={r}>
+                <title>
+                  {`${point.label}（${point.kind_label}） · ${yLabel} `
+                    + `${point.growth_pct >= 0 ? "+" : ""}${point.growth_pct.toFixed(1)}% · `
+                    + `${xLabel} ${point.shelf_pct.toFixed(1)}% · ${point.asins} ASIN · `
+                    + `${point.searches.toLocaleString()} `
+                    + (point.avg_price != null ? `· ${fmtMoney(point.avg_price)}` : "")}
+                </title>
+              </circle>
+              {!clash ? (
+                <text className="bi-quadrant-label" x={cx} y={cy - r - 5} textAnchor="middle">
+                  {truncate(point.label, 10)}
+                </text>
+              ) : null}
+            </g>
+          );
+        })}
+      </svg>
+      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]
+                      text-fg-subtle">
+        <span>{windowNote}</span>
+        <span>{sizeNote}</span>
+      </div>
+    </div>
+  );
+}
+
 /** Demand growth against ease of entry — and which corner you are in.
  *
  * A scatter only pays for itself if the reader can name the region a dot sits

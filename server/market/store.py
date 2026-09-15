@@ -530,6 +530,27 @@ def top_products(
         ))
 
 
+def all_products(marketplace: str, period: str, *, limit: int = 800) -> list[dict]:
+    """Every ASIN row stored for a month, across all nodes, joined to its title.
+
+    The element matrix reads titles department-wide: a style is not a property of
+    one node, and "fluted" split across six categories is six numbers too small
+    to mean anything separately.
+    """
+    db._ensure()
+    with db.connect() as conn:
+        return _rows(conn.execute(
+            "SELECT m.asin, m.node_id_path, m.price, m.revenue, m.units, m.rating, "
+            "       m.ratings, p.title, p.brand, p.variations, p.weight "
+            "FROM market_product_metrics m "
+            "LEFT JOIN market_products p ON p.marketplace = m.marketplace "
+            "                           AND p.asin = m.asin "
+            "WHERE m.marketplace = ? AND m.period = ? "
+            "ORDER BY m.revenue IS NULL, m.revenue DESC LIMIT ?",
+            (marketplace, period, limit),
+        ))
+
+
 def product_totals(marketplace: str, period: str) -> dict[str, dict]:
     """Summed ASIN revenue and units per node, from the rows actually collected.
 

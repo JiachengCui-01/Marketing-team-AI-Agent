@@ -21,6 +21,7 @@ import {
   BandHistogram,
   Bullet,
   DeltaBullet,
+  ElementMatrix,
   Quadrant,
   ScoreBar,
   Sparkline,
@@ -182,6 +183,23 @@ export function MarketOverviewPanel({
                             onDrill={onDrill} />
                 ))}
               </div>
+            </Section>
+
+            <Section title={t.gmElements} hint={t.gmElementsHint}
+                     data={(dashboard?.element_matrix?.points ?? []).length >= 2
+                       ? dashboard?.element_matrix?.points : null}>
+              <ElementMatrix
+                points={dashboard?.element_matrix?.points ?? []}
+                quadrants={(dashboard?.element_matrix?.quadrants ?? [
+                  "", "", "", ""]) as [string, string, string, string]}
+                xLabel={t.gmElementShelf}
+                yLabel={t.gmElementGrowth}
+                windowNote={
+                  dashboard?.element_matrix?.window === "yoy" ? t.gmWindowYoy
+                  : dashboard?.element_matrix?.window === "mixed" ? t.gmWindowMixed
+                  : t.gmWindowMom}
+                sizeNote={t.gmElementSize}
+              />
             </Section>
 
             <Direction dashboard={dashboard} />

@@ -1758,8 +1758,16 @@ export type MarketElement = {
   kind_label: string;
   searches: number;
   growth_pct: number | null;
+  /** Which window growth was measured over: "stored" | "mom" | "yoy". */
+  window?: string;
   keyword_count: number;
   rated: boolean;
+  /** Supply half, from the titles of the listings holding the head revenue. */
+  asins?: number;
+  revenue?: number;
+  revenue_share_pct?: number;
+  avg_price?: number | null;
+  shelf_rated?: boolean;
   keywords: { keyword: string; searches: number; growth_pct: number | null }[];
 };
 
@@ -1912,6 +1920,16 @@ export type MarketDashboard = {
   // it is about. Both shapes are read by name, never indexed positionally.
   concentration?: any;
   elements?: MarketElement[];
+  /** Demand trend against shelf presence — the chart a design review opens with. */
+  element_matrix?: {
+    points: {
+      key: string; label: string; kind: string; kind_label: string;
+      shelf_pct: number; growth_pct: number; searches: number; asins: number;
+      avg_price: number | null; window: string;
+    }[];
+    window: string;
+    quadrants: [string, string, string, string];
+  };
   follow?: MarketDirection[];
   avoid?: MarketDirection[];
   direction_reading?: string;

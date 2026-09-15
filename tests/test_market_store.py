@@ -35,6 +35,31 @@ CREATE UNIQUE INDEX idx_market_node_snapshots_key
 """
 
 
+# Likewise for the keyword table before the growth windows were split apart.
+_PRE_GROWTH_KEYWORDS = """
+DROP TABLE IF EXISTS market_keyword_metrics;
+CREATE TABLE market_keyword_metrics (
+    id TEXT PRIMARY KEY,
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    keyword TEXT NOT NULL,
+    node_id_path TEXT,
+    period TEXT NOT NULL,
+    grain TEXT NOT NULL DEFAULT 'month',
+    searches REAL, searches_growth REAL,
+    search_rank INTEGER, rank_growth_rate REAL,
+    purchases REAL, purchase_rate REAL,
+    supply_demand_ratio REAL, monopoly_click_rate REAL,
+    spr REAL, title_density REAL,
+    products REAL, avg_price REAL, bid REAL, bid_max REAL,
+    market_period TEXT,
+    google_trend_index REAL,
+    source_tool TEXT NOT NULL DEFAULT '',
+    evidence_id TEXT,
+    ingested_at REAL NOT NULL
+);
+"""
+
+
 class SchemaUpgradeTests(unittest.TestCase):
     """``init()`` must survive meeting a database from an earlier release.
 
@@ -73,6 +98,42 @@ class SchemaUpgradeTests(unittest.TestCase):
         self.assertIn("idx_market_node_snapshots_grain", indexes)
         # The old key would reject a pulse row sharing a month with its aggregate.
         self.assertNotIn("idx_market_node_snapshots_key", indexes)
+
+    def test_init_upgrades_a_database_that_predates_the_growth_windows(self) -> None:
+        """The columns the element matrix reads are added by migration, not schema."""
+        db.reset_for_tests()
+        db.init()
+        with db.connect() as conn:
+            conn.executescript(_PRE_GROWTH_KEYWORDS)
+            self.assertNotIn("searches_mom_pct",
+                             db._table_columns(conn, "market_keyword_metrics"))
+        db._INITIALIZED = False
+
+        db.init()                      # must not raise
+
+        with db.connect() as conn:
+            columns = db._table_columns(conn, "market_keyword_metrics")
+        for name in ("searches_mom_pct", "searches_yoy_pct", "rank_4w", "rank_12w"):
+            self.assertIn(name, columns)
+
+    def test_an_upgraded_keyword_table_still_accepts_writes(self) -> None:
+        """A column added but never written to is a migration that only looks done."""
+        db.reset_for_tests()
+        db.init()
+        with db.connect() as conn:
+            conn.executescript(_PRE_GROWTH_KEYWORDS)
+        db._INITIALIZED = False
+        db.init()
+
+        store.upsert_keyword_metrics([{
+            "marketplace": "US", "keyword": "fluted sideboard", "period": "202608",
+            "node_id_path": self.NODE, "searches": 11_000.0,
+            "searches_mom_pct": 12.5, "searches_yoy_pct": 41.0,
+            "rank_4w": 940, "rank_12w": 1220, "source_tool": "keyword_research",
+        }])
+        row = store.top_keywords("US", self.NODE, "202608")[0]
+        self.assertEqual(row["searches_mom_pct"], 12.5)
+        self.assertEqual(row["rank_12w"], 1220)
 
     def test_rows_predating_the_column_become_monthly_rows(self) -> None:
         """The default has to backfill, or the board loses every month it had."""

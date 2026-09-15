@@ -13,8 +13,8 @@ import unittest
 from unittest import mock
 
 from server import db
-from server.market import (gateway, jobs, render, scoring, store, sweep,
-                           taxonomy)
+from server.market import (elements, gateway, jobs, render, scoring, store,
+                           sweep, taxonomy)
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures" / "sellersprite"
 BUFFETS = "1055398:1063306:3733781:3733831"
@@ -384,6 +384,67 @@ class BoardReadTests(RenderTestCase):
         brief = render._board_brief(payload["board"], "zh")
         self.assertIn("分主要来自", brief)
         self.assertIn("96.4 lb", brief)
+
+
+class ElementMatrixTests(RenderTestCase):
+    """Demand trend against shelf presence — both halves measured, neither guessed."""
+
+    def seed(self) -> None:
+        store.upsert_products([
+            {"marketplace": "US", "asin": f"BF{i}", "brand": "Demo", "title": title}
+            for i, title in enumerate([
+                "Fluted Oak Sideboard Buffet", "Fluted Door Console Table",
+                "Fluted Arch Cabinet", "Tufted Velvet Bench"])])
+        store.upsert_product_metrics([
+            {"marketplace": "US", "asin": f"BF{i}", "period": PERIOD,
+             "node_id_path": BUFFETS, "price": 399.0, "revenue": revenue,
+             "source_tool": "product_research"}
+            for i, revenue in enumerate([600_000.0, 300_000.0, 200_000.0, 100_000.0])])
+        store.upsert_keyword_metrics([
+            {"marketplace": "US", "keyword": "fluted sideboard cabinet", "period": PERIOD,
+             "node_id_path": BUFFETS, "searches": 11_000.0, "searches_mom_pct": 24.0,
+             "source_tool": "keyword_research"},
+            {"marketplace": "US", "keyword": "fluted door console", "period": PERIOD,
+             "node_id_path": BUFFETS, "searches": 6_000.0, "searches_mom_pct": 18.0,
+             "source_tool": "keyword_research"},
+        ])
+
+    def test_both_axes_are_measured_from_stored_vendor_rows(self) -> None:
+        self.seed()
+        matrix = render.build_overview("US", PERIOD, "zh")["element_matrix"]
+        point = next(p for p in matrix["points"] if p["key"] == "fluted")
+        self.assertGreater(point["shelf_pct"], 0)
+        self.assertAlmostEqual(point["growth_pct"], 21.9, places=1)
+        self.assertEqual(point["asins"], 3)
+
+    def test_the_window_is_named_so_a_month_is_not_read_as_a_year(self) -> None:
+        self.seed()
+        matrix = render.build_overview("US", PERIOD, "zh")["element_matrix"]
+        self.assertEqual(matrix["window"], elements.MOM)
+
+    def test_an_element_with_no_shelf_reading_is_not_plotted(self) -> None:
+        """Search growth with nothing on the shelf is a collection gap, and on a
+        scatter it is indistinguishable from a real opening."""
+        self.seed()
+        store.upsert_keyword_metrics([
+            {"marketplace": "US", "keyword": "japandi sideboard", "period": PERIOD,
+             "node_id_path": BUFFETS, "searches": 9_000.0, "searches_mom_pct": 40.0,
+             "source_tool": "keyword_research"},
+            {"marketplace": "US", "keyword": "japandi console", "period": PERIOD,
+             "node_id_path": BUFFETS, "searches": 5_000.0, "searches_mom_pct": 35.0,
+             "source_tool": "keyword_research"},
+        ])
+        payload = render.build_overview("US", PERIOD, "zh")
+        plotted = {p["key"] for p in payload["element_matrix"]["points"]}
+        self.assertNotIn("japandi", plotted)
+        # It is still on the demand side, so the follow list can still name it.
+        self.assertIn("japandi", {r["key"] for r in payload["elements"]})
+
+    def test_the_quadrants_are_named_for_the_decision(self) -> None:
+        self.seed()
+        matrix = render.build_overview("US", PERIOD, "zh")["element_matrix"]
+        self.assertEqual(len(matrix["quadrants"]), 4)
+        self.assertIn("货架未跟上", matrix["quadrants"][0])
 
 
 class GrowthWindowTests(RenderTestCase):

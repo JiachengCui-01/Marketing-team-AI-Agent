@@ -300,6 +300,42 @@ def build_current(marketplace: str, language: str, *,
 
 # ----------------------------------------------------------------- overview ----
 
+def _element_matrix(rows: Sequence[dict], zh: bool) -> dict:
+    """Demand trend against shelf presence, for the one chart a designer needs.
+
+    x is the share of head revenue whose listing mentions the element — what is
+    already proven to sell. y is how fast the phrases carrying it are growing —
+    where demand is going. The interesting cell is top-left: people are asking
+    and the shelf has not answered.
+
+    Only elements with both halves are plotted. An element with search growth and
+    no shelf reading is not a gap in the market, it is a gap in our collection,
+    and the two look identical on a scatter.
+    """
+    points = [
+        {"key": row["key"], "label": row["label"], "kind": row["kind"],
+         "kind_label": row["kind_label"],
+         "shelf_pct": row["revenue_share_pct"], "growth_pct": row["growth_pct"],
+         "searches": row["searches"], "asins": row["asins"],
+         "avg_price": row["avg_price"], "window": row.get("window") or ""}
+        for row in rows
+        if row.get("rated") and row.get("shelf_rated")
+        and row.get("growth_pct") is not None
+    ]
+    points.sort(key=lambda p: p["searches"], reverse=True)
+    windows = {p["window"] for p in points if p["window"]}
+    return {
+        "points": points[:MAX_DIRECTION_ROWS * 2],
+        # One window or the reader is comparing a month against a year.
+        "window": windows.pop() if len(windows) == 1 else "mixed",
+        "quadrants": (("需求在涨·货架未跟上", "需求在涨·已验证",
+                       "需求转弱·货架仍重", "需求转弱·货架也轻")
+                      if zh else
+                      ("Rising, shelf has not answered", "Rising and proven",
+                       "Cooling but shelf-heavy", "Cooling and thin")),
+    }
+
+
 def _follow(board: Sequence[dict], rising: Sequence[dict], zh: bool) -> list[dict]:
     """What to put on the product roadmap, and the one reason why.
 
@@ -536,9 +572,13 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
     # Element demand is department-wide: a style does not belong to one node, and
     # reading it per node would split "fluted" across six categories and bury it.
     element_rows = elements.localize(
-        elements.scan(store.top_keywords(marketplace, None, period, limit=400),
-                      previous=store.top_keywords(
-                          marketplace, None, gateway.step_period(period, -1), limit=400)),
+        elements.merge(
+            elements.scan(store.top_keywords(marketplace, None, period, limit=400),
+                          previous=store.top_keywords(
+                              marketplace, None, gateway.step_period(period, -1),
+                              limit=400)),
+            # The supply half, from titles the product calls already paid for.
+            elements.shelf_share(store.all_products(marketplace, period))),
         zh)
     rising_elements, falling_elements = elements.split(element_rows)
     board: list[dict] = []
@@ -663,6 +703,7 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
                           for r in board if r["top5_brand_share_pct"] is not None],
         "physical": _physical_rows(board, snapshots),
         "elements": element_rows,
+        "element_matrix": _element_matrix(element_rows, zh),
         "follow": _follow(board, rising_elements, zh),
         "avoid": _avoid(board, falling_elements, zh),
         "supply": _supply_rows(board, snapshots),

@@ -614,7 +614,15 @@ CREATE TABLE IF NOT EXISTS market_keyword_metrics (
     period TEXT NOT NULL,
     grain TEXT NOT NULL DEFAULT 'month',
     searches REAL, searches_growth REAL,
+    -- The vendor measures demand change two ways in one call and they are not
+    -- interchangeable: searchMonthlyCr is month over month, `growth` (with
+    -- withYearlyGrowth) is year over year. Stored apart so a chart can say which
+    -- one it is drawing instead of quietly mixing a seasonal swing into a trend.
+    searches_mom_pct REAL, searches_yoy_pct REAL,
+    -- ABA reports rank movement, not search movement. Lower rank is better, so
+    -- this column must never be read as if it were a growth percentage.
     search_rank INTEGER, rank_growth_rate REAL,
+    rank_4w INTEGER, rank_12w INTEGER,
     purchases REAL, purchase_rate REAL,
     supply_demand_ratio REAL, monopoly_click_rate REAL,
     spr REAL, title_density REAL,
@@ -875,6 +883,7 @@ def init() -> None:
             _migrate_market_traffic_mix(conn)
             _migrate_snapshot_grain(conn)
             _migrate_product_pool(conn)
+            _migrate_keyword_growth(conn)
             _seed_image_templates(conn)
         _INITIALIZED = True
 
@@ -2165,6 +2174,24 @@ _IMAGE_TEMPLATE_SEED = [
     ("tpl_generic_clean", "generic", "generic", "clean", "干净背景",
      "Versatile composition on a simple neutral background.", "1:1", 10),
 ]
+
+
+def _migrate_keyword_growth(conn: sqlite3.Connection) -> None:
+    """Split demand change into the two windows the vendor actually reports.
+
+    ``searches_growth`` was fed ``growth`` when ``keyword_research`` answered and
+    ``searchRankGrowthRate`` when ABA did — a year-over-year percentage and a
+    *rank* movement ratio in one column. Anything reading it as "how fast is this
+    phrase growing" was right for one source and badly wrong for the other, and
+    the element trend chart reads exactly that column.
+    """
+    columns = _table_columns(conn, "market_keyword_metrics")
+    for name in ("searches_mom_pct", "searches_yoy_pct"):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE market_keyword_metrics ADD COLUMN {name} REAL")
+    for name in ("rank_4w", "rank_12w"):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE market_keyword_metrics ADD COLUMN {name} INTEGER")
 
 
 def _seed_image_templates(conn: sqlite3.Connection) -> None:

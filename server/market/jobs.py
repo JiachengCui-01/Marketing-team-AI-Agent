@@ -57,6 +57,11 @@ KEYWORD_SEED_BATCH = 10
 # makes the deep dive's structure section a different shape each month, so the
 # one thing it cannot show is a change. At ~11 calls a day steady state the whole
 # set is affordable, and a comparable month beats a cheaper one.
+# How far back the trend charts are worth filling. Twelve closed months plus the
+# current one is a full seasonal cycle, which is the shortest window in which a
+# furniture category's Q4 means anything.
+HISTORY_MONTHS = 12
+
 _STRUCTURE_DISTRIBUTIONS = (
     ("market_rating_distribution", "rating"),
     ("market_ratings_count_distribution", "ratings_count"),
@@ -198,6 +203,64 @@ def _category_structure(*, marketplace: str, period: str, subject_id: str,
         return JobResult(status="pending", calls=calls,
                          detail=f"partial: no rows from {', '.join(missing)}")
     return JobResult(status="done", calls=calls, detail=f"{len(metrics)} metrics")
+
+
+def _category_history(*, marketplace: str, period: str, subject_id: str,
+                      bucket: str) -> JobResult:
+    """Backfill the closed months this node has no revenue for.
+
+    Almost every chart on the board is a trend — the treemap's decline outlines,
+    the department sparkline, the movers list, the quadrant's y axis — and every
+    one of them was blank because ``growth_pct`` needs two stored months and the
+    warehouse only ever collected the month it was run in. Waiting a year for the
+    charts to fill themselves is not a plan.
+
+    ``market_research`` takes a ``month``, so the history can simply be fetched:
+    one call per missing month, same tool and same field as the current month's
+    figure, which is what makes the series comparable with itself.
+
+    Bounded three ways. Only ``HISTORY_MONTHS`` back, only months that are
+    actually missing, and each month is committed before the next is requested —
+    so when the daily budget runs out mid-backfill, ``BudgetExhausted`` leaves the
+    job untouched and tomorrow resumes with fewer gaps rather than starting over.
+    """
+    have = {row["period"] for row in store.snapshot_history(marketplace, subject_id)
+            if row.get("total_revenue") is not None}
+    wanted = [gateway.step_period(period, -offset)
+              for offset in range(1, HISTORY_MONTHS + 1)]
+    missing = [month for month in wanted if month and month not in have]
+    if not missing:
+        return JobResult(status="done", calls=0, detail="history complete")
+
+    calls = 0
+    filled: list[str] = []
+    # Newest first: a two-month series is worth more than the oldest month alone,
+    # so an interrupted backfill still leaves the charts something to draw.
+    for month in missing:
+        index = EvidenceIndex(marketplace=marketplace, period=month)
+        reply = gateway.call(
+            "market_research",
+            _request(marketplace=marketplace, nodeIdPath=subject_id, month=month, size=20,
+                     order={"field": "total_amount", "desc": True}),
+            bucket=bucket, purpose=f"history {month}", marketplace=marketplace)
+        calls += int(reply.billable)
+        if not _ok(reply):
+            # A month the vendor will not answer for is not a reason to keep
+            # asking about the other eleven.
+            continue
+        metrics = extract.extract_market_research(
+            reply, node_id_path=subject_id, period=month, index=index)
+        if not metrics:
+            continue
+        store.upsert_node_snapshot(marketplace, subject_id, month, metrics)
+        store.record_evidence(index.all_rows())
+        filled.append(month)
+
+    if not filled:
+        return JobResult(status="pending", calls=calls,
+                         detail=f"no history for {len(missing)} months")
+    return JobResult(status="done", calls=calls,
+                    detail=f"{len(filled)} months: {filled[-1]}–{filled[0]}")
 
 
 def _category_demand(*, marketplace: str, period: str, subject_id: str,
@@ -548,6 +611,10 @@ CATALOG: tuple[JobSpec, ...] = (
               _concentration_job(tool, kind))
       for tool, kind in _STRUCTURE_CONCENTRATIONS),
     JobSpec("offamazon_trend", "node", 70, 1, "month", _offamazon_trend),
+    # Last in the queue by design: a month of history is worth less than any part
+    # of the month we are actually reporting, and this is the only job that can
+    # ask for a dozen calls at once.
+    JobSpec("category_history", "node", 95, HISTORY_MONTHS, "month", _category_history),
     # Per-ASIN, enqueued by product_pack once the ASINs are known.
     JobSpec("flagship_history", "asin", 65, 1, "month", _flagship_history),
     JobSpec("flagship_traffic", "asin", 75, 1, "month", _flagship_traffic),

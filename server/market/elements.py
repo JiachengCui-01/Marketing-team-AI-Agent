@@ -133,24 +133,36 @@ def kind_label(kind: str, zh: bool) -> str:
     return names[0] if zh else names[1]
 
 
-def _growth_of(row: Mapping[str, Any], previous: Mapping[str, float] | None) -> float | None:
-    """Period-over-period from our own warehouse, else the vendor's own figure.
+# Which window a growth figure came from, worst to best. Reported alongside the
+# number because "up 18%" means different things over a month and over a year,
+# and a seasonal category will disagree with itself between the two.
+STORED, MOM, YOY = "stored", "mom", "yoy"
 
-    Ours is preferred: it is two numbers we stored and can point at, while the
-    vendor's ``growth`` is a single opaque column whose window it does not
-    document.
+
+def _growth_of(row: Mapping[str, Any],
+               previous: Mapping[str, float] | None) -> tuple[float | None, str]:
+    """``(percent, window)`` — never a rank movement dressed up as demand growth.
+
+    ``rank_growth_rate`` is deliberately not consulted. It is ABA's *rank*
+    movement, where lower is better and the scale is a ratio of positions; the
+    old code fell back to it whenever ``growth`` was absent, so an ABA-sourced
+    phrase reported 0.9951 as "up 99.51%".
     """
     keyword = str(row.get("keyword") or "")
     now = _num(row.get("searches"))
     before = (previous or {}).get(keyword)
     if now is not None and before:
-        return (now - before) / before * 100.0
-    vendor = _num(row.get("searches_growth"))
-    if vendor is None:
-        return None
-    # keyword_research reports growth as a ratio on some tools and a percentage
-    # on others; anything inside ±3 is a ratio, nothing grows 0.4% and reports it.
-    return vendor * 100.0 if -3.0 <= vendor <= 3.0 else vendor
+        # Two months we stored and can point at, so this wins when it exists.
+        return (now - before) / before * 100.0, STORED
+    for column, window in (("searches_mom_pct", MOM), ("searches_yoy_pct", YOY),
+                           ("searches_growth", MOM)):
+        value = _num(row.get(column))
+        if value is None:
+            continue
+        # The vendor reports these as a percentage on keyword_research and as a
+        # ratio on some others; nothing in this market grows 0.4% and says so.
+        return (value * 100.0 if -3.0 <= value <= 3.0 else value), window
+    return None, ""
 
 
 def scan(
@@ -171,13 +183,13 @@ def scan(
         if not phrase:
             continue
         searches = _num(row.get("searches")) or 0.0
-        growth = _growth_of(row, before)
+        growth, window = _growth_of(row, before)
         for key, pattern in _PATTERNS.items():
             if not pattern.search(phrase):
                 continue
             bucket = buckets.setdefault(key, {
                 "key": key, "kind": _BY_KEY[key][2], "keywords": [],
-                "searches": 0.0, "_weighted": 0.0, "_weight": 0.0,
+                "searches": 0.0, "_weighted": 0.0, "_weight": 0.0, "_windows": {},
             })
             bucket["keywords"].append({"keyword": str(row.get("keyword")),
                                        "searches": searches, "growth_pct": growth})
@@ -185,11 +197,17 @@ def scan(
             if growth is not None and searches > 0:
                 bucket["_weighted"] += growth * searches
                 bucket["_weight"] += searches
+                bucket["_windows"][window] = bucket["_windows"].get(window, 0.0) + searches
 
     out: list[dict] = []
     for bucket in buckets.values():
         weight = bucket.pop("_weight")
         weighted = bucket.pop("_weighted")
+        windows = bucket.pop("_windows")
+        # The window most of this element's search volume was measured over. A
+        # bucket can mix them when the phrases came from different tools, and the
+        # label has to say which one dominates rather than imply they agree.
+        bucket["window"] = max(windows, key=windows.get) if windows else ""
         # Search-weighted: a 300%-growth phrase with 40 searches a month is noise
         # next to a 12% move on a phrase with 40,000.
         bucket["growth_pct"] = round(weighted / weight, 1) if weight else None
@@ -236,3 +254,85 @@ def brief(rising: Sequence[dict], falling: Sequence[dict], zh: bool) -> str:
         lines.append(f"  FALLING {row['key']} ({row['kind']}) {row['growth_pct']:+.1f}% "
                      f"over {row['keyword_count']} phrases, {row['searches']:,} searches")
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------- shelf side ----
+# Demand says what people ask for; this says what is already selling. Both come
+# from calls the sweep already makes — the titles arrive with every
+# ``product_research`` row — so the whole supply half of the element picture
+# costs nothing extra.
+
+MIN_SHELF_ASINS = 3
+
+
+def shelf_share(products: Sequence[Mapping[str, Any]]) -> list[dict]:
+    """Element share of the head set's revenue, matched on listing titles.
+
+    Revenue rather than listing count on purpose: ten listings nobody buys prove
+    a style is *available*, not that it works. A listing carrying three elements
+    counts toward all three, so the shares sum past 100 — they are "share of head
+    revenue whose listing mentions this", not slices of a pie, and the chart says
+    so.
+    """
+    total = sum((_num(p.get("revenue")) or 0.0) for p in products)
+    if total <= 0:
+        return []
+    buckets: dict[str, dict[str, Any]] = {}
+    for product in products:
+        title = str(product.get("title") or "").strip().lower()
+        if not title:
+            continue
+        revenue = _num(product.get("revenue")) or 0.0
+        price = _num(product.get("price"))
+        for key, pattern in _PATTERNS.items():
+            if not pattern.search(title):
+                continue
+            bucket = buckets.setdefault(key, {
+                "key": key, "kind": _BY_KEY[key][2], "asins": 0,
+                "revenue": 0.0, "_prices": [],
+            })
+            bucket["asins"] += 1
+            bucket["revenue"] += revenue
+            if price is not None:
+                bucket["_prices"].append(price)
+
+    out: list[dict] = []
+    for bucket in buckets.values():
+        prices = bucket.pop("_prices")
+        bucket["avg_price"] = round(sum(prices) / len(prices), 2) if prices else None
+        bucket["revenue_share_pct"] = round(bucket["revenue"] / total * 100.0, 1)
+        bucket["revenue"] = round(bucket["revenue"], 2)
+        bucket["shelf_rated"] = bucket["asins"] >= MIN_SHELF_ASINS
+        out.append(bucket)
+    out.sort(key=lambda b: b["revenue_share_pct"], reverse=True)
+    return out
+
+
+def merge(demand: Sequence[Mapping[str, Any]],
+          shelf: Sequence[Mapping[str, Any]]) -> list[dict]:
+    """One row per element carrying both halves, for the demand-vs-shelf matrix.
+
+    An element present on only one side is kept, not dropped: a style with search
+    growth and no shelf presence is the most interesting cell on the chart, and a
+    style holding revenue with no search trend behind it is the second most.
+    """
+    rows: dict[str, dict] = {}
+    for item in demand:
+        rows[item["key"]] = {**item}
+    for item in shelf:
+        rows.setdefault(item["key"], {"key": item["key"], "kind": item["kind"],
+                                      "keywords": [], "searches": 0,
+                                      "growth_pct": None, "keyword_count": 0,
+                                      "rated": False, "window": ""})
+        rows[item["key"]].update({
+            "asins": item["asins"], "revenue": item["revenue"],
+            "revenue_share_pct": item["revenue_share_pct"],
+            "avg_price": item["avg_price"], "shelf_rated": item["shelf_rated"],
+        })
+    for row in rows.values():
+        row.setdefault("asins", 0)
+        row.setdefault("revenue", 0.0)
+        row.setdefault("revenue_share_pct", 0.0)
+        row.setdefault("avg_price", None)
+        row.setdefault("shelf_rated", False)
+    return sorted(rows.values(), key=lambda r: r["searches"], reverse=True)

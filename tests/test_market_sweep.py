@@ -13,7 +13,7 @@ from unittest import mock
 
 from marketing_agent.tools.mcp_client import McpToolError, McpUnavailable
 from server import db
-from server.market import gateway, jobs, store, sweep, taxonomy
+from server.market import gateway, jobs, scoring, store, sweep, taxonomy
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures" / "sellersprite"
 PERIOD = "202608"
@@ -148,6 +148,95 @@ class PlanningTests(SweepTestCase):
             with self.subTest(kind=kind):
                 self.assertEqual(len([j for j in queued if j["job_kind"] == kind]),
                                  leaves)
+
+
+class HistoryBackfillTests(SweepTestCase):
+    """Almost every chart on the board is a trend, and every one of them was blank.
+
+    ``growth_pct`` needs two stored months and the warehouse only ever collected
+    the month it was run in, so the treemap's decline outlines, the department
+    sparkline, the movers list and the quadrant's y axis were all waiting on a
+    year of calendar time. ``market_research`` takes a ``month``; the history can
+    simply be fetched.
+    """
+
+    def _job(self, kind: str, subject_id: str = BUFFETS, period: str = PERIOD) -> dict:
+        store.enqueue_job(marketplace="US", job_kind=kind,
+                          subject_kind=jobs.BY_KIND[kind].subject_kind,
+                          subject_id=subject_id, period=period,
+                          est_calls=jobs.BY_KIND[kind].est_calls)
+        return next(j for j in store.due_jobs("US", limit=500) if j["job_kind"] == kind)
+
+    def test_the_backfill_fills_every_missing_closed_month(self) -> None:
+        with mock.patch.object(gateway.sellersprite, "call_tool",
+                               side_effect=fixture_vendor):
+            result = jobs.run_job(self._job("category_history"))
+        self.assertEqual(result.status, "done")
+        history = store.snapshot_history("US", BUFFETS)
+        months = [row["period"] for row in history if row["total_revenue"] is not None]
+        self.assertEqual(len(months), jobs.HISTORY_MONTHS)
+        self.assertNotIn(PERIOD, months, "the backfill fills the past, not the present")
+
+    def test_the_months_it_wrote_are_the_twelve_before_the_target(self) -> None:
+        with mock.patch.object(gateway.sellersprite, "call_tool",
+                               side_effect=fixture_vendor):
+            jobs.run_job(self._job("category_history"))
+        months = {row["period"] for row in store.snapshot_history("US", BUFFETS)}
+        expected = {gateway.step_period(PERIOD, -offset)
+                    for offset in range(1, jobs.HISTORY_MONTHS + 1)}
+        self.assertEqual(months, expected)
+
+    def test_a_month_already_stored_is_not_bought_twice(self) -> None:
+        """Ongoing cost falls to nothing once the window is full.
+
+        September's run looks back twelve months from September, which includes
+        August — and August's own sweep already stored it through
+        ``category_structure``. So the second run finds no gaps and spends nothing.
+        """
+        with mock.patch.object(gateway.sellersprite, "call_tool",
+                               side_effect=fixture_vendor):
+            jobs.run_job(self._job("category_history"))
+            jobs.run_job(self._job("category_structure"))   # August, as the sweep does
+            with mock.patch.object(gateway, "call") as vendor:
+                again = jobs.run_job(self._job("category_history", period="202609"))
+        vendor.assert_not_called()
+        self.assertEqual(again.status, "done")
+        self.assertEqual(again.calls, 0)
+
+    def test_the_backfill_makes_growth_computable(self) -> None:
+        """Which is the entire point: the trend charts had nothing to draw."""
+        self.assertIsNone(scoring.growth_pct(store.snapshot_history("US", BUFFETS)))
+        with mock.patch.object(gateway.sellersprite, "call_tool",
+                               side_effect=fixture_vendor):
+            jobs.run_job(self._job("category_history"))
+        history = store.snapshot_history("US", BUFFETS)
+        self.assertIsNotNone(scoring.growth_pct(history))
+        self.assertNotEqual(scoring.growth_span(history), ("", ""))
+
+    def test_running_out_of_budget_keeps_the_months_already_written(self) -> None:
+        """Each month is committed before the next is asked for, so an interrupted
+        backfill resumes with fewer gaps instead of starting over."""
+        gateway.DAILY_LIMITS[gateway.BUCKET_SWEEP] = 4
+        with mock.patch.object(gateway.sellersprite, "call_tool",
+                               side_effect=fixture_vendor):
+            result = jobs.run_job(self._job("category_history"))
+        self.assertEqual(result.status, "budget")
+        stored = [row for row in store.snapshot_history("US", BUFFETS)
+                  if row["total_revenue"] is not None]
+        self.assertEqual(len(stored), 4)
+        # And the job is left exactly as it was, so tomorrow picks it up.
+        queued = [j for j in store.due_jobs("US", limit=500)
+                  if j["job_kind"] == "category_history"]
+        self.assertEqual(len(queued), 1)
+        self.assertEqual(int(queued[0]["attempts"] or 0), 0)
+
+    def test_it_runs_last_so_the_current_month_never_waits_on_the_past(self) -> None:
+        spec = jobs.BY_KIND["category_history"]
+        self.assertEqual(spec.priority, max(s.priority for s in jobs.CATALOG))
+
+    def test_it_is_not_part_of_the_completeness_pack(self) -> None:
+        """A node whose history has not been fetched is not an incomplete month."""
+        self.assertNotIn("category_history", jobs.NODE_PACK)
 
 
 class JobExecutionTests(SweepTestCase):
