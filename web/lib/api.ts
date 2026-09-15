@@ -1730,6 +1730,39 @@ export type MarketKpi = {
   estimated?: boolean;
 };
 
+/** One line of the server's written read of a board row. `read` and `facts` are
+ *  prose; `opportunity` and `risk` are named signals; `gap` bounds all of them. */
+export type MarketBoardRead = {
+  kind: "read" | "facts" | "opportunity" | "risk" | "gap";
+  text: string;
+  detail?: string;
+  evidence_ids?: string[];
+};
+
+/** A category to build in, or a style/material/feature element to build with. */
+export type MarketDirection = {
+  kind: "category" | "element";
+  key: string;
+  label: string;
+  kind_label?: string;
+  score?: number;
+  confidence?: number;
+  why: string;
+  keywords?: string[];
+};
+
+export type MarketElement = {
+  key: string;
+  kind: string;
+  label: string;
+  kind_label: string;
+  searches: number;
+  growth_pct: number | null;
+  keyword_count: number;
+  rated: boolean;
+  keywords: { keyword: string; searches: number; growth_pct: number | null }[];
+};
+
 export type MarketBoardRow = {
   node_key: string;
   node_label_path: string;
@@ -1744,6 +1777,8 @@ export type MarketBoardRow = {
   product_pool: number | null;
   growth_pct: number | null;
   median_price: number | null;
+  avg_weight: number | null;
+  avg_volume: number | null;
   top5_brand_share_pct: number | null;
   new_revenue_share_pct: number | null;
   return_ratio_pct: number | null;
@@ -1751,6 +1786,7 @@ export type MarketBoardRow = {
   return_risk: number;
   completeness: number;
   missing: string[];
+  read?: MarketBoardRead[];
 };
 
 export type MarketVerdict = {
@@ -1875,6 +1911,10 @@ export type MarketDashboard = {
   // Overview ships a row per node; the deep dive ships one object for the node
   // it is about. Both shapes are read by name, never indexed positionally.
   concentration?: any;
+  elements?: MarketElement[];
+  follow?: MarketDirection[];
+  avoid?: MarketDirection[];
+  direction_reading?: string;
   /** Each tracked category as a physical object, ranked by price density —
    *  freight and returns scale with weight, the price does not. */
   physical?: {

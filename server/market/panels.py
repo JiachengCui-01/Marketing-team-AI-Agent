@@ -16,12 +16,14 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
 
-from . import gateway, jobs, monitor, scoring, store, taxonomy
+from . import elements, gateway, jobs, monitor, scoring, store, taxonomy
 
 MAX_BOARD_ROWS = 24
 MAX_COMPETITORS = 12
 MAX_KEYWORDS = 25
 MAX_OPPORTUNITIES = 4
+# Both direction lists are read top to bottom; past a dozen nobody does.
+MAX_DIRECTION_ROWS = 12
 MAX_HISTORY_ASINS = 4
 MAX_EDGE_ASINS = 3
 
@@ -298,6 +300,225 @@ def build_current(marketplace: str, language: str, *,
 
 # ----------------------------------------------------------------- overview ----
 
+def _follow(board: Sequence[dict], rising: Sequence[dict], zh: bool) -> list[dict]:
+    """What to put on the product roadmap, and the one reason why.
+
+    Two kinds of entry, because a product programme needs both halves: a category
+    says where to build, an element says what the thing should look like. Each
+    carries the number that put it on the list, so the recommendation can be
+    argued with rather than only obeyed.
+    """
+    out: list[dict] = []
+    for row in board:
+        growth = scoring._num(row.get("growth_pct"))
+        new_share = scoring._num(row.get("new_revenue_share_pct"))
+        ret, peer = (scoring._num(row.get("return_ratio_pct")),
+                     scoring._num(row.get("return_ratio_avg_pct")))
+        reasons: list[str] = []
+        if growth is not None and growth >= 10.0:
+            reasons.append((f"销售额 {growth:+.1f}%" if zh else f"revenue {growth:+.1f}%"))
+        # A newcomer share this high is the market saying a new listing can still
+        # win — the single most important precondition for building anything.
+        if new_share is not None and new_share >= 15.0:
+            reasons.append((f"近 12 月新品占销额 {new_share:.1f}%" if zh
+                            else f"new listings hold {new_share:.1f}% of revenue"))
+        if ret is not None and peer and ret / peer <= 0.85:
+            reasons.append((f"退货率只有同级 {ret / peer:.2f} 倍" if zh
+                            else f"returns {ret / peer:.2f}x peers"))
+        if not reasons:
+            continue
+        out.append({
+            "kind": "category", "key": row["node_key"], "label": row["label"],
+            "score": row["category_score"], "confidence": row["score_confidence"],
+            "why": "，".join(reasons) if zh else "; ".join(reasons),
+        })
+    out.sort(key=lambda item: item.get("score") or 0, reverse=True)
+
+    for element in rising:
+        out.append({
+            "kind": "element", "key": element["key"], "label": element["label"],
+            "kind_label": element["kind_label"],
+            "why": ((f"{element['keyword_count']} 个词合计 {element['searches']:,} 搜索，"
+                     f"{element['growth_pct']:+.1f}%") if zh else
+                    (f"{element['growth_pct']:+.1f}% across {element['keyword_count']} "
+                     f"phrases, {element['searches']:,} searches")),
+            "keywords": [k["keyword"] for k in element["keywords"][:3]],
+        })
+    return out[:MAX_DIRECTION_ROWS]
+
+
+def _avoid(board: Sequence[dict], falling: Sequence[dict], zh: bool) -> list[dict]:
+    """What not to start, and what to design out of whatever does get started."""
+    out: list[dict] = []
+    for row in board:
+        growth = scoring._num(row.get("growth_pct"))
+        ret, peer = (scoring._num(row.get("return_ratio_pct")),
+                     scoring._num(row.get("return_ratio_avg_pct")))
+        top5 = scoring._num(row.get("top5_brand_share_pct"))
+        entrench = scoring._num(row.get("score_breakdown", {}).get("entrenchment"))
+        reasons: list[str] = []
+        if growth is not None and growth <= -10.0:
+            reasons.append((f"销售额 {growth:+.1f}%" if zh else f"revenue {growth:+.1f}%"))
+        if ret is not None and peer and ret / peer >= 1.25:
+            reasons.append((f"退货率是同级 {ret / peer:.2f} 倍，货运退货吃掉整单毛利" if zh
+                            else f"returns {ret / peer:.2f}x peers"))
+        if top5 is not None and top5 >= 55.0:
+            reasons.append((f"Top5 品牌占 {top5:.0f}% 销额" if zh
+                            else f"top-5 brands hold {top5:.0f}% of revenue"))
+        # entrenchment scores *high* when the review wall is low, so a near-zero
+        # score is the wall itself: a new listing cannot climb it inside a year.
+        if entrench is not None and entrench <= 2.0:
+            reasons.append(("头部评论墙过高，新品一年内爬不上去" if zh
+                            else "the head's review wall is not climbable in a year"))
+        if not reasons:
+            continue
+        out.append({
+            "kind": "category", "key": row["node_key"], "label": row["label"],
+            "score": row["category_score"], "confidence": row["score_confidence"],
+            "why": "，".join(reasons) if zh else "; ".join(reasons),
+        })
+    out.sort(key=lambda item: item.get("score") or 0)
+
+    for element in falling:
+        out.append({
+            "kind": "element", "key": element["key"], "label": element["label"],
+            "kind_label": element["kind_label"],
+            "why": ((f"{element['keyword_count']} 个词合计 {element['searches']:,} 搜索，"
+                     f"{element['growth_pct']:+.1f}%") if zh else
+                    (f"{element['growth_pct']:+.1f}% across {element['keyword_count']} "
+                     f"phrases, {element['searches']:,} searches")),
+            "keywords": [k["keyword"] for k in element["keywords"][:3]],
+        })
+    return out[:MAX_DIRECTION_ROWS]
+
+
+# Factor names live here as well as in the frontend dictionary for the reason
+# monitor's templates do: the board's written read is built server-side, so the
+# strings have to exist where the sentence is assembled.
+_FACTOR_NAMES: dict[str, tuple[str, str]] = {
+    "demand_scale": ("需求规模", "demand scale"),
+    "demand_growth": ("需求增长", "demand growth"),
+    "aov_fit": ("价格带适配", "price fit"),
+    "concentration": ("竞争可入性", "competitive openness"),
+    "entrenchment": ("评论壁垒", "review wall"),
+    "new_product_viability": ("新品可行性", "new-entrant viability"),
+    "keyword_sdr": ("关键词空间", "keyword headroom"),
+}
+
+# The eight jobs in jobs.NODE_PACK, named for a reader. A raw job kind in a
+# sentence about a market reads as a leaked internal.
+_MISSING_NAMES: dict[str, tuple[str, str]] = {
+    "category_structure": ("类目结构", "category structure"),
+    "category_demand": ("需求趋势", "demand trend"),
+    "category_price_bands": ("价格带分布", "price bands"),
+    "category_newcomers": ("新品表现", "new-entrant performance"),
+    "category_brands": ("品牌格局", "brand landscape"),
+    "product_pack": ("竞品包", "competitor pack"),
+    "product_newcomers": ("新品竞品", "new-entrant listings"),
+    "keyword_demand": ("关键词需求", "keyword demand"),
+}
+
+
+def _named_missing(missing: Sequence[str], zh: bool) -> list[str]:
+    out = []
+    for step in missing:
+        names = _MISSING_NAMES.get(step)
+        out.append((names[0] if zh else names[1]) if names else step)
+    return out
+
+
+def _board_read(row: Mapping[str, Any], node_alerts: Sequence[Mapping[str, Any]],
+                zh: bool) -> list[dict]:
+    """A written read for one board row, composed from stored columns and alerts.
+
+    Every row gets one, including the rows that are mostly gaps — a card with a
+    score and nothing else reads as a rendering failure, and the honest reading of
+    a thin row ("we covered a quarter of the model, here is which quarter") is
+    more useful than silence.
+
+    Deterministic on purpose. The model's verdict rationale sits alongside this,
+    not instead of it: a sentence that survives a model outage is the one people
+    come to rely on.
+    """
+    lines: list[dict] = []
+    breakdown = row.get("score_breakdown") or {}
+    earned = [(key, value) for key, value in breakdown.items()
+              if key != scoring.RISK_KEY and (scoring._num(value) or 0) > 0]
+    earned.sort(key=lambda pair: pair[1], reverse=True)
+    shortfall = sorted(
+        ((key, weight - (scoring._num(breakdown.get(key)) or 0.0))
+         for key, weight in scoring.CATEGORY_WEIGHTS.items()),
+        key=lambda pair: pair[1], reverse=True)
+
+    def name(key: str) -> str:
+        names = _FACTOR_NAMES.get(key, (key, key))
+        return names[0] if zh else names[1]
+
+    # 1. Why it sits where it sits.
+    if earned:
+        best = "、".join(name(k) for k, _v in earned[:2]) if zh else \
+            " and ".join(name(k) for k, _v in earned[:2])
+        # "earned nothing" would be a lie about a factor that earned 6 of 15;
+        # the honest form is the points forgone, which is also the actionable one.
+        weak_key, lost = shortfall[0] if shortfall else ("", 0.0)
+        weak = name(weak_key) if lost >= 5 else ""
+        got = scoring._num(breakdown.get(weak_key)) or 0.0
+        cap = scoring.CATEGORY_WEIGHTS.get(weak_key, 0)
+        if zh:
+            text = f"{row['category_score']} 分主要来自{best}"
+            text += (f"；最大失分项是{weak}（{got:.0f}/{cap:.0f}）。" if weak else "。")
+        else:
+            text = f"Scores {row['category_score']} mainly on {best}"
+            text += (f"; the biggest shortfall is {weak} ({got:.0f}/{cap:.0f})."
+                     if weak else ".")
+        lines.append({"kind": "read", "text": text})
+
+    # 2. The physical and commercial constraints a product brief is written against.
+    # Deliberately not the price, the revenue, the growth or the top-5 share: the
+    # row's own metric strip already names those four, and a card that prints the
+    # same number twice teaches people to skim past both.
+    facts: list[str] = []
+    weight = scoring._num(row.get("avg_weight"))
+    if weight is not None:
+        facts.append((f"平均 {round(weight, 1)} lb" if zh
+                      else f"{round(weight, 1)} lb average"))
+    ret, peer = (scoring._num(row.get("return_ratio_pct")),
+                 scoring._num(row.get("return_ratio_avg_pct")))
+    if ret is not None and peer:
+        multiple = ret / peer
+        if zh:
+            facts.append(f"退货率 {ret:.2f}%，是同级 {multiple:.2f} 倍"
+                         + ("（结构性成本优势）" if multiple <= 0.85 else
+                            "（一次货运退货吃掉整单毛利）" if multiple >= 1.25 else ""))
+        else:
+            facts.append(f"returns {ret:.2f}%, {multiple:.2f}x peers")
+    new_share = scoring._num(row.get("new_revenue_share_pct"))
+    if new_share is not None:
+        facts.append((f"近 12 月新品拿走 {new_share:.1f}% 销额" if zh
+                      else f"new listings hold {new_share:.1f}% of revenue"))
+    if facts:
+        lines.append({"kind": "facts", "text": "；".join(facts) + "。" if zh
+                      else "; ".join(facts) + "."})
+
+    # 3. The strongest signal each way, named rather than summarised.
+    for kind in ("opportunity", "risk"):
+        hit = next((a for a in node_alerts if a.get("kind") == kind), None)
+        if hit:
+            lines.append({"kind": kind, "text": hit.get("title") or "",
+                          "detail": hit.get("detail") or "",
+                          "evidence_ids": hit.get("evidence_ids") or []})
+
+    # 4. What was not collected — stated, because it bounds every line above.
+    missing = _named_missing(row.get("missing") or [], zh)
+    if missing and (row.get("score_confidence") or 1.0) < 0.6:
+        lines.append({"kind": "gap", "text": (
+            f"本期未采集：{'、'.join(missing)}。缺失项按 0 分计，"
+            f"所以这个分数不能和覆盖完整的类目直接比。" if zh else
+            f"Not collected: {', '.join(missing)}. Missing inputs score zero, so this "
+            f"score is not comparable with a fully covered category.")})
+    return lines
+
+
 def build_overview(marketplace: str, period: str, language: str) -> dict:
     """Every deterministic section of the discovery board."""
     zh = _zh(language)
@@ -312,6 +533,14 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
          if path != taxonomy.FURNITURE_ROOT})
 
     totals = store.product_totals(marketplace, period)
+    # Element demand is department-wide: a style does not belong to one node, and
+    # reading it per node would split "fluted" across six categories and bury it.
+    element_rows = elements.localize(
+        elements.scan(store.top_keywords(marketplace, None, period, limit=400),
+                      previous=store.top_keywords(
+                          marketplace, None, gateway.step_period(period, -1), limit=400)),
+        zh)
+    rising_elements, falling_elements = elements.split(element_rows)
     board: list[dict] = []
     alerts: list[dict] = []
     for node in taxonomy.leaf_nodes(marketplace):
@@ -339,6 +568,8 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
             "product_pool": snap.get("product_pool"),
             "growth_pct": scoring.growth_pct(history),
             "median_price": snap.get("avg_price"),
+            "avg_weight": snap.get("avg_weight"),
+            "avg_volume": snap.get("avg_volume"),
             "top5_brand_share_pct": pct(snap.get("top5_brand_crn")),
             "new_revenue_share_pct": scoring.new_revenue_share_pct(snap),
             "return_ratio_pct": pct(snap.get("return_ratio")),
@@ -355,6 +586,13 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
     board = board[:MAX_BOARD_ROWS]
     shown = {row["node_key"] for row in board}
     alerts = [a for a in alerts if a["node_key"] in shown]
+
+    # Ranked alerts per node, so each row's read names its strongest signal each
+    # way rather than whichever one happened to be scanned first.
+    ranked = monitor.rank(alerts)
+    for row in board:
+        row["read"] = _board_read(
+            row, [a for a in ranked if a["node_key"] == row["node_key"]], zh)
 
     root = snapshots.get(taxonomy.FURNITURE_ROOT) or {}
     # Summing `or 0.0` over rows that are all None yields 0.0, and the board then
@@ -419,6 +657,9 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
                                pct((snapshots.get(r["node_key"]) or {}).get("top5_product_crn"))}
                           for r in board if r["top5_brand_share_pct"] is not None],
         "physical": _physical_rows(board, snapshots),
+        "elements": element_rows,
+        "follow": _follow(board, rising_elements, zh),
+        "avoid": _avoid(board, falling_elements, zh),
         "supply": _supply_rows(board, snapshots),
         "fulfilment": _fulfilment_rows(board, snapshots),
         "quality": _quality_rows(board, snapshots),

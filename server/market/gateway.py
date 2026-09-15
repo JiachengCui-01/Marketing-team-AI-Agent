@@ -124,6 +124,23 @@ def previous_period(now: datetime | None = None) -> str:
     return f"{year}{month:02d}"
 
 
+def step_period(period: str, months: int) -> str:
+    """Shift a ``yyyyMM`` key by whole months; ``""`` when it cannot be parsed.
+
+    Returning empty rather than raising: the callers use this to look for an
+    optional comparison month, and a malformed key should cost them the
+    comparison, not the whole render.
+    """
+    try:
+        year, month = int(period[:4]), int(period[4:6])
+    except (TypeError, ValueError, IndexError):
+        return ""
+    if not 1 <= month <= 12:
+        return ""
+    index = year * 12 + (month - 1) + months
+    return f"{index // 12}{index % 12 + 1:02d}"
+
+
 def enabled() -> bool:
     return os.environ.get("MARKETING_AGENT_MARKET_SWEEP", "1").strip().lower() not in _FALSEY
 

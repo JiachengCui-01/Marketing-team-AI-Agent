@@ -28,7 +28,7 @@ from marketing_agent import config
 from marketing_agent.source_policy import data_gap_message
 
 from . import evidence as ev
-from . import gateway, jobs, monitor, panels, scoring, store
+from . import elements, gateway, jobs, monitor, panels, scoring, store
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +119,15 @@ TOOL_OVERVIEW = {
                 "note": {"type": "string"},
                 "evidence_ids": _EVIDENCE_IDS,
             }, "required": ["node_key", "driver", "evidence_ids"]}},
+            "direction_reading": {"type": "string", "description":
+                                  "<=200 words, cited. Read the supplied FOLLOW and "
+                                  "AVOID lists as one product decision: which "
+                                  "category and which style/material/feature element "
+                                  "go together into the next programme, and which "
+                                  "combination to stop proposing. Name elements by "
+                                  "their own words (fluted, boucle, narrow depth), "
+                                  "not as 'trending styles'. Do not add a category or "
+                                  "element that is not in the lists."},
             "monitor_summary": {"type": "string", "description":
                                 "<=140 words. Read the supplied RISK/OPPORTUNITY "
                                 "signals together: which ones compound, which one "
@@ -387,12 +396,13 @@ def render_overview(
 
     index = ev.index_from_rows(_evidence_for_overview(marketplace, period, payload["board"]),
                                marketplace=marketplace, period=period)
-    user = "\n\n".join([
+    user = "\n\n".join([part for part in [
         f"MARKETPLACE: {marketplace}   PERIOD: {period}",
         _board_brief(payload["board"], language),
+        _direction_brief(payload, language),
         monitor.brief(payload["monitor"], language),
         index.sheet(language=language),
-    ])
+    ] if part])
     narrative, source = _run_tool(client, tool=TOOL_OVERVIEW, user=user, language=language)
     cleaned, dropped = ev.validate_citations(narrative, index.ids())
 
@@ -402,6 +412,7 @@ def render_overview(
     payload["movers_reading"] = cleaned.get("movers_reading", [])
     payload["gaps"] = list(cleaned.get("notes", [])) + ev.citation_notes(dropped, language)
     payload["gaps"] += _missing_notes(payload["board"], language)
+    payload["direction_reading"] = cleaned.get("direction_reading", "")
     payload["monitor_summary"] = cleaned.get("monitor_summary", "")
     payload["score_model"] = scoring.score_model()
     payload["narrative_source"] = source
@@ -582,7 +593,37 @@ def _board_brief(board: Sequence[dict], language: str) -> str:
     for row in board:
         lines.append(f"{row['node_key']} | {row['label']} | {row['category_score']} | "
                      f"{row['score_confidence']} | {row['completeness']:.2f}")
+        # The server's own read of the row. Supplied so the thesis extends it
+        # instead of writing a second, differently-worded version of it.
+        for line in row.get("read") or ():
+            if line.get("kind") in ("read", "facts"):
+                lines.append(f"    {line['text']}")
     return "\n".join(lines)
+
+
+def _direction_brief(payload: dict, language: str) -> str:
+    """FOLLOW / AVOID plus the element demand behind them."""
+    zh = language == "zh"
+    blocks: list[str] = []
+    for key, heading in (("follow", "FOLLOW (server-computed; the product roadmap)"),
+                         ("avoid", "AVOID (server-computed; do not start these)")):
+        rows = payload.get(key) or []
+        if not rows:
+            continue
+        lines = [heading]
+        for item in rows:
+            phrases = ", ".join(item.get("keywords") or [])
+            lines.append(f"  [{item['kind']}] {item['label']} — {item['why']}"
+                         + (f" | phrases: {phrases}" if phrases else ""))
+        blocks.append("\n".join(lines))
+    rising = [r for r in (payload.get("elements") or []) if r.get("rated")
+              and (r.get("growth_pct") or 0) >= elements.RISING_PCT]
+    falling = [r for r in (payload.get("elements") or []) if r.get("rated")
+               and (r.get("growth_pct") or 0) <= elements.FALLING_PCT]
+    element_text = elements.brief(rising, falling, zh)
+    if element_text:
+        blocks.append(element_text)
+    return "\n\n".join(blocks)
 
 
 def _category_brief(payload: dict, language: str) -> str:

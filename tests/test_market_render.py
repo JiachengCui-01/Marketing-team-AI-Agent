@@ -317,6 +317,139 @@ class CategoryTests(RenderTestCase):
         self.assertIn("category_structure", gaps)
 
 
+class BoardReadTests(RenderTestCase):
+    """Every row carries a written read, including the rows that are mostly gaps.
+
+    A card with a score and nothing else is what the board looked like before, and
+    it reads as a rendering failure rather than as a thin month.
+    """
+
+    # A real taxonomy leaf: build_overview iterates taxonomy.leaf_nodes, so a
+    # made-up path produces no row at all and the assertion tests nothing.
+    THIN = "1055398:1063306:1063308:3733251"  # Nightstands
+
+    def read_of(self, payload: dict, node_key: str) -> dict[str, str]:
+        row = next(r for r in payload["board"] if r["node_key"] == node_key)
+        return {line["kind"]: line["text"] for line in row["read"]}
+
+    def test_the_read_names_the_factors_behind_the_score(self) -> None:
+        by_kind = self.read_of(render.build_overview("US", PERIOD, "zh"), BUFFETS)
+        self.assertIn("分主要来自", by_kind["read"])
+        self.assertIn("最大失分项", by_kind["read"])
+
+    def test_the_shortfall_states_points_rather_than_claiming_a_zero(self) -> None:
+        """A factor that earned 6 of 15 has not 'earned nothing'."""
+        by_kind = self.read_of(render.build_overview("US", PERIOD, "zh"), BUFFETS)
+        self.assertNotIn("没拿到分", by_kind["read"])
+        self.assertRegex(by_kind["read"], r"\d+/\d+")
+
+    def test_the_facts_line_is_the_product_brief_constraints(self) -> None:
+        by_kind = self.read_of(render.build_overview("US", PERIOD, "zh"), BUFFETS)
+        facts = by_kind["facts"]
+        self.assertIn("96.4 lb", facts)
+        self.assertIn("退货率", facts)
+        self.assertIn("新品", facts)
+        # The metric strip already names the price; a card that prints the same
+        # number twice teaches people to skim past both.
+        self.assertNotIn("类目均价", facts)
+
+    def test_a_return_rate_well_under_peers_is_called_an_advantage(self) -> None:
+        """For freight furniture this is worth more than most growth."""
+        by_kind = self.read_of(render.build_overview("US", PERIOD, "zh"), BUFFETS)
+        self.assertIn("结构性成本优势", by_kind["facts"])
+
+    def test_a_thin_row_says_what_was_not_collected(self) -> None:
+        store.upsert_node_snapshot("US", self.THIN, PERIOD, {"avg_price": 189.0},
+                                   completeness=0.1, missing=["product_pack",
+                                                              "keyword_demand"])
+        by_kind = self.read_of(render.build_overview("US", PERIOD, "zh"), self.THIN)
+        self.assertIn("本期未采集", by_kind["gap"])
+        # Named for a reader, not as the queue's own job kinds.
+        self.assertIn("竞品包", by_kind["gap"])
+        self.assertNotIn("product_pack", by_kind["gap"])
+        self.assertIn("不能和覆盖完整的类目直接比", by_kind["gap"])
+
+    def test_a_row_with_nothing_to_say_says_nothing_rather_than_empty_labels(self) -> None:
+        """No weight, no returns, no newcomer share — so no facts line at all."""
+        store.upsert_node_snapshot("US", self.THIN, PERIOD, {"avg_price": 189.0},
+                                   completeness=0.1, missing=[])
+        by_kind = self.read_of(render.build_overview("US", PERIOD, "zh"), self.THIN)
+        self.assertNotIn("facts", by_kind)
+        self.assertIn("read", by_kind)
+
+    def test_the_board_brief_hands_the_model_the_same_sentences(self) -> None:
+        """Otherwise the thesis writes a second, differently-worded version."""
+        payload = render.build_overview("US", PERIOD, "zh")
+        brief = render._board_brief(payload["board"], "zh")
+        self.assertIn("分主要来自", brief)
+        self.assertIn("96.4 lb", brief)
+
+
+class DirectionTests(RenderTestCase):
+    """跟进 / 规避 — the two lists the board exists to produce."""
+
+    def test_a_growing_low_return_category_lands_in_follow(self) -> None:
+        payload = render.build_overview("US", PERIOD, "zh")
+        entry = next(i for i in payload["follow"]
+                     if i["kind"] == "category" and i["key"] == BUFFETS)
+        self.assertIn("销售额 +", entry["why"])
+        self.assertIn("退货率只有同级", entry["why"])
+
+    def test_a_shrinking_entrenched_category_lands_in_avoid(self) -> None:
+        crowded = "1055398:1063306:1063318:3733551"  # Sofas & Couches
+        store.upsert_node_snapshot("US", crowded, "202607", {"total_revenue": 9_000_000.0})
+        store.upsert_node_snapshot("US", crowded, PERIOD, {
+            "total_revenue": 6_000_000.0, "avg_price": 740.0,
+            "top5_brand_crn": 0.61, "hl_avg_ratings": 42_000.0,
+            "return_ratio": 0.041, "return_ratio_avg": 0.0288,
+        }, completeness=1.0, missing=[])
+        payload = render.build_overview("US", PERIOD, "zh")
+        entry = next(i for i in payload["avoid"]
+                     if i["kind"] == "category" and i["key"] == crowded)
+        self.assertIn("销售额 -", entry["why"])
+        self.assertIn("Top5 品牌占 61%", entry["why"])
+        self.assertIn("退货率是同级", entry["why"])
+
+    def test_a_category_that_is_merely_flat_appears_on_neither_list(self) -> None:
+        """A list that includes everything is a list nobody reads."""
+        flat = "1055398:1063306:3733781:3733811"  # Tables
+        store.upsert_node_snapshot("US", flat, "202607", {"total_revenue": 4_000_000.0})
+        store.upsert_node_snapshot("US", flat, PERIOD, {
+            "total_revenue": 4_080_000.0, "avg_price": 318.0, "top5_brand_crn": 0.30,
+            "return_ratio": 0.028, "return_ratio_avg": 0.0288, "hl_avg_ratings": 900.0,
+        }, completeness=1.0, missing=[])
+        payload = render.build_overview("US", PERIOD, "zh")
+        keys = {i["key"] for i in payload["follow"]} | {i["key"] for i in payload["avoid"]}
+        self.assertNotIn(flat, keys)
+
+    def test_rising_elements_reach_the_follow_list_with_their_phrases(self) -> None:
+        store.upsert_keyword_metrics([
+            {"marketplace": "US", "keyword": "fluted sideboard cabinet", "period": PERIOD,
+             "node_id_path": BUFFETS, "searches": 11_000.0, "searches_growth": 0.42,
+             "source_tool": "keyword_research"},
+            {"marketplace": "US", "keyword": "fluted door console", "period": PERIOD,
+             "node_id_path": BUFFETS, "searches": 6_000.0, "searches_growth": 0.31,
+             "source_tool": "keyword_research"},
+        ])
+        payload = render.build_overview("US", PERIOD, "zh")
+        entry = next(i for i in payload["follow"] if i["key"] == "fluted")
+        self.assertEqual(entry["kind"], "element")
+        self.assertIn("fluted sideboard cabinet", entry["keywords"])
+        self.assertIn("2 个词", entry["why"])
+
+    def test_the_direction_brief_is_omitted_rather_than_left_empty(self) -> None:
+        payload = {"follow": [], "avoid": [], "elements": []}
+        self.assertEqual(render._direction_brief(payload, "zh"), "")
+
+    def test_the_model_may_not_invent_a_direction_of_its_own(self) -> None:
+        """direction_reading is prose over a server-computed list, like every
+        other narrative field here."""
+        properties = render.TOOL_OVERVIEW["input_schema"]["properties"]
+        self.assertIn("direction_reading", properties)
+        self.assertIn("Do not add a category or element that is not in the lists",
+                      properties["direction_reading"]["description"])
+
+
 class ProductViewTests(RenderTestCase):
     """The report reads as a product development brief, not a traffic report.
 
@@ -378,12 +511,12 @@ class ProductViewTests(RenderTestCase):
 
     def test_the_department_board_ranks_categories_by_price_density(self) -> None:
         """Freight scales with weight and the price does not; nothing else showed it."""
-        store.upsert_node_snapshot("US", "1055398:1063306:3733781:3733851", PERIOD, {
+        store.upsert_node_snapshot("US", "1055398:1063306:1063308:3733251", PERIOD, {
             "total_revenue": 2_000_000.0, "avg_price": 90.0, "avg_weight": 60.0,
         }, completeness=1.0, missing=[])
         payload = render.build_overview("US", PERIOD, "zh")
         rows = payload["physical"]
-        self.assertTrue(rows)
+        self.assertGreaterEqual(len(rows), 2, "both seeded nodes must reach the board")
         densities = [r["price_per_lb"] for r in rows if r["price_per_lb"] is not None]
         self.assertEqual(densities, sorted(densities, reverse=True))
         buffets = next(r for r in rows if r["node_key"] == BUFFETS)

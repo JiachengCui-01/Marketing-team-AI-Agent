@@ -8,6 +8,7 @@ import {
   getMarketConfig,
   getMarketOverview,
   refreshMarketOverview,
+  type MarketBoardRead,
   type MarketBoardRow,
   type MarketConfigResponse,
   type MarketCurrent,
@@ -182,6 +183,8 @@ export function MarketOverviewPanel({
                 ))}
               </div>
             </Section>
+
+            <Direction dashboard={dashboard} />
 
             <div className="grid gap-4 lg:grid-cols-2 empty:hidden">
               <Section title={t.gmTreemap} hint={t.gmTreemapHint} data={dashboard?.treemap}>
@@ -385,6 +388,110 @@ export function MarketOverviewPanel({
   );
 }
 
+/** 跟进 / 规避: the two lists the board exists to produce.
+ *
+ * A category says where to build; an element says what it should look like. Both
+ * are server-computed from stored columns, and each carries the number that put
+ * it on the list — a recommendation you cannot argue with is one nobody acts on.
+ */
+function Direction({ dashboard }: { dashboard: any }) {
+  const { t } = useI18n();
+  const follow = dashboard?.follow ?? [];
+  const avoid = dashboard?.avoid ?? [];
+  if (!follow.length && !avoid.length) return null;
+
+  const column = (rows: any[], title: string, hint: string, good: boolean) => (
+    <div className="min-w-0 flex-1">
+      <div className="mb-1.5 flex items-baseline gap-1.5">
+        <span className="text-[11px] font-medium text-fg">{title}</span>
+        <span className="text-[10px] text-fg-subtle">{hint}</span>
+      </div>
+      {rows.length === 0 ? (
+        <p className="text-[11px] text-fg-subtle">{t.gmDirectionNone}</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {rows.map((item) => (
+            <li key={`${item.kind}-${item.key}`} className="bi-card py-1.5">
+              <div className="flex flex-wrap items-baseline gap-1.5">
+                <span className={`bi-chip ${good ? "bi-chip-low" : "bi-chip-high"}`}>
+                  {item.kind === "element"
+                    ? item.kind_label ?? t.gmDirectionElement
+                    : t.gmDirectionCategory}
+                </span>
+                <span className="text-sm font-medium">{item.label}</span>
+                {item.score != null ? (
+                  <span className="text-[10px] tabular-nums text-fg-subtle">
+                    {item.score}
+                  </span>
+                ) : null}
+              </div>
+              <p className="mt-0.5 text-[11px] text-fg-muted">{item.why}</p>
+              {item.keywords?.length ? (
+                <p className="mt-0.5 text-[10px] text-fg-subtle">
+                  {item.keywords.join(" · ")}
+                </p>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+
+  return (
+    <Section title={t.gmDirection} hint={t.gmDirectionHint}>
+      {dashboard?.direction_reading ? (
+        <div className="mb-3 text-sm leading-relaxed">
+          <CitationMarkdown content={dashboard.direction_reading} />
+        </div>
+      ) : null}
+      <div className="flex flex-col gap-4 sm:flex-row">
+        {column(follow, t.gmFollow, t.gmFollowHint, true)}
+        {column(avoid, t.gmAvoid, t.gmAvoidHint, false)}
+      </div>
+    </Section>
+  );
+}
+
+/** The server's written read of one board row.
+ *
+ * Four kinds, in the order a decision is made: why it ranks there, the physical
+ * and commercial constraints a brief would be written against, the strongest
+ * signal each way, and what was not collected. The last one matters most on the
+ * thin rows — a score with no data behind it is not a small finding, it is a
+ * different claim.
+ */
+function BoardRead({ lines }: { lines?: MarketBoardRead[] }) {
+  const { t } = useI18n();
+  if (!lines?.length) return null;
+  const prose = lines.filter((l) => l.kind === "read" || l.kind === "facts");
+  const signals = lines.filter((l) => l.kind === "opportunity" || l.kind === "risk");
+  const gap = lines.find((l) => l.kind === "gap");
+  return (
+    <div className="mt-1.5 space-y-1">
+      {prose.map((line, i) => (
+        <p key={i} className={`text-[11px] leading-relaxed ${
+          line.kind === "read" ? "text-fg-muted" : "text-fg-subtle"}`}>
+          {line.text}
+        </p>
+      ))}
+      {signals.length ? (
+        <div className="flex flex-wrap gap-1.5 pt-0.5">
+          {signals.map((line, i) => (
+            <span key={i} title={line.detail}
+                  className={`bi-chip ${line.kind === "risk" ? "bi-chip-high" : "bi-chip-low"}`}>
+              {line.kind === "risk" ? t.gmReadRisk : t.gmReadOpportunity} · {line.text}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {gap ? (
+        <p className="pt-0.5 text-[10px] leading-relaxed text-fg-subtle">{gap.text}</p>
+      ) : null}
+    </div>
+  );
+}
+
 /** The board row's metrics: each one named, and absent when it has no value.
  *
  * `median_price` carries the vendor's ``avgPrice``, not a median — the field name
@@ -495,8 +602,9 @@ function BoardRow({
             <p className="mt-0.5 text-[11px] text-fg-muted">{verdict.rationale}</p>
           ) : null}
           <BoardMetrics row={row} />
+          <BoardRead lines={row.read} />
         </div>
-        <div className="w-28 shrink-0 text-right">
+        <div className="w-36 shrink-0 text-right">
           <div className="text-lg font-semibold" style={{ fontVariantNumeric: "tabular-nums" }}>
             {row.category_score}
           </div>
