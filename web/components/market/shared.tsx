@@ -82,12 +82,16 @@ export function Block({
   );
 }
 
-export function KpiRow({ kpis }: { kpis: MarketKpi[] }) {
+export function KpiRow({ kpis, columns = 5 }: { kpis: MarketKpi[]; columns?: 4 | 5 }) {
   const { t } = useI18n();
   const shown = kpis.filter((kpi) => kpi.value && kpi.value !== "—");
   if (!shown.length) return null;
+  // Four across for the department headline, which is eight tiles and reads as
+  // two deliberate rows; five for the narrower per-category rows, where the tiles
+  // carry short values and a fifth column costs nothing.
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+    <div className={`grid grid-cols-2 gap-2 sm:grid-cols-3 ${
+      columns === 4 ? "lg:grid-cols-4" : "lg:grid-cols-5"}`}>
       {shown.map((kpi) => (
         <div key={kpi.label} className="bi-tile">
           <div className="flex items-center gap-1">

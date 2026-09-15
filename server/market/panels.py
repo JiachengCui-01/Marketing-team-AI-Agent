@@ -652,6 +652,7 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
             "covered_revenue": (totals.get(path) or {}).get("revenue"),
             "covered_asins": (totals.get(path) or {}).get("asins") or 0,
             "product_pool": snap.get("product_pool"),
+            "product_tail_pct": snap.get("product_tail_pct"),
             "growth_pct": scoring.growth_pct(history),
             # The window that figure covers, so nothing downstream has to guess
             # whether it means "since last month" or "year on year".
@@ -700,24 +701,31 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
     watch = monitor.split(monitor.diversify(alerts), limit=monitor.MAX_OVERVIEW_ALERTS)
     families = coverage(marketplace, period, language)
 
+    # Eight, in two rows of four. The break lands between "how big is this shelf
+    # and how much of it did we read" and "where do we go, what do we watch".
+    # The vendor-data-family count is gone from here: the coverage strip below
+    # names every family and says which ones landed, so a bare "12/22" at the top
+    # was a worry with nowhere to go.
+    dept_share = _department_share(board, snapshots)
     kpis = [
         _revenue_tile(coverage_stats, head_revenue, zh),
         _coverage_tile(coverage_stats, zh),
-        tile("追踪子类目" if zh else "Tracked sub-categories", str(len(board))),
+        tile("追踪子类目" if zh else "Tracked sub-categories", str(len(board)),
+             (f"覆盖家具部门在售数的 {dept_share:.0f}%" if zh
+              else f"{dept_share:.0f}% of the department's listings")
+             if dept_share is not None else ""),
+        tile("类目均价中位" if zh else "Median category price",
+             money(scoring._median([r["median_price"] for r in board]))),
         tile("最佳机会类目" if zh else "Top opportunity",
              board[0]["label"] if board else "—",
              f"{board[0]['category_score']}/100" if board else ""),
-        tile("类目均价中位" if zh else "Median category price",
-             money(scoring._median([r["median_price"] for r in board]))),
-        tile("高风险信号" if zh else "High-severity risks",
-             str(watch["counts"]["risk_high"]),
-             f"{watch['counts']['risk_total']} " + ("条风险" if zh else "risks")),
         tile("高价值机会信号" if zh else "High-value openings",
              str(watch["counts"]["opportunity_high"]),
              f"{watch['counts']['opportunity_total']} " + ("条机会" if zh else "openings")),
+        tile("高风险信号" if zh else "High-severity risks",
+             str(watch["counts"]["risk_high"]),
+             f"{watch['counts']['risk_total']} " + ("条风险" if zh else "risks")),
         _return_risk_tile(board, zh),
-        tile("已覆盖数据类型" if zh else "Vendor data families",
-             f"{families['present']}/{families['total']}"),
     ]
 
     return {
@@ -769,6 +777,22 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
     }
 
 
+def _department_share(board, snapshots) -> float | None:
+    """What share of the department's listings the tracked categories cover.
+
+    The department root carries its own listing count, so this is measured rather
+    than asserted — and it is the honest answer to "is this really the whole
+    market": it is the part of it this brand builds in.
+    """
+    root = snapshots.get(taxonomy.FURNITURE_ROOT) or {}
+    total = scoring._num(root.get("total_products"))
+    if not total:
+        return None
+    tracked = sum(scoring._num((snapshots.get(r["node_key"]) or {})
+                               .get("total_products")) or 0.0 for r in board)
+    return min(100.0, tracked / total * 100.0) if tracked else None
+
+
 def _coverage_totals(board: Sequence[dict]) -> dict:
     """What the summed-ASIN roll-up actually covers, across the tracked nodes."""
     revenue = [scoring._num(r.get("covered_revenue")) for r in board]
@@ -776,10 +800,16 @@ def _coverage_totals(board: Sequence[dict]) -> dict:
     asins = sum(int(r.get("covered_asins") or 0) for r in board)
     pool = [scoring._num(r.get("product_pool")) for r in board]
     pool = [v for v in pool if v is not None]
+    tails = [scoring._num(r.get("product_tail_pct")) for r in board]
+    tails = [v for v in tails if v is not None]
     return {
         "revenue": round(sum(revenue), 2) if revenue else None,
         "asins": asins,
         "pool": int(sum(pool)) if pool else None,
+        # The worst case across the board: the category whose tail was still
+        # paying when collection stopped. An average would let one exhausted
+        # category cover for one that got truncated at the page cap.
+        "tail_pct": round(max(tails), 2) if tails else None,
         "nodes_with_products": len([r for r in board if (r.get("covered_asins") or 0) > 0]),
     }
 
@@ -812,23 +842,34 @@ def _revenue_tile(stats: Mapping[str, Any], head_revenue: float | None,
 
 
 def _coverage_tile(stats: Mapping[str, Any], zh: bool) -> dict:
-    """How much of the shelf that roll-up actually saw.
+    """How deep the roll-up went, stated as economics rather than as a fraction.
 
-    A roll-up without its denominator invites being read as the whole market,
-    which is exactly the mistake the old headline made.
+    This used to read ``2,016 / 505,758`` — listings collected over the listing
+    count the vendor reports. Both halves are counts, so the ratio answers "how
+    many rows did we read", while the tile is titled for revenue. Those are very
+    different numbers, because the rows arrive in revenue order: the top 2,000
+    listings of a category hold most of its money and a sliver of its listings.
+
+    A true revenue-coverage ratio cannot be shown at all — nobody publishes the
+    denominator. Amazon does not, and the vendor's own category total covers only
+    the ~100 head listings it analyses. So the statement is the one the data
+    supports: how many listings were summed, and what the last page was worth.
     """
-    asins, pool = stats.get("asins") or 0, stats.get("pool")
+    asins = stats.get("asins") or 0
     if not asins:
-        return tile("销售额覆盖" if zh else "Revenue coverage", "—",
+        return tile("已采集 listing" if zh else "Listings summed", "—",
                     "本期未采集 ASIN 明细" if zh else "no ASIN rows collected")
-    if not pool:
-        return tile("销售额覆盖" if zh else "Revenue coverage",
-                    f"{asins:,}",
-                    "个已采集 ASIN" if zh else "ASINs collected")
-    return tile("销售额覆盖" if zh else "Revenue coverage",
-                f"{asins:,} / {pool:,}",
-                ("已采集 ASIN / 厂商报告的在售数" if zh
-                 else "ASINs collected / listings the vendor reports"))
+    tail = scoring._num(stats.get("tail_pct"))
+    if tail is None:
+        hint = "逐条求和" if zh else "summed row by row"
+    elif tail < jobs.PRODUCT_TAIL_PCT:
+        hint = (f"已采到尾部无量（边际页仅贡献 {tail:.1f}%）" if zh
+                else f"paged until a page added {tail:.1f}% — the tail is spent")
+    else:
+        hint = (f"触及页数上限，最深类目边际页仍贡献 {tail:.1f}%" if zh
+                else f"hit the page cap; the deepest category's last page still "
+                     f"added {tail:.1f}%")
+    return tile("已采集 listing" if zh else "Listings summed", f"{asins:,}", hint)
 
 
 def _return_risk_tile(board: Sequence[dict], zh: bool) -> dict:
@@ -844,9 +885,17 @@ def _return_risk_tile(board: Sequence[dict], zh: bool) -> dict:
         return tile("退货率高于同级的类目" if zh else "Above-average return risk", "—",
                     "本期未取到退货率" if zh else "return rate not collected")
     worse = [r for r in known if r["return_ratio_pct"] > r["return_ratio_avg_pct"]]
+    if len(known) == len(board):
+        # Every tracked category answered, so the denominator is the board itself
+        # and printing it says nothing. A fraction is for reporting a gap.
+        return tile("退货率高于同级的类目" if zh else "Above-average return risk",
+                    str(len(worse)),
+                    (f"{len(known)} 个类目全部已取到退货率" if zh
+                     else f"all {len(known)} categories have a known rate"))
     return tile("退货率高于同级的类目" if zh else "Above-average return risk",
                 f"{len(worse)} / {len(known)}",
-                ("已知退货率的类目" if zh else "categories with a known rate"))
+                (f"仅 {len(known)}/{len(board)} 个类目取到退货率" if zh
+                 else f"only {len(known)} of {len(board)} have a known rate"))
 
 
 def _department_trend(histories: Mapping[str, Sequence[dict]],

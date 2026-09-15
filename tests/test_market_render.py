@@ -396,6 +396,76 @@ class BoardReadTests(RenderTestCase):
         self.assertIn("96.4 lb", brief)
 
 
+class HeadlineTileTests(RenderTestCase):
+    """The department headline: eight tiles, and no fraction that is really a gap
+    report wearing a coverage label."""
+
+    def tiles(self) -> dict[str, dict]:
+        payload = render.build_overview("US", PERIOD, "zh")
+        return {t["label"]: t for t in payload["headline"]["kpis"]}
+
+    def test_the_headline_is_eight_tiles_in_two_rows_of_four(self) -> None:
+        payload = render.build_overview("US", PERIOD, "zh")
+        self.assertEqual(len(payload["headline"]["kpis"]), 8)
+
+    def test_the_vendor_data_family_count_is_no_longer_a_headline(self) -> None:
+        """The coverage strip below names every family and says which landed; a
+        bare 12/22 at the top was a worry with nowhere to go."""
+        self.assertNotIn("已覆盖数据类型", self.tiles())
+        # The families themselves are still reported.
+        payload = render.build_overview("US", PERIOD, "zh")
+        self.assertEqual(payload["coverage"]["total"], len(panels.COVERAGE_FAMILIES))
+
+    def test_coverage_states_depth_not_a_count_over_a_count(self) -> None:
+        """`2,016 / 505,758` compared listings read against listings reported, under
+        a title about revenue. Two counts, and neither is a revenue denominator."""
+        tile = self.tiles()["已采集 listing"]
+        self.assertNotIn("/", tile["value"])
+        self.assertEqual(tile["value"], "2")
+
+    def test_the_depth_hint_says_whether_the_tail_was_exhausted(self) -> None:
+        store.upsert_node_snapshot("US", BUFFETS, PERIOD, {"product_tail_pct": 0.2})
+        self.assertIn("尾部无量", self.tiles()["已采集 listing"]["hint"])
+        store.upsert_node_snapshot("US", BUFFETS, PERIOD, {"product_tail_pct": 7.5})
+        self.assertIn("页数上限", self.tiles()["已采集 listing"]["hint"])
+
+    def test_the_worst_tail_is_reported_not_the_average(self) -> None:
+        """An average would let one exhausted category cover for a truncated one."""
+        other = "1055398:1063306:1063308:3733251"      # Nightstands
+        store.upsert_node_snapshot("US", BUFFETS, PERIOD, {"product_tail_pct": 0.1})
+        store.upsert_node_snapshot("US", other, PERIOD,
+                                   {"product_tail_pct": 9.0, "avg_price": 120.0,
+                                    "total_revenue": 500_000.0},
+                                   completeness=0.5, missing=[])
+        store.upsert_product_metrics([
+            {"marketplace": "US", "asin": "BX1", "period": PERIOD,
+             "node_id_path": other, "price": 120.0, "revenue": 1_000.0,
+             "source_tool": "product_research"}])
+        self.assertIn("9.0%", self.tiles()["已采集 listing"]["hint"])
+
+    def test_return_risk_drops_its_denominator_once_nothing_is_missing(self) -> None:
+        """A fraction is for reporting a gap. With none, it says nothing."""
+        tile = self.tiles()["退货率高于同级的类目"]
+        self.assertNotIn("/", tile["value"])
+        self.assertIn("全部已取到退货率", tile["hint"])
+
+    def test_return_risk_keeps_the_denominator_while_data_is_missing(self) -> None:
+        store.upsert_node_snapshot("US", "1055398:1063306:1063308:3733251", PERIOD,
+                                   {"avg_price": 120.0, "total_revenue": 500_000.0},
+                                   completeness=0.5, missing=[])
+        tile = self.tiles()["退货率高于同级的类目"]
+        self.assertEqual(tile["value"], "0 / 1")
+        self.assertIn("仅 1/2", tile["hint"])
+
+    def test_the_tracked_category_count_says_what_it_covers(self) -> None:
+        """"Is this the whole market" deserves a measured answer, not silence."""
+        store.upsert_node_snapshot("US", taxonomy.FURNITURE_ROOT, PERIOD,
+                                   {"total_products": 10_000.0},
+                                   completeness=1.0, missing=[])
+        store.upsert_node_snapshot("US", BUFFETS, PERIOD, {"total_products": 2_500.0})
+        self.assertIn("25%", self.tiles()["追踪子类目"]["hint"])
+
+
 class PriceCurveTests(RenderTestCase):
     """The price factor is scored against the department, not against a constant."""
 

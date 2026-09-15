@@ -492,6 +492,10 @@ CREATE TABLE IF NOT EXISTS market_node_snapshots (
     -- totals cover only the ~100 head listings it analyses, so this is the
     -- denominator that makes the collected coverage statable.
     product_pool INTEGER,
+    -- What the last collected page of listings was still worth, as a share of
+    -- everything held for the node. The completeness statement for the summed
+    -- revenue figure: the vendor publishes no category total to divide by.
+    product_tail_pct REAL,
     completeness REAL NOT NULL DEFAULT 0.0,
     missing_json TEXT NOT NULL DEFAULT '[]',
     schema_version INTEGER NOT NULL DEFAULT 1,
@@ -996,8 +1000,12 @@ def _migrate_product_pool(conn: sqlite3.Connection) -> None:
     migrations, so an index over a migration-added column takes down ``init()``
     on every existing database.
     """
-    if "product_pool" not in _table_columns(conn, "market_node_snapshots"):
+    columns = _table_columns(conn, "market_node_snapshots")
+    if "product_pool" not in columns:
         conn.execute("ALTER TABLE market_node_snapshots ADD COLUMN product_pool INTEGER")
+    if "product_tail_pct" not in columns:
+        conn.execute(
+            "ALTER TABLE market_node_snapshots ADD COLUMN product_tail_pct REAL")
 
 
 def _migrate_calendar_status(conn: sqlite3.Connection) -> None:

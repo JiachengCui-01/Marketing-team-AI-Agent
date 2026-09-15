@@ -161,7 +161,7 @@ export function MarketOverviewPanel({
                      right={<span className="text-[10px] text-fg-subtle">
                        {t.gmPeriod} {report.period}
                      </span>}>
-              <KpiRow kpis={dashboard?.headline?.kpis ?? []} />
+              <KpiRow kpis={dashboard?.headline?.kpis ?? []} columns={4} />
             </Section>
 
             {dashboard?.thesis ? (

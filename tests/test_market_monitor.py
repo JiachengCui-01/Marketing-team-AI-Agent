@@ -515,10 +515,18 @@ class PanelTests(unittest.TestCase):
             {"entity": "FBA", "rank": 1, "revenue_ratio": 0.72},
         ])
 
-    def test_the_rollup_states_its_coverage_rather_than_implying_totality(self) -> None:
-        """The vendor's own total covers ~100 head listings; a label that reads
-        as market-wide is the mistake, not the number."""
-        store.upsert_node_snapshot("US", BUFFETS, PERIOD, {"product_pool": 13781})
+    def test_the_rollup_states_its_depth_rather_than_implying_totality(self) -> None:
+        """The vendor's own total covers ~100 head listings; a label that reads as
+        market-wide is the mistake, not the number.
+
+        The depth used to be shown as ``150 / 13,781`` — listings read over
+        listings reported. Both are counts, so that ratio answers "how many rows",
+        while the tile was titled for revenue; and the rows arrive in revenue
+        order, so the top 150 hold far more of the money than 1% of it. There is
+        no revenue denominator to divide by, from the vendor or from Amazon.
+        """
+        store.upsert_node_snapshot("US", BUFFETS, PERIOD,
+                                   {"product_pool": 13781, "product_tail_pct": 0.3})
         store.upsert_product_metrics([
             {"marketplace": "US", "asin": f"B{i:04d}", "node_id_path": BUFFETS,
              "period": PERIOD, "revenue": 100_000.0, "units": 400}
@@ -528,9 +536,10 @@ class PanelTests(unittest.TestCase):
         self.assertEqual(stats["asins"], 150)
         self.assertEqual(stats["pool"], 13781)
         self.assertEqual(stats["revenue"], 15_000_000.0)
-        coverage = next(k for k in board["headline"]["kpis"] if "覆盖" in k["label"])
-        self.assertEqual(coverage["value"], "150 / 13,781")
-        self.assertFalse(coverage["estimated"])   # a count is observed, not modelled
+        depth = next(k for k in board["headline"]["kpis"] if "listing" in k["label"])
+        self.assertEqual(depth["value"], "150")
+        self.assertIn("尾部无量", depth["hint"])
+        self.assertFalse(depth["estimated"])   # a count is observed, not modelled
 
     def test_money_stays_flagged_as_a_vendor_model_even_for_a_closed_month(self) -> None:
         """SellerSprite infers every money figure from BSR; Amazon publishes

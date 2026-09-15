@@ -150,6 +150,89 @@ class PlanningTests(SweepTestCase):
                                  leaves)
 
 
+class ListingDepthTests(SweepTestCase):
+    """The pull stops when a page stops moving the number, not after three pages.
+
+    Three pages was 150 listings out of a category's several thousand, which made
+    the summed revenue figure a reading of the head and nothing else.
+    """
+
+    def _job(self, kind: str, subject_id: str = BUFFETS, period: str = PERIOD) -> dict:
+        store.enqueue_job(marketplace="US", job_kind=kind,
+                          subject_kind=jobs.BY_KIND[kind].subject_kind,
+                          subject_id=subject_id, period=period,
+                          est_calls=jobs.BY_KIND[kind].est_calls)
+        return next(j for j in store.due_jobs("US", limit=500) if j["job_kind"] == kind)
+
+    def test_the_cap_is_deep_enough_to_pass_the_head(self) -> None:
+        self.assertGreaterEqual(jobs.PRODUCT_PAGES * 50, 1_000)
+
+    def test_a_short_category_costs_one_call_not_the_cap(self) -> None:
+        """The fixture returns fewer rows than a full page, so the vendor is out."""
+        with mock.patch.object(gateway.sellersprite, "call_tool",
+                               side_effect=fixture_vendor):
+            result = jobs.run_job(self._job("product_pack"))
+        self.assertEqual(result.status, "done")
+        self.assertEqual(result.calls, 1)
+
+    def test_an_exhausted_category_records_a_zero_tail(self) -> None:
+        with mock.patch.object(gateway.sellersprite, "call_tool",
+                               side_effect=fixture_vendor):
+            jobs.run_job(self._job("product_pack"))
+        snap = store.get_node_snapshot("US", BUFFETS, PERIOD)
+        self.assertEqual(snap["product_tail_pct"], 0.0)
+
+    def test_paging_stops_once_a_page_stops_paying(self) -> None:
+        """A full page every time, with revenue decaying — the loop must not run
+        to the cap just because the vendor keeps answering."""
+        page = {"code": "OK", "data": {"total": 9_999, "items": [
+            {"asin": f"B{i:04d}", "title": f"Listing {i}", "price": 100.0,
+             "revenue": 1.0, "units": 1.0}
+            for i in range(jobs.PRODUCT_PAGE_SIZE)]}}
+        first = {"code": "OK", "data": {"total": 9_999, "items": [
+            {"asin": f"A{i:04d}", "title": f"Head {i}", "price": 400.0,
+             "revenue": 100_000.0, "units": 250.0}
+            for i in range(jobs.PRODUCT_PAGE_SIZE)]}}
+        calls = {"n": 0}
+
+        def vendor(tool: str, arguments: dict) -> str:
+            if tool != "product_research":
+                return fixture_vendor(tool, arguments)
+            calls["n"] += 1
+            return json.dumps(first if calls["n"] == 1 else page)
+
+        with mock.patch.object(gateway.sellersprite, "call_tool", side_effect=vendor):
+            result = jobs.run_job(self._job("product_pack"))
+        self.assertEqual(result.status, "done")
+        self.assertLess(result.calls, jobs.PRODUCT_PAGES,
+                        "ran to the cap on pages worth nothing")
+        snap = store.get_node_snapshot("US", BUFFETS, PERIOD)
+        self.assertLess(snap["product_tail_pct"], jobs.PRODUCT_TAIL_PCT)
+
+    def test_a_category_that_keeps_paying_is_followed_to_the_cap(self) -> None:
+        """The other half of the same rule: depth is bounded by economics, and a
+        category whose tail still sells gets the calls."""
+        page = {"code": "OK", "data": {"total": 99_999, "items": [
+            {"asin": f"C{i:04d}", "title": f"Listing {i}", "price": 300.0,
+             "revenue": 50_000.0, "units": 160.0}
+            for i in range(jobs.PRODUCT_PAGE_SIZE)]}}
+        seen = {"n": 0}
+
+        def vendor(tool: str, arguments: dict) -> str:
+            if tool != "product_research":
+                return fixture_vendor(tool, arguments)
+            seen["n"] += 1
+            payload = json.loads(json.dumps(page))
+            for i, item in enumerate(payload["data"]["items"]):
+                item["asin"] = f"C{seen['n']:02d}{i:03d}"
+            return json.dumps(payload)
+
+        gateway.DAILY_LIMITS[gateway.BUCKET_SWEEP] = 500
+        with mock.patch.object(gateway.sellersprite, "call_tool", side_effect=vendor):
+            result = jobs.run_job(self._job("product_pack"))
+        self.assertEqual(result.calls, jobs.PRODUCT_PAGES)
+
+
 class HistoryBackfillTests(SweepTestCase):
     """Almost every chart on the board is a trend, and every one of them was blank.
 

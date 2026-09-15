@@ -95,6 +95,10 @@ class SchemaUpgradeTests(unittest.TestCase):
                 "AND tbl_name = 'market_node_snapshots'")}
         self.assertIn("grain", columns)
         self.assertIn("observed_at", columns)
+        # Added by the same migration path; the depth figure the coverage tile
+        # reads would otherwise be filtered out against the table's column list.
+        self.assertIn("product_pool", columns)
+        self.assertIn("product_tail_pct", columns)
         self.assertIn("idx_market_node_snapshots_grain", indexes)
         # The old key would reject a pulse row sharing a month with its aggregate.
         self.assertNotIn("idx_market_node_snapshots_key", indexes)

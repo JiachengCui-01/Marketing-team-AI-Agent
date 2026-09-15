@@ -45,7 +45,18 @@ PRODUCT_PAGE_SIZE = 50
 # is one call that widens it by fifty. Revenue is steeply skewed, so the first
 # pages carry most of the money — but how much is data, not an assumption, and
 # the panel reports the coverage it achieved rather than claiming completeness.
-PRODUCT_PAGES = int(os.environ.get("MARKETING_AGENT_MARKET_PRODUCT_PAGES", "3"))
+# How deep the per-node listing pull may go, and when it stops early.
+#
+# Three pages was 150 listings out of a category's several thousand, which made
+# the summed revenue figure a reading of the head and nothing else. The depth is
+# now bounded by *economics* rather than by a page count: keep paging while a
+# page still moves the number, stop when it does not. A furniture category's
+# revenue is concentrated enough that this usually settles well before the cap,
+# and where it does not the extra calls are buying the only complete answer
+# available — the vendor publishes no category total to compare against.
+PRODUCT_PAGES = int(os.environ.get("MARKETING_AGENT_MARKET_PRODUCT_PAGES", "24"))
+# Stop once one more page would add less than this share of what we already hold.
+PRODUCT_TAIL_PCT = float(os.environ.get("MARKETING_AGENT_MARKET_PRODUCT_TAIL", "0.5"))
 KEYWORD_SEED_BATCH = 10
 
 # Every structural distribution and concentration the vendor offers, for every
@@ -374,6 +385,8 @@ def _product_pack(*, marketplace: str, period: str, subject_id: str,
     metrics: list[dict] = []
     collected = 0
     pool: int | None = None
+    revenue = 0.0
+    tail_pct: float | None = None
 
     for page in range(1, max(1, PRODUCT_PAGES) + 1):
         reply = gateway.call(
@@ -398,15 +411,33 @@ def _product_pack(*, marketplace: str, period: str, subject_id: str,
         store.upsert_product_metrics(page_metrics)
         collected += len(page_products)
         metrics.extend(page_metrics)
+
+        page_revenue = sum(float(row.get("revenue") or 0.0) for row in page_metrics)
+        # Share of everything held *after* this page, so the first page is 100%
+        # and the figure falls as the tail thins.
+        revenue += page_revenue
+        tail_pct = (page_revenue / revenue * 100.0) if revenue > 0 else None
+
         if len(page_products) < PRODUCT_PAGE_SIZE:
-            break               # the vendor has nothing more to give
+            tail_pct = 0.0      # the vendor has nothing more to give
+            break
+        if tail_pct is not None and page > 1 and tail_pct < PRODUCT_TAIL_PCT:
+            break               # another page would not move the number
 
     if not collected:
         return JobResult(status="pending", calls=calls, detail="no products")
     store.record_evidence(index.all_rows())
+    depth: dict = {}
     if pool is not None:
-        store.upsert_node_snapshot(marketplace, subject_id, period,
-                                   {"product_pool": int(pool)})
+        depth["product_pool"] = int(pool)
+    if tail_pct is not None:
+        # What the last page was still worth. This, not the listing count, is the
+        # honest completeness statement: there is no published category revenue
+        # total to divide by, so "another page adds 0.3%" is the strongest claim
+        # the data supports.
+        depth["product_tail_pct"] = round(tail_pct, 3)
+    if depth:
+        store.upsert_node_snapshot(marketplace, subject_id, period, depth)
 
     followups = 0
     if subject_id in taxonomy.TIER1_PATHS:
@@ -419,7 +450,8 @@ def _product_pack(*, marketplace: str, period: str, subject_id: str,
                                   period=period, priority=priority, est_calls=1)
                 followups += 1
     return JobResult(status="done", calls=calls,
-                     detail=f"{collected} products of {pool or '?'}",
+                     detail=f"{collected} products of {pool or '?'}"
+                            + (f", tail {tail_pct:.2f}%" if tail_pct is not None else ""),
                      followups=followups)
 
 
