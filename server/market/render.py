@@ -114,9 +114,12 @@ TOOL_OVERVIEW = {
             }, "required": ["node_key", "verdict", "rationale", "evidence_ids"]}},
             "movers_reading": {"type": "array", "items": {"type": "object", "properties": {
                 "node_key": {"type": "string"},
-                "driver": {"enum": ["new_entrants", "price_shift", "seasonal",
-                                    "brand_exit", "unclear"]},
-                "note": {"type": "string"},
+                "driver": {"enum": ["new_entrants", "assortment_shift", "price_shift",
+                                    "seasonal", "brand_exit", "unclear"]},
+                "note": {"type": "string", "description":
+                         "<=90 chars. What the move changes about the product we "
+                         "would build — spec, price band, variant count, the defect "
+                         "to design out. Not a restatement of the percentage."},
                 "evidence_ids": _EVIDENCE_IDS,
             }, "required": ["node_key", "driver", "evidence_ids"]}},
             "direction_reading": {"type": "string", "description":
@@ -130,9 +133,11 @@ TOOL_OVERVIEW = {
                                   "element that is not in the lists."},
             "monitor_summary": {"type": "string", "description":
                                 "<=140 words. Read the supplied RISK/OPPORTUNITY "
-                                "signals together: which ones compound, which one "
-                                "decides the next move. Do not introduce a signal "
-                                "that is not in the list."},
+                                "signals together: which ones compound, and what "
+                                "each compounding pair changes about the product "
+                                "plan — a heavy category that also arrives broken is "
+                                "a packaging brief, not two separate alerts. Do not "
+                                "introduce a signal that is not in the list."},
             "notes": {"type": "array", "items": {"type": "string"}},
         },
         "required": ["thesis", "category_verdicts"],
@@ -198,8 +203,10 @@ TOOL_CATEGORY = {
                                    "verdict's main reason. Omit if not collected."},
             "monitor_summary": {"type": "string", "description":
                                 "<=120 words on the supplied RISK/OPPORTUNITY "
-                                "signals for this node. Do not introduce a signal "
-                                "that is not in the list."},
+                                "signals for this node, ending in what they change "
+                                "about the product: which spec, which price band, "
+                                "which defect. Do not introduce a signal that is not "
+                                "in the list."},
             "verdict": _VERDICT,
             "verdict_rationale": {"type": "string", "description":
                                   "<=120 chars. Must rest on a product fact — design "
