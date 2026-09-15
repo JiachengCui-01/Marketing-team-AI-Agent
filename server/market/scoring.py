@@ -128,6 +128,22 @@ def growth_pct(series: Sequence[dict], key: str = "total_revenue") -> float | No
     return (values[-1] - values[0]) / values[0] * 100.0
 
 
+def growth_span(series: Sequence[dict], key: str = "total_revenue") -> tuple[str, str]:
+    """The first and last period :func:`growth_pct` actually compared.
+
+    Shipped alongside the number because the window is not fixed: it is however
+    many months of this node we happen to hold, which is two for a node we
+    started tracking last month and twenty-four for one we did not. A figure
+    labelled "year on year" that is really "since last month" is worse than no
+    label, and that is what the treemap legend used to say.
+    """
+    usable = [point for point in series
+              if (_num(point.get(key)) or 0) > 0 and point.get("period")]
+    if len(usable) < 2:
+        return "", ""
+    return str(usable[0]["period"]), str(usable[-1]["period"])
+
+
 def new_revenue_share_pct(snapshot: dict) -> float | None:
     """Share of category revenue held by listings under 12 months old.
 

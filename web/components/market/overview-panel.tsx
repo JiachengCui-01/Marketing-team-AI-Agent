@@ -188,7 +188,10 @@ export function MarketOverviewPanel({
 
             <div className="grid gap-4 lg:grid-cols-2 empty:hidden">
               <Section title={t.gmTreemap} hint={t.gmTreemapHint} data={dashboard?.treemap}>
-                <Treemap items={dashboard?.treemap ?? []} onPick={pick} fallingLabel={t.gmFalling} />
+                <Treemap items={dashboard?.treemap ?? []} onPick={pick}
+                         labels={{ falling: t.gmFalling, rising: t.gmRising,
+                                   unknown: t.gmNoTrend, unknownHint: t.gmNoTrendHint,
+                                   window: t.gmTrendWindow }} />
               </Section>
               <Section title={t.gmTrend}
                        data={[(dashboard?.trend ?? []).length > 1 ? dashboard?.trend : null,

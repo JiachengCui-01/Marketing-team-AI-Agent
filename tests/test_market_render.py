@@ -13,7 +13,8 @@ import unittest
 from unittest import mock
 
 from server import db
-from server.market import gateway, jobs, render, store, sweep, taxonomy
+from server.market import (gateway, jobs, render, scoring, store, sweep,
+                           taxonomy)
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures" / "sellersprite"
 BUFFETS = "1055398:1063306:3733781:3733831"
@@ -383,6 +384,56 @@ class BoardReadTests(RenderTestCase):
         brief = render._board_brief(payload["board"], "zh")
         self.assertIn("分主要来自", brief)
         self.assertIn("96.4 lb", brief)
+
+
+class GrowthWindowTests(RenderTestCase):
+    """A missing trend must not be drawn as a flat one.
+
+    The treemap outlined declining categories in red and left everything else
+    plain, so a department with one stored month rendered as "nothing is
+    declining" — a claim nobody made and the data does not support.
+    """
+
+    SPARSE = "1055398:1063306:1063308:3733251"  # Nightstands
+
+    def test_the_window_travels_with_the_growth_figure(self) -> None:
+        payload = render.build_overview("US", PERIOD, "zh")
+        row = next(r for r in payload["board"] if r["node_key"] == BUFFETS)
+        self.assertEqual((row["growth_from"], row["growth_to"]), ("202607", PERIOD))
+
+    def test_one_stored_month_yields_no_growth_and_no_window(self) -> None:
+        store.upsert_node_snapshot("US", self.SPARSE, PERIOD,
+                                   {"total_revenue": 2_000_000.0, "avg_price": 189.0},
+                                   completeness=0.2, missing=[])
+        payload = render.build_overview("US", PERIOD, "zh")
+        row = next(r for r in payload["board"] if r["node_key"] == self.SPARSE)
+        self.assertIsNone(row["growth_pct"])
+        self.assertEqual((row["growth_from"], row["growth_to"]), ("", ""))
+
+    def test_the_treemap_carries_the_same_distinction(self) -> None:
+        """The chart has to be able to tell 'not declining' from 'cannot tell'."""
+        store.upsert_node_snapshot("US", self.SPARSE, PERIOD,
+                                   {"total_revenue": 2_000_000.0, "avg_price": 189.0},
+                                   completeness=0.2, missing=[])
+        payload = render.build_overview("US", PERIOD, "zh")
+        by_key = {t["node_key"]: t for t in payload["treemap"]}
+        self.assertIsNone(by_key[self.SPARSE]["growth_pct"])
+        self.assertEqual(by_key[self.SPARSE]["growth_from"], "")
+        self.assertIsNotNone(by_key[BUFFETS]["growth_pct"])
+        self.assertEqual(by_key[BUFFETS]["growth_from"], "202607")
+
+    def test_a_month_with_no_revenue_is_not_counted_as_an_endpoint(self) -> None:
+        """A month the sweep never reached is not a month the category sold zero."""
+        self.assertEqual(scoring.growth_span([
+            {"period": "202605", "total_revenue": None},
+            {"period": "202606", "total_revenue": 0.0},
+            {"period": "202607", "total_revenue": 5_800_000.0},
+            {"period": "202608", "total_revenue": 6_907_337.97},
+        ]), ("202607", "202608"))
+
+    def test_a_single_usable_month_reports_no_window(self) -> None:
+        self.assertEqual(scoring.growth_span(
+            [{"period": "202608", "total_revenue": 6_907_337.97}]), ("", ""))
 
 
 class DirectionTests(RenderTestCase):

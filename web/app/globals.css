@@ -1563,6 +1563,10 @@ select.field:focus {
     background: rgb(var(--danger) / 0.16);
     border: 1px solid rgb(var(--danger) / 0.8);
   }
+  .bi-swatch-unknown {
+    background: rgb(var(--fg) / 0.06);
+    border: 1px dashed rgb(var(--fg-subtle) / 0.7);
+  }
   /* The band where revenue outruns listings — the one a price is set from. */
   .bi-band-lead {
     background: rgb(var(--feature-selection) / 0.62);
@@ -1698,12 +1702,34 @@ select.field:focus {
   .bi-tree-tile {
     fill: rgb(var(--feature-selection) / 0.42);
     stroke: rgb(var(--bg));
-    stroke-width: 0.4;
+    stroke-width: 1;
   }
   .bi-tree-down {
     fill: rgb(var(--danger) / 0.16);
     stroke: rgb(var(--danger) / 0.8);
-    stroke-width: 0.55;
+    stroke-width: 1.75;
+  }
+  /* Dashed, because dashed reads as provisional — which is exactly what an
+     unknown trend is. (The same stroke was wrong on a gridline for the same
+     reason it is right here.) */
+  .bi-tree-unknown {
+    fill: rgb(var(--fg) / 0.06);
+    stroke: rgb(var(--fg-subtle) / 0.7);
+    stroke-width: 1.5;
+    stroke-dasharray: 4 3;
+  }
+  .bi-tree-delta {
+    fill: rgb(var(--fg-muted));
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+  }
+  .bi-tree-delta-down {
+    fill: rgb(var(--danger));
+    font-weight: 600;
+  }
+  .bi-tree-delta-unknown {
+    fill: rgb(var(--fg-subtle));
+    font-style: italic;
   }
   .bi-tree-label {
     fill: rgb(var(--fg));

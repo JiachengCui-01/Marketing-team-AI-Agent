@@ -567,6 +567,10 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
             "covered_asins": (totals.get(path) or {}).get("asins") or 0,
             "product_pool": snap.get("product_pool"),
             "growth_pct": scoring.growth_pct(history),
+            # The window that figure covers, so nothing downstream has to guess
+            # whether it means "since last month" or "year on year".
+            "growth_from": scoring.growth_span(history)[0],
+            "growth_to": scoring.growth_span(history)[1],
             "median_price": snap.get("avg_price"),
             "avg_weight": snap.get("avg_weight"),
             "avg_volume": snap.get("avg_volume"),
@@ -643,6 +647,7 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
         "treemap": [{"node_key": r["node_key"], "label": r["label"],
                      "value": r["covered_revenue"] or r["revenue_est"] or 0.0,
                      "growth_pct": r["growth_pct"],
+                     "growth_from": r["growth_from"], "growth_to": r["growth_to"],
                      "score": r["category_score"]}
                     for r in board if (r["revenue_est"] or 0) > 0],
         "trend": _department_trend(histories, board),

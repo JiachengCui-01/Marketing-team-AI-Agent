@@ -484,7 +484,10 @@ type TreeItem = {
   node_key: string;
   label: string;
   value: number;
+  /** null means "not computable yet" — one stored month — not "flat". */
   growth_pct?: number | null;
+  growth_from?: string;
+  growth_to?: string;
   score?: number;
 };
 
@@ -561,18 +564,32 @@ function squarify(items: TreeItem[], width: number, height: number): Tile[] {
  * row of bars the eye has to add up.
  *
  * One flat fill, deliberately. Tinting each tile by its own share would encode
- * the same number twice — area already says it — and spend the only free
- * channel on nothing. The channel goes to *change* instead, which area cannot
- * show: a declining category is outlined and carries its own ▼.
+ * the same number twice — area already says it — so the free channel goes to
+ * *change*, which area cannot show.
+ *
+ * Change has **three** states here, not two. A category we hold one month of has
+ * no growth figure at all, and drawing it exactly like a category that grew
+ * makes the chart quietly claim "nothing is declining" when the truth is "we
+ * cannot tell yet". Declining is a red outline, unknown is a dashed grey one,
+ * and the footer counts all three so the absence of red is readable as a fact
+ * rather than as an assumption.
  */
 export function Treemap({
   items,
   onPick,
-  fallingLabel,
+  labels,
 }: {
   items: TreeItem[];
   onPick?: (nodeKey: string) => void;
-  fallingLabel: string;
+  labels: {
+    falling: string;
+    rising: string;
+    unknown: string;
+    /** e.g. "需要两个月才能算" — says why the unknown tiles are unknown. */
+    unknownHint: string;
+    /** e.g. "对比区间" — prefixes the window in the tooltip. */
+    window: string;
+  };
 }) {
   const clipId = useId().replace(/:/g, "");
   const rows = items.filter((i) => i.value > 0).sort((a, b) => b.value - a.value);
@@ -585,14 +602,24 @@ export function Treemap({
   const width = 680;
   const height = 210;
   const tiles = squarify(rows, width, height);
-  const falling = rows.filter((r) => (r.growth_pct ?? 0) < 0).length;
+
+  const state = (item: TreeItem) =>
+    item.growth_pct === null || item.growth_pct === undefined
+      ? "unknown" : item.growth_pct < 0 ? "down" : "up";
+  const counts = {
+    down: rows.filter((r) => state(r) === "down").length,
+    up: rows.filter((r) => state(r) === "up").length,
+    unknown: rows.filter((r) => state(r) === "unknown").length,
+  };
 
   return (
     <div>
       <svg viewBox={`0 0 ${width} ${height}`} className="w-full" style={{ height }}
            preserveAspectRatio="xMidYMid meet" role="img"
            aria-label={rows
-             .map((r) => `${r.label} ${fmtMoney(r.value)}, ${((r.value / total) * 100).toFixed(1)}%`)
+             .map((r) => `${r.label} ${fmtMoney(r.value)}, ${((r.value / total) * 100).toFixed(1)}%`
+               + (r.growth_pct == null ? `, ${labels.unknown}`
+                  : `, ${r.growth_pct >= 0 ? "+" : ""}${r.growth_pct.toFixed(1)}%`))
              .join("; ")}>
         <defs>
           {tiles.map(({ item }, index) => {
@@ -608,16 +635,21 @@ export function Treemap({
         {tiles.map(({ item, x, y, w, h }, index) => {
           const share = (item.value / total) * 100;
           const growth = item.growth_pct ?? null;
-          const down = growth !== null && growth < 0;
+          const kind = state(item);
+          const span = item.growth_from && item.growth_to
+            ? ` · ${labels.window} ${item.growth_from}–${item.growth_to}` : "";
           return (
             <g key={item.node_key} onClick={() => onPick?.(item.node_key)}
                style={{ cursor: onPick ? "pointer" : "default" }}>
-              <rect className={down ? "bi-tree-tile bi-tree-down" : "bi-tree-tile"}
+              <rect className={`bi-tree-tile${kind === "down" ? " bi-tree-down"
+                                : kind === "unknown" ? " bi-tree-unknown" : ""}`}
                     x={x + 1} y={y + 1} rx={3}
                     width={Math.max(0, w - 2)} height={Math.max(0, h - 2)}>
                 <title>
                   {`${item.label} · ${fmtMoney(item.value)} · ${share.toFixed(1)}%`
-                    + (growth !== null ? ` · ${growth >= 0 ? "+" : ""}${growth.toFixed(1)}%` : "")}
+                    + (growth !== null
+                       ? ` · ${growth >= 0 ? "+" : ""}${growth.toFixed(1)}%${span}`
+                       : ` · ${labels.unknown}`)}
                 </title>
               </rect>
               {w > 74 && h > 34 ? (
@@ -629,7 +661,16 @@ export function Treemap({
                   </text>
                   <text className="bi-tree-sub" x={x + 6} y={y + 30}>
                     {fmtMoney(item.value)} · {share.toFixed(0)}%
-                    {down ? ` ▼${Math.abs(growth as number).toFixed(0)}%` : ""}
+                  </text>
+                  {/* The change, on every tile that has one. Thirteen tiles is few
+                      enough to read, and it is what stops the outline from being
+                      the only place the direction lives. */}
+                  <text className={kind === "down" ? "bi-tree-delta bi-tree-delta-down"
+                                   : kind === "unknown" ? "bi-tree-delta bi-tree-delta-unknown"
+                                   : "bi-tree-delta"}
+                        x={x + 6} y={y + 43}>
+                    {kind === "unknown" ? labels.unknown
+                      : `${growth! < 0 ? "▼" : "▲"}${Math.abs(growth!).toFixed(0)}%`}
                   </text>
                 </g>
               ) : null}
@@ -637,12 +678,29 @@ export function Treemap({
           );
         })}
       </svg>
-      {falling ? (
-        <div className="mt-1 flex items-center gap-1 text-[10px] text-fg-subtle">
-          <i className="bi-swatch bi-swatch-down" />
-          {fallingLabel} · {falling}
-        </div>
-      ) : null}
+      {/* Always rendered. The old footer appeared only when something was
+          falling, so "no red anywhere" and "we did not draw the legend" looked
+          identical — which is the question this chart kept being asked. */}
+      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]
+                      text-fg-subtle">
+        {counts.down ? (
+          <span className="flex items-center gap-1">
+            <i className="bi-swatch bi-swatch-down" />{labels.falling} · {counts.down}
+          </span>
+        ) : null}
+        {counts.up ? (
+          <span className="flex items-center gap-1">
+            <i className="bi-swatch" />{labels.rising} · {counts.up}
+          </span>
+        ) : null}
+        {counts.unknown ? (
+          <span className="flex items-center gap-1">
+            <i className="bi-swatch bi-swatch-unknown" />
+            {labels.unknown} · {counts.unknown}
+            <span className="opacity-70">— {labels.unknownHint}</span>
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 }
