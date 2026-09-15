@@ -1,7 +1,11 @@
-"""Style and feature elements, and the follow / avoid lists built on them.
+"""Design terms mined from the market's own words, and the lists built on them.
 
-Runs on literals: the vocabulary is a constant and the aggregation is arithmetic,
-so none of this needs a database, a vendor or a model.
+Runs on literals: the mining is text processing and the aggregation is
+arithmetic, so none of this needs a database, a vendor or a model.
+
+The old version of this file tested a hand-written vocabulary of fifty style
+words. The tests that survived the rewrite are the ones that were really about
+evidence bars rather than about the list.
 """
 from __future__ import annotations
 
@@ -10,75 +14,137 @@ import unittest
 from server.market import elements, gateway
 
 
-def kw(keyword: str, searches: float, growth: float | None = None) -> dict:
-    return {"keyword": keyword, "searches": searches, "searches_growth": growth}
+def title(name: str, revenue: float, *, price: float | None = None,
+          brand: str = "Demo", node: str = "n1") -> dict:
+    return {"title": name, "revenue": revenue, "price": price, "brand": brand,
+            "node_id_path": node}
 
 
-class VocabularyTests(unittest.TestCase):
-    def test_tokens_match_on_word_boundaries(self) -> None:
-        """'cane' must not fire on 'canes' … or, worse, on 'hurricane lamp'."""
-        rows = {r["key"] for r in elements.scan([kw("hurricane glass lamp", 5000)])}
-        self.assertNotIn("rattan", rows)
-        self.assertIn("glass", rows)
-
-    def test_one_phrase_can_carry_several_elements(self) -> None:
-        """A real search phrase is a spec: material, form and room at once."""
-        rows = {r["key"] for r in elements.scan(
-            [kw("fluted oak sideboard for entryway", 8000)])}
-        self.assertEqual(rows, {"fluted", "oak", "entryway"})
-
-    def test_every_vocabulary_entry_has_a_kind_we_label(self) -> None:
-        for key, zh, en, kind, tokens in elements.VOCABULARY:
-            with self.subTest(key):
-                self.assertIn(kind, elements.KIND_LABELS)
-                self.assertTrue(zh and en and tokens)
-
-    def test_keys_are_unique(self) -> None:
-        keys = [entry[0] for entry in elements.VOCABULARY]
-        self.assertEqual(len(keys), len(set(keys)))
+def kw(keyword: str, searches: float, mom: float | None = None) -> dict:
+    return {"keyword": keyword, "searches": searches, "searches_mom_pct": mom}
 
 
-class AggregationTests(unittest.TestCase):
-    def test_growth_is_search_weighted(self) -> None:
-        """A 300% move on 40 searches is noise next to 12% on 40,000."""
-        rows = elements.scan([kw("boucle sofa", 40_000, 0.12),
-                              kw("boucle accent chair", 40, 3.0)])
-        boucle = next(r for r in rows if r["key"] == "boucle")
-        self.assertAlmostEqual(boucle["growth_pct"], 12.3, places=1)
+class TokenisingTests(unittest.TestCase):
+    def test_function_words_never_become_terms(self) -> None:
+        terms = elements._terms(elements._tokens("Cabinet with Storage for the Hallway"))
+        self.assertNotIn("with", terms)
+        self.assertNotIn("for the", terms)
 
-    def test_our_own_two_months_beat_the_vendor_growth_column(self) -> None:
-        rows = elements.scan(
-            [kw("fluted cabinet", 10_000, 0.90), kw("fluted console", 6_000, 0.90)],
-            previous=[kw("fluted cabinet", 8_000), kw("fluted console", 5_000)])
-        fluted = next(r for r in rows if r["key"] == "fluted")
-        # 25% and 20% against the stored month, not the vendor's 90%.
-        self.assertAlmostEqual(fluted["growth_pct"], 23.1, places=1)
+    def test_a_bigram_is_not_formed_across_a_function_word(self) -> None:
+        """'with storage' is 'storage'; gluing the preposition on splits the term."""
+        terms = elements._terms(elements._tokens("Sideboard with Storage"))
+        self.assertIn("storage", terms)
+        self.assertNotIn("with storage", terms)
 
-    def test_a_ratio_and_a_percentage_are_both_understood(self) -> None:
-        """keyword_research reports growth as a ratio on some tools, a percent on
-        others; nothing in this market grows 0.4% and bothers to report it."""
-        ratio = elements.scan([kw("velvet sofa", 9_000, 0.25)])[0]["growth_pct"]
-        percent = elements.scan([kw("velvet sofa", 9_000, 25.0)])[0]["growth_pct"]
-        self.assertEqual(ratio, 25.0)
-        self.assertEqual(percent, 25.0)
+    def test_real_bigrams_survive(self) -> None:
+        """'lift top' and 'solid wood' are single decisions either half misreports."""
+        terms = elements._terms(elements._tokens("Solid Wood Lift Top Coffee Table"))
+        self.assertIn("solid wood", terms)
+        self.assertIn("lift top", terms)
 
-    def test_a_phrase_with_no_growth_anywhere_leaves_the_element_unrated(self) -> None:
-        rows = elements.scan([kw("marble dining table", 9_000),
-                              kw("marble console", 5_000)])
-        marble = next(r for r in rows if r["key"] == "marble")
-        self.assertIsNone(marble["growth_pct"])
-        self.assertFalse(marble["rated"])
+    def test_a_bare_number_is_not_a_term(self) -> None:
+        terms = elements._terms(elements._tokens("60 inch Sideboard"))
+        self.assertNotIn("60", terms)
+
+
+class ExclusionTests(unittest.TestCase):
+    """What gets filtered is derived from the rows, not from a list."""
+
+    def test_a_brand_name_is_excluded_because_the_rows_say_it_is_one(self) -> None:
+        rows = elements.mine([
+            title("VASAGLE Fluted Sideboard", 100.0, brand="VASAGLE"),
+            title("VASAGLE Arched Cabinet", 100.0, brand="VASAGLE"),
+        ])
+        found = {r["term"] for r in rows}
+        self.assertNotIn("vasagle", found)
+        self.assertIn("fluted", found)
+
+    def test_a_category_noun_is_dropped_once_the_sample_can_show_it(self) -> None:
+        """'Sideboard' is in every sideboard listing; that is what makes it the
+        category and what makes it useless as a differentiator."""
+        products = [title(f"Sideboard Buffet Cabinet {i}", 100.0) for i in range(24)]
+        products += [title("Sideboard Fluted Door", 100.0) for _ in range(6)]
+        found = {r["term"] for r in elements.mine(products)}
+        self.assertNotIn("sideboard", found)
+        self.assertNotIn("sideboard fluted", found)   # the category noun in a pair
+        # Which phrasing survives is the deduper's call — here every fluted
+        # listing says "fluted door", so that is the term the market uses.
+        self.assertTrue([t for t in found if "fluted" in t], found)
+
+    def test_a_small_node_does_not_have_its_best_style_filtered_as_a_noun(self) -> None:
+        """In a node of four titles, three is both a category noun and a hit."""
+        products = [title("Fluted Oak Sideboard", 100.0),
+                    title("Fluted Door Console", 100.0),
+                    title("Fluted Arch Cabinet", 100.0),
+                    title("Tufted Velvet Bench", 100.0)]
+        self.assertIn("fluted", {r["term"] for r in elements.mine(products)})
+
+
+class ShelfTests(unittest.TestCase):
+    LISTINGS = [
+        title("Fluted Oak Sideboard Buffet", 600_000.0, price=429.0),
+        title("Fluted Door Console Table", 200_000.0, price=289.0),
+        title("Tufted Velvet Bench", 100_000.0, price=199.0),
+        title("Plain Storage Cabinet", 100_000.0, price=149.0),
+    ]
+
+    def rows(self, products=None) -> dict[str, dict]:
+        return {r["term"]: r for r in elements.mine(products or self.LISTINGS)}
+
+    def test_share_is_of_revenue_not_of_listing_count(self) -> None:
+        """Ten listings nobody buys prove a style is available, not that it works."""
+        rows = self.rows()
+        self.assertEqual(rows["fluted"]["revenue_share_pct"], 80.0)
+        self.assertEqual(rows["fluted"]["asins"], 2)
+        self.assertEqual(rows["tufted"]["revenue_share_pct"], 10.0)
+
+    def test_a_listing_counts_toward_every_term_it_carries(self) -> None:
+        rows = self.rows()
+        self.assertEqual(rows["oak"]["revenue_share_pct"], 60.0)
+        # Shares deliberately sum past 100: they are not slices of a pie.
+        self.assertGreater(sum(r["revenue_share_pct"] for r in rows.values()), 100.0)
+
+    def test_average_price_comes_from_the_matched_listings(self) -> None:
+        self.assertEqual(self.rows()["fluted"]["avg_price"], 359.0)
+
+    def test_a_thin_term_is_recorded_but_not_shelf_rated(self) -> None:
+        rows = self.rows()
+        self.assertFalse(rows["tufted"]["shelf_rated"])
+        self.assertEqual(rows["tufted"]["asins"], 1)
+
+    def test_no_revenue_anywhere_gives_a_zero_share_not_a_crash(self) -> None:
+        """Dividing by a zero total would print 'nan%' on every dot."""
+        rows = {r["term"]: r for r in elements.mine([title("Fluted Cabinet", 0.0)])}
+        self.assertEqual(rows["fluted"]["revenue_share_pct"], 0.0)
+
+    def test_an_untitled_listing_still_enlarges_the_denominator(self) -> None:
+        """It is real revenue we simply cannot attribute, so shares fall."""
+        rows = self.rows(self.LISTINGS + [title("", 900_000.0)])
+        self.assertLess(rows["fluted"]["revenue_share_pct"], 80.0)
+
+
+class DedupeTests(unittest.TestCase):
+    def test_a_bigram_that_carries_its_unigram_wins(self) -> None:
+        """'lift top' on every listing that says 'lift' makes 'lift' redundant."""
+        products = [title(f"Lift Top Coffee Table {i}", 100.0) for i in range(4)]
+        found = {r["term"] for r in elements.mine(products)}
+        self.assertIn("lift top", found)
+        self.assertNotIn("lift", found)
+
+    def test_a_broad_term_beats_one_phrasing_of_itself(self) -> None:
+        products = [title("Fluted Oak Sideboard", 100.0),
+                    title("Fluted Door Console", 100.0),
+                    title("Fluted Arch Cabinet", 100.0)]
+        found = {r["term"] for r in elements.mine(products)}
+        self.assertIn("fluted", found)
+        self.assertNotIn("fluted oak", found)
 
 
 class GrowthWindowTests(unittest.TestCase):
-    """Which window a growth number came from, and what must never be one.
-
-    ``searches_growth`` used to be fed ``growth`` from keyword_research and
-    ``searchRankGrowthRate`` from ABA — a yearly percentage and a *rank* movement
-    ratio in the same column. A rank of 0.9951 read as "up 99.51%".
-    """
+    """Which window a growth number came from, and what must never be one."""
 
     def test_a_rank_movement_is_never_read_as_demand_growth(self) -> None:
+        """ABA's 0.9951 is a rank ratio. It used to be read as 'up 99.51%'."""
         row = {"keyword": "reacher", "searches": 10_115_226,
                "rank_growth_rate": 0.9951, "search_rank": 1, "rank_12w": 234}
         self.assertEqual(elements._growth_of(row, {}), (None, ""))
@@ -87,8 +153,7 @@ class GrowthWindowTests(unittest.TestCase):
         """They disagree constantly in a seasonal category, which is the point."""
         row = {"keyword": "boucle sofa", "searches": 9_000,
                "searches_mom_pct": -8.13, "searches_yoy_pct": 18.31}
-        value, window = elements._growth_of(row, {})
-        self.assertEqual((value, window), (-8.13, elements.MOM))
+        self.assertEqual(elements._growth_of(row, {}), (-8.13, elements.MOM))
 
     def test_a_stored_comparison_wins_over_both(self) -> None:
         row = {"keyword": "boucle sofa", "searches": 9_000,
@@ -97,114 +162,94 @@ class GrowthWindowTests(unittest.TestCase):
         self.assertEqual(window, elements.STORED)
         self.assertAlmostEqual(value, 50.0)
 
-    def test_the_element_reports_the_window_its_volume_came_from(self) -> None:
-        rows = elements.scan([
-            kw("fluted cabinet", 10_000) | {"searches_mom_pct": 22.0},
-            kw("fluted console", 2_000) | {"searches_yoy_pct": 90.0},
-        ])
-        fluted = next(r for r in rows if r["key"] == "fluted")
-        self.assertEqual(fluted["window"], elements.MOM)
+    def test_the_explicit_columns_are_percentages_and_are_not_second_guessed(self) -> None:
+        """searchMonthlyCr is -8.13 for 'down 8.13%'. A heuristic that rescaled
+        anything inside +-3 turned a real 3% move into 300%."""
+        self.assertEqual(elements._growth_of({"searches_mom_pct": 3.0}, {})[0], 3.0)
+        self.assertEqual(elements._growth_of({"searches_yoy_pct": 0.4}, {})[0], 0.4)
 
+    def test_the_legacy_column_still_gets_the_old_guess(self) -> None:
+        """Rows written before the split really did vary by source; this release
+        writes no more of them, so the guess is confined to history."""
+        self.assertEqual(elements._growth_of({"searches_growth": 0.25}, {})[0], 25.0)
+        self.assertEqual(elements._growth_of({"searches_growth": 25.0}, {})[0], 25.0)
 
-class ShelfShareTests(unittest.TestCase):
-    """The supply half, matched on listing titles the product calls already paid for."""
-
-    LISTINGS = [
-        {"title": "Fluted Oak Sideboard Buffet", "revenue": 600_000.0, "price": 429.0},
-        {"title": "Fluted Door Console Table", "revenue": 200_000.0, "price": 289.0},
-        {"title": "Tufted Velvet Bench", "revenue": 100_000.0, "price": 199.0},
-        {"title": "Plain Storage Cabinet", "revenue": 100_000.0, "price": 149.0},
-    ]
-
-    def test_share_is_of_revenue_not_of_listing_count(self) -> None:
-        """Ten listings nobody buys prove a style is available, not that it works."""
-        rows = {r["key"]: r for r in elements.shelf_share(self.LISTINGS)}
-        self.assertEqual(rows["fluted"]["revenue_share_pct"], 80.0)
-        self.assertEqual(rows["fluted"]["asins"], 2)
-        self.assertEqual(rows["tufted"]["revenue_share_pct"], 10.0)
-
-    def test_a_listing_counts_toward_every_element_it_carries(self) -> None:
-        rows = {r["key"]: r for r in elements.shelf_share(self.LISTINGS)}
-        self.assertEqual(rows["oak"]["revenue_share_pct"], 60.0)
-        self.assertEqual(rows["fluted"]["revenue_share_pct"], 80.0)
-        # Shares deliberately sum past 100: they are not slices of a pie.
-        self.assertGreater(sum(r["revenue_share_pct"] for r in rows.values()), 100.0)
-
-    def test_average_price_comes_from_the_matched_listings(self) -> None:
-        rows = {r["key"]: r for r in elements.shelf_share(self.LISTINGS)}
-        self.assertEqual(rows["fluted"]["avg_price"], 359.0)
-
-    def test_a_thin_element_is_recorded_but_not_rated(self) -> None:
-        rows = {r["key"]: r for r in elements.shelf_share(self.LISTINGS)}
-        self.assertFalse(rows["tufted"]["shelf_rated"])
-        self.assertEqual(rows["tufted"]["asins"], 1)
-
-    def test_no_revenue_anywhere_produces_no_rows(self) -> None:
-        """Dividing by a zero total would print 'nan%' on every tile."""
-        self.assertEqual(elements.shelf_share(
-            [{"title": "Fluted Cabinet", "revenue": 0.0}]), [])
-
-    def test_an_untitled_listing_is_skipped_not_counted_as_plain(self) -> None:
-        rows = elements.shelf_share(self.LISTINGS + [{"title": "", "revenue": 900_000.0}])
-        fluted = next(r for r in rows if r["key"] == "fluted")
-        # The untitled listing still enlarges the denominator — it is real revenue
-        # we simply cannot attribute — so the share falls rather than holding.
-        self.assertLess(fluted["revenue_share_pct"], 80.0)
-
-
-class MergeTests(unittest.TestCase):
-    def test_an_element_present_on_one_side_only_survives(self) -> None:
-        """Search growth with no shelf presence is the most interesting cell there is."""
-        demand = elements.scan([kw("japandi sideboard", 9_000, 0.4),
-                                kw("japandi console", 5_000, 0.3)])
-        shelf = elements.shelf_share([{"title": "Tufted Bench", "revenue": 10_000.0}])
-        merged = {r["key"]: r for r in elements.merge(demand, shelf)}
-        self.assertIn("japandi", merged)
-        self.assertIn("tufted", merged)
-        self.assertEqual(merged["japandi"]["revenue_share_pct"], 0.0)
-        self.assertEqual(merged["tufted"]["searches"], 0)
-
-    def test_both_halves_land_on_the_same_row(self) -> None:
-        demand = elements.scan([kw("fluted cabinet", 9_000, 0.4),
-                                kw("fluted console", 6_000, 0.3)])
-        shelf = elements.shelf_share([
-            {"title": "Fluted Oak Sideboard", "revenue": 600_000.0, "price": 429.0},
-            {"title": "Fluted Console", "revenue": 400_000.0, "price": 289.0},
-        ])
-        fluted = next(r for r in elements.merge(demand, shelf) if r["key"] == "fluted")
-        self.assertEqual(fluted["searches"], 15_000)
-        self.assertEqual(fluted["revenue_share_pct"], 100.0)
-        self.assertEqual(fluted["asins"], 2)
+    def test_growth_is_search_weighted(self) -> None:
+        """A 300% move on 40 searches is noise next to 12% on 40,000."""
+        rows = {r["term"]: r for r in elements.mine(
+            [], [kw("boucle sofa", 40_000, 12.0), kw("boucle chair", 40, 300.0)])}
+        self.assertAlmostEqual(rows["boucle"]["growth_pct"], 12.3, places=1)
 
 
 class EvidenceBarTests(unittest.TestCase):
+    def one(self, *keywords) -> list[dict]:
+        return elements.mine([], list(keywords))
+
     def test_a_single_phrase_is_never_a_trend(self) -> None:
-        rows = elements.scan([kw("japandi sideboard", 50_000, 0.60)])
-        rising, _falling = elements.split(rows)
+        rising, _falling = elements.split(self.one(kw("japandi sideboard", 50_000, 60.0)))
         self.assertEqual(rising, [])
 
     def test_a_tiny_search_volume_is_never_a_trend(self) -> None:
-        rows = elements.scan([kw("terrazzo console", 300, 0.80),
-                              kw("terrazzo side table", 200, 0.75)])
-        rising, _falling = elements.split(rows)
+        rising, _falling = elements.split(self.one(
+            kw("terrazzo console", 300, 80.0), kw("terrazzo side table", 200, 75.0)))
         self.assertEqual(rising, [])
 
     def test_a_move_inside_the_band_is_neither(self) -> None:
-        rows = elements.scan([kw("oak sideboard", 20_000, 0.03),
-                              kw("oak console table", 9_000, 0.02)])
-        rising, falling = elements.split(rows)
+        rising, falling = elements.split(self.one(
+            kw("oak sideboard", 20_000, 3.0), kw("oak console table", 9_000, 2.0)))
         self.assertEqual((rising, falling), ([], []))
 
     def test_rising_and_falling_are_ordered_by_strength(self) -> None:
-        rows = elements.scan([
-            kw("fluted cabinet", 9_000, 0.40), kw("fluted console", 6_000, 0.35),
-            kw("arched mirror cabinet", 8_000, 0.15), kw("arched bookcase", 5_000, 0.12),
-            kw("tufted sofa", 12_000, -0.30), kw("tufted bench", 7_000, -0.25),
-            kw("industrial shelf", 9_000, -0.14), kw("industrial desk", 6_000, -0.11),
-        ])
+        rows = self.one(
+            kw("fluted cabinet", 9_000, 40.0), kw("fluted console", 6_000, 35.0),
+            kw("tufted sofa", 12_000, -30.0), kw("tufted bench", 7_000, -25.0))
         rising, falling = elements.split(rows)
-        self.assertEqual([r["key"] for r in rising], ["fluted", "arched"])
-        self.assertEqual([r["key"] for r in falling], ["tufted", "industrial"])
+        self.assertEqual([r["term"] for r in rising], ["fluted"])
+        self.assertEqual([r["term"] for r in falling], ["tufted"])
+
+    def test_a_phrase_with_no_growth_anywhere_leaves_the_term_unrated(self) -> None:
+        rows = {r["term"]: r for r in self.one(
+            kw("marble dining table", 9_000), kw("marble console", 5_000))}
+        self.assertIsNone(rows["marble"]["growth_pct"])
+        self.assertFalse(rows["marble"]["rated"])
+
+
+class NamingTests(unittest.TestCase):
+    """The model names and classifies; it computes nothing and adds nothing."""
+
+    TERMS = [{"term": "fluted", "asins": 3, "revenue_share_pct": 21.0,
+              "searches": 17_000, "growth_pct": 35.0, "rated": True,
+              "shelf_rated": True, "keyword_count": 2, "keywords": [],
+              "revenue": 1.0, "avg_price": 399.0, "window": "mom"}]
+
+    def test_a_named_term_gets_its_label_and_kind(self) -> None:
+        named = elements.apply_naming(
+            self.TERMS, {"fluted": {"kind": "form", "label_zh": "竖纹",
+                                    "label_en": "Fluted"}}, True)
+        self.assertEqual(named[0]["label"], "竖纹")
+        self.assertEqual(named[0]["kind_label"], "形态")
+
+    def test_an_unnamed_term_keeps_its_own_words(self) -> None:
+        """An unnamed real term is worth more than a named invented one."""
+        named = elements.apply_naming(self.TERMS, {}, True)
+        self.assertEqual(named[0]["label"], "fluted")
+        self.assertEqual(named[0]["kind"], elements.OTHER)
+
+    def test_a_term_the_model_dropped_disappears(self) -> None:
+        named = elements.apply_naming(self.TERMS, {"fluted": {"drop": True}}, True)
+        self.assertEqual(named, [])
+
+    def test_an_invented_kind_falls_back_rather_than_reaching_the_ui(self) -> None:
+        named = elements.apply_naming(
+            self.TERMS, {"fluted": {"kind": "vibes", "label_zh": "竖纹"}}, True)
+        self.assertEqual(named[0]["kind"], elements.OTHER)
+
+    def test_the_numbers_survive_naming_untouched(self) -> None:
+        named = elements.apply_naming(
+            self.TERMS, {"fluted": {"kind": "form", "label_zh": "竖纹",
+                                    "revenue_share_pct": 99.0, "searches": 1}}, True)
+        self.assertEqual(named[0]["revenue_share_pct"], 21.0)
+        self.assertEqual(named[0]["searches"], 17_000)
 
 
 class BriefTests(unittest.TestCase):
@@ -212,14 +257,11 @@ class BriefTests(unittest.TestCase):
         """An empty heading in the prompt is worse than no heading."""
         self.assertEqual(elements.brief([], [], True), "")
 
-    def test_the_brief_names_elements_and_their_evidence(self) -> None:
-        rows = elements.scan([kw("fluted cabinet", 9_000, 0.40),
-                              kw("fluted console", 6_000, 0.35)])
-        rising, falling = elements.split(rows)
-        text = elements.brief(rising, falling, True)
-        self.assertIn("RISING fluted", text)
-        self.assertIn("2 phrases", text)
-        self.assertIn("15,000 searches", text)
+    def test_the_naming_brief_carries_the_measurements_as_final(self) -> None:
+        text = elements.naming_brief([
+            {"term": "fluted", "asins": 3, "revenue_share_pct": 21.0, "searches": 17_000}])
+        self.assertIn("fluted | 3 | 21.0% | 17,000", text)
+        self.assertIn("never evaluate", text)
 
 
 class StepPeriodTests(unittest.TestCase):

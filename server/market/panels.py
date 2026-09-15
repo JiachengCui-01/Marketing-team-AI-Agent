@@ -555,6 +555,28 @@ def _board_read(row: Mapping[str, Any], node_alerts: Sequence[Mapping[str, Any]]
     return lines
 
 
+def _with_product_peers(peers: dict, marketplace: str, period: str) -> dict:
+    """Add the department medians that live on listings rather than on snapshots."""
+    products = store.all_products(marketplace, period)
+    depth = scoring._median([v for v in (scoring._num(p.get("variations"))
+                                         for p in products) if v is not None])
+    return {**peers, "variations": depth}
+
+
+def mined_terms(marketplace: str, period: str) -> list[dict]:
+    """The design terms this month's data contains, before anything names them.
+
+    Shared by the panel and by the naming call so there is exactly one answer to
+    "which terms did we find" — two definitions would let the model classify a
+    list the chart never draws.
+    """
+    return elements.mine(
+        store.all_products(marketplace, period),
+        store.top_keywords(marketplace, None, period, limit=400),
+        previous=store.top_keywords(marketplace, None,
+                                    gateway.step_period(period, -1), limit=400))
+
+
 def build_overview(marketplace: str, period: str, language: str) -> dict:
     """Every deterministic section of the discovery board."""
     zh = _zh(language)
@@ -563,23 +585,19 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
                  for path in snapshots}
     leaf_snapshots = [snapshots[n["node_id_path"]] for n in taxonomy.leaf_nodes(marketplace)
                       if n["node_id_path"] in snapshots]
-    peers = monitor.peer_medians(
+    peers = _with_product_peers(monitor.peer_medians(
         leaf_snapshots,
         {path: history for path, history in histories.items()
-         if path != taxonomy.FURNITURE_ROOT})
+         if path != taxonomy.FURNITURE_ROOT}), marketplace, period)
 
     totals = store.product_totals(marketplace, period)
     # Element demand is department-wide: a style does not belong to one node, and
     # reading it per node would split "fluted" across six categories and bury it.
-    element_rows = elements.localize(
-        elements.merge(
-            elements.scan(store.top_keywords(marketplace, None, period, limit=400),
-                          previous=store.top_keywords(
-                              marketplace, None, gateway.step_period(period, -1),
-                              limit=400)),
-            # The supply half, from titles the product calls already paid for.
-            elements.shelf_share(store.all_products(marketplace, period))),
-        zh)
+    # Mined from the market's own words, then named by the model and cached.
+    # Both halves come from calls the sweep already makes: the titles arrive with
+    # every product_research row, the phrases with every keyword call.
+    element_rows = elements.apply_naming(
+        mined_terms(marketplace, period), store.element_naming(marketplace), zh)
     rising_elements, falling_elements = elements.split(element_rows)
     board: list[dict] = []
     alerts: list[dict] = []
@@ -980,10 +998,11 @@ def build_category(marketplace: str, node_id_path: str, period: str,
     label = taxonomy.label_for(node_id_path, marketplace)
 
     siblings = store.list_node_snapshots(marketplace, period)
-    peers = monitor.peer_medians(
+    peers = _with_product_peers(monitor.peer_medians(
         [s for s in siblings if s["node_id_path"] != taxonomy.FURNITURE_ROOT],
         {s["node_id_path"]: store.snapshot_history(marketplace, s["node_id_path"])
-         for s in siblings if s["node_id_path"] != taxonomy.FURNITURE_ROOT})
+         for s in siblings if s["node_id_path"] != taxonomy.FURNITURE_ROOT}),
+        marketplace, period)
     facts = monitor.NodeFacts(
         node_key=node_id_path, label=taxonomy.short_label(label), snapshot=snap,
         history=history, keywords=keywords, products=products, themes=themes,

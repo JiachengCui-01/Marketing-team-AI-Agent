@@ -13,8 +13,8 @@ import unittest
 from unittest import mock
 
 from server import db
-from server.market import (elements, gateway, jobs, render, scoring, store,
-                           sweep, taxonomy)
+from server.market import (elements, gateway, jobs, panels, render, scoring,
+                           store, sweep, taxonomy)
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures" / "sellersprite"
 BUFFETS = "1055398:1063306:3733781:3733831"
@@ -34,13 +34,20 @@ class FakeClient:
     def __init__(self, payloads: dict[str, dict]) -> None:
         self.payloads = payloads
         self.prompts: list[str] = []
+        self.by_tool: dict[str, str] = {}
         self.messages = mock.Mock()
         self.messages.create = self._create
 
     def _create(self, **kwargs):
         name = kwargs["tools"][0]["name"]
         self.prompts.append(kwargs["messages"][0]["content"])
+        self.by_tool[name] = kwargs["messages"][0]["content"]
         return tool_use(name, self.payloads.get(name, {}))
+
+    def prompt_for(self, tool: str) -> str:
+        """The prompt one tool saw. Indexing by position broke the moment the
+        render made a second model call for something else."""
+        return self.by_tool.get(tool, "")
 
 
 def seed_warehouse(*, with_products: bool = True, with_keywords: bool = True) -> None:
@@ -151,7 +158,7 @@ class OverviewTests(RenderTestCase):
     def test_the_model_is_shown_an_evidence_sheet_not_a_payload(self) -> None:
         client = FakeClient({"publish_market_overview": self.OVERVIEW})
         render.render_overview(client=client, period=PERIOD)
-        prompt = client.prompts[0]
+        prompt = client.prompt_for("publish_market_overview")
         self.assertIn("ev_price000001", prompt)
         self.assertNotIn("nodeLabelPathLocale", prompt)   # no raw vendor payload
         self.assertIn("ESTIMATE", prompt.replace("估算", "ESTIMATE"))
@@ -160,13 +167,14 @@ class OverviewTests(RenderTestCase):
         """Without the brief the model must invent risks or omit the section."""
         client = FakeClient({"publish_market_overview": self.OVERVIEW})
         render.render_overview(client=client, period=PERIOD)
-        self.assertIn("RISK SIGNALS", client.prompts[0].replace("风险信号", "RISK SIGNALS"))
+        self.assertIn("RISK SIGNALS", client.prompt_for("publish_market_overview")
+                      .replace("风险信号", "RISK SIGNALS"))
 
     def test_the_model_may_not_add_a_risk_of_its_own(self) -> None:
         client = FakeClient({"publish_market_overview": self.OVERVIEW})
         render.render_overview(client=client, period=PERIOD)
         instruction = "不得新增未列出的风险"
-        self.assertIn(instruction, client.prompts[0])
+        self.assertIn(instruction, client.prompt_for("publish_market_overview"))
 
     def test_the_weights_ship_with_the_dashboard(self) -> None:
         client = FakeClient({"publish_market_overview": self.OVERVIEW})
@@ -239,7 +247,8 @@ class CategoryTests(RenderTestCase):
         this line once already."""
         client = self._client()
         render.render_category(node_id_path=BUFFETS, client=client, period=PERIOD)
-        self.assertIn("RISK SIGNALS", client.prompts[0].replace("风险信号", "RISK SIGNALS"))
+        self.assertIn("RISK SIGNALS", client.prompt_for("publish_category_narrative")
+                      .replace("风险信号", "RISK SIGNALS"))
 
     def test_a_category_renders_from_storage_only(self) -> None:
         client = self._client()
@@ -384,6 +393,78 @@ class BoardReadTests(RenderTestCase):
         brief = render._board_brief(payload["board"], "zh")
         self.assertIn("分主要来自", brief)
         self.assertIn("96.4 lb", brief)
+
+
+class ElementNamingTests(RenderTestCase):
+    """The model names and classifies mined terms; it computes and adds nothing."""
+
+    NAMING = {"terms": [
+        {"term": "fluted", "kind": "form", "label_zh": "竖纹", "label_en": "Fluted",
+         "drop": False},
+        {"term": "sideboard", "kind": "other", "label_zh": "", "label_en": "",
+         "drop": True},
+        {"term": "invented", "kind": "style", "label_zh": "凭空", "drop": False},
+    ]}
+
+    def seed(self) -> None:
+        store.upsert_products([
+            {"marketplace": "US", "asin": f"BN{i}", "brand": "Demo", "title": t}
+            for i, t in enumerate(["Fluted Sideboard One", "Fluted Sideboard Two",
+                                   "Fluted Sideboard Three"])])
+        store.upsert_product_metrics([
+            {"marketplace": "US", "asin": f"BN{i}", "period": PERIOD,
+             "node_id_path": BUFFETS, "price": 399.0, "revenue": 100_000.0,
+             "source_tool": "product_research"} for i in range(3)])
+
+    def client(self) -> FakeClient:
+        return FakeClient({"publish_element_naming": self.NAMING,
+                           "publish_market_overview": {"thesis": "", "category_verdicts": []}})
+
+    def test_naming_is_cached_so_it_is_asked_once_per_term(self) -> None:
+        """Otherwise the call repeats on every render for the life of the month."""
+        self.seed()
+        client = self.client()
+        render.render_overview(client=client, period=PERIOD)
+        first = len([p for p in client.prompts if "MINED DESIGN TERMS" in p])
+        render.render_overview(client=client, period=PERIOD)
+        second = len([p for p in client.prompts if "MINED DESIGN TERMS" in p])
+        self.assertEqual(first, 1)
+        self.assertEqual(second, 1, "the second render must not re-ask")
+
+    def test_a_term_the_model_skipped_is_still_recorded(self) -> None:
+        """An unanswered term would otherwise look fresh forever."""
+        self.seed()
+        render.render_overview(client=self.client(), period=PERIOD)
+        cached = store.element_naming("US")
+        mined = {row["term"] for row in panels.mined_terms("US", PERIOD)}
+        self.assertTrue(mined)
+        self.assertEqual(mined - set(cached), set())
+
+    def test_a_term_the_model_invented_is_not_stored(self) -> None:
+        self.seed()
+        render.render_overview(client=self.client(), period=PERIOD)
+        self.assertNotIn("invented", store.element_naming("US"))
+
+    def test_a_dropped_term_leaves_the_dashboard(self) -> None:
+        self.seed()
+        record = render.render_overview(client=self.client(), period=PERIOD)
+        terms = {row["key"] for row in record["dashboard"]["elements"]}
+        self.assertNotIn("sideboard", terms)
+
+    def test_a_model_outage_does_not_cache_an_empty_answer(self) -> None:
+        """A transient failure must not leave the month permanently unnamed."""
+        self.seed()
+        broken = FakeClient({})
+        broken.messages.create = mock.Mock(side_effect=RuntimeError("boom"))
+        render.render_overview(client=broken, period=PERIOD)
+        self.assertEqual(store.element_naming("US"), {})
+
+    def test_no_client_means_no_naming_and_no_crash(self) -> None:
+        self.seed()
+        record = render.render_overview(client=None, period=PERIOD)
+        self.assertEqual(record["status"], "ok")
+        # The terms are still mined and still carry their own words as labels.
+        self.assertTrue(record["dashboard"]["elements"])
 
 
 class ElementMatrixTests(RenderTestCase):

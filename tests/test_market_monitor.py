@@ -255,13 +255,26 @@ class ProductSignalTests(unittest.TestCase):
     def test_variation_depth_is_a_median_not_a_maximum(self) -> None:
         """One ten-variant listing must not make the shelf look like a range."""
         outlier = facts(products=[{"variations": 10}, {"variations": 1},
-                                  {"variations": 1}, {"variations": 1}])
+                                  {"variations": 1}, {"variations": 1}],
+                        peers={"variations": 4.0})
         self.assertIsNone(fired(monitor.scan(outlier), "variation_depth_expected"))
         real = facts(products=[{"variations": 6}, {"variations": 7},
-                               {"variations": 5}, {"variations": 8}])
+                               {"variations": 5}, {"variations": 8}],
+                     peers={"variations": 4.0})
         alert = fired(monitor.scan(real), "variation_depth_expected")
         self.assertEqual(alert.severity, monitor.HIGH)
         self.assertEqual(alert.extra["asins"], 4)
+
+    def test_variation_depth_is_read_against_the_department_not_a_constant(self) -> None:
+        """Six variants is a deep range in one department and a thin one in
+        another; the old absolute threshold said the opposite in the second."""
+        deep_shelf = facts(products=[{"variations": 6}, {"variations": 6}],
+                           peers={"variations": 8.0})
+        self.assertIsNone(fired(monitor.scan(deep_shelf), "variation_depth_expected"))
+
+    def test_no_department_reading_fires_nothing_rather_than_guessing(self) -> None:
+        bare = facts(products=[{"variations": 9}, {"variations": 9}], peers={})
+        self.assertIsNone(fired(monitor.scan(bare), "variation_depth_expected"))
 
     # ---- what the complaints are made of -----------------------------------
 
@@ -318,6 +331,7 @@ class ProductSignalTests(unittest.TestCase):
             themes=self.themes(("assembly_difficulty", 0.21, True, 64),
                                ("damage_in_transit", 0.19, True, 64),
                                ("missing_or_wrong_parts", 0.11, True, 64)),
+            peers={"variations": 3.0},
         )
         family = {a.id for a in monitor.scan(rich) if a.family == "product"}
         self.assertEqual(family, {"freight_heavy", "variation_depth_expected",
@@ -340,6 +354,7 @@ class ProductSignalTests(unittest.TestCase):
             products=[{"variations": 5}, {"variations": 4}, {"variations": 6}],
             themes=self.themes(("assembly_difficulty", 0.21, True, 64),
                                ("damage_in_transit", 0.19, True, 64)),
+            peers={"variations": 3.0},
         )
         for alert in monitor.scan(rich):
             if alert.family != "product":

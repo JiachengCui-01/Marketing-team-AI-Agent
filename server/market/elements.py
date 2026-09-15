@@ -1,21 +1,35 @@
-"""Style and feature elements: what the market is asking for, not which category.
+"""Design elements, discovered from the data rather than declared in advance.
 
 A category tells a product team *where* to work. It does not tell them what to
-draw. "Sideboards are growing 12%" is not a brief; "fluted fronts are up 38%
-across nine phrases while tufted is down 14%" is — one of those sentences can be
+draw. "Sideboards are growing 12%" is not a brief; "fluted fronts hold 21% of
+head revenue and their phrases are up 36%" is — one of those sentences can be
 handed to a designer.
 
-The vocabulary below is a **constant**, the same way the freight tiers in
-``monitor`` are a constant. It is the set of material, form, feature, size, style
-and room words that this business can actually decide about: a fluted door is a
-tooling decision, boucle is a supplier decision, "narrow / 12 inch deep" is a
-dimension decision. A model asked to "find the trending styles" invents
-plausible ones at a steady rate whether or not the data contains any, so the
-matching is literal and the arithmetic is ours.
+This module used to answer that from a hand-written vocabulary of fifty style
+words. That was wrong in a way worth stating plainly: a fixed list can only find
+what somebody thought of before the data arrived. It cannot see a material that
+appeared last quarter, it silently scores zero for anything phrased differently,
+and it encodes one person's guess about what matters as though it were a
+measurement. The market names its own styles; the job is to read those names off
+the shelf and out of the search box.
 
-What this module will *not* do is guess. An element with one matching phrase, or
-with no growth figure behind it, is reported as observed-but-unrated rather than
-promoted into a recommendation.
+So the terms are **mined**, the numbers are **computed**, and only the naming and
+classification go to the model — the same division this package already uses for
+review themes, and for the same reason. A model asked to "find the trending
+styles" invents plausible ones at a steady rate. A model handed forty measured
+terms and asked which is a material, which a form, and which is not a design
+attribute at all is doing the one job it does better than a regex.
+
+What gets filtered out is derived, not listed:
+
+* **Category nouns** — a term in more than ``MAX_DOC_FREQ`` of a node's titles
+  describes the category, not a choice inside it. "Sideboard" appears in every
+  sideboard listing; that is what makes it the category and what makes it
+  useless as a differentiator.
+* **Brand names** — read from the ``brand`` column of the same rows, so a brand
+  that starts showing up in titles next month is excluded next month too.
+* **Function words** — the one genuinely fixed list here, and it is linguistic
+  rather than domain: "with", "for", "and" are not furniture judgements.
 """
 from __future__ import annotations
 
@@ -24,9 +38,11 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from .scoring import _num
 
-# Kinds, in the order a product decision meets them.
-MATERIAL, FORM, FEATURE, SIZE, STYLE, ROOM = (
-    "material", "form", "feature", "size", "style", "room")
+# Kinds the model may assign. An enum rather than free text so the UI can group
+# by it and so two runs cannot produce both "material" and "materials".
+MATERIAL, FORM, FEATURE, SIZE, STYLE, ROOM, OTHER = (
+    "material", "form", "feature", "size", "style", "room", "other")
+KINDS = (MATERIAL, FORM, FEATURE, SIZE, STYLE, ROOM, OTHER)
 
 KIND_LABELS: dict[str, tuple[str, str]] = {
     MATERIAL: ("材质", "Material"),
@@ -35,97 +51,55 @@ KIND_LABELS: dict[str, tuple[str, str]] = {
     SIZE: ("尺寸", "Size"),
     STYLE: ("风格", "Style"),
     ROOM: ("空间", "Room"),
+    OTHER: ("其他", "Other"),
 }
 
-# (key, zh, en, kind, tokens). Tokens are matched case-insensitively on word
-# boundaries, so "cane" does not match "canended" and "oak" does not match "soak".
-VOCABULARY: tuple[tuple[str, str, str, str, tuple[str, ...]], ...] = (
-    # ---- material ----------------------------------------------------------
-    ("boucle", "boucle 羊羔绒", "Boucle", MATERIAL, ("boucle", "bouclé")),
-    ("velvet", "天鹅绒", "Velvet", MATERIAL, ("velvet",)),
-    ("rattan", "藤编", "Rattan / cane", MATERIAL, ("rattan", "cane", "wicker")),
-    ("oak", "橡木", "Oak", MATERIAL, ("oak",)),
-    ("walnut", "胡桃木", "Walnut", MATERIAL, ("walnut",)),
-    ("acacia", "相思木/芒果木", "Acacia / mango", MATERIAL, ("acacia", "mango wood")),
-    ("marble", "大理石/石材", "Marble / stone", MATERIAL,
-     ("marble", "travertine", "terrazzo")),
-    ("leather", "皮革", "Leather", MATERIAL, ("leather", "leathaire")),
-    ("linen", "亚麻/棉麻", "Linen", MATERIAL, ("linen",)),
-    ("sherpa", "羊羔毛/泰迪绒", "Sherpa / teddy", MATERIAL, ("sherpa", "teddy")),
-    ("metal", "金属", "Metal", MATERIAL, ("metal", "steel", "iron", "brass")),
-    ("glass", "玻璃", "Glass", MATERIAL, ("glass", "acrylic")),
-    # ---- form --------------------------------------------------------------
-    ("fluted", "竖纹/罗马柱", "Fluted / reeded", FORM, ("fluted", "reeded", "ribbed")),
-    ("arched", "拱形", "Arched", FORM, ("arch", "arched")),
-    ("curved", "曲面", "Curved", FORM, ("curved", "curve")),
-    ("round", "圆形", "Round", FORM, ("round", "circular")),
-    ("sectional", "组合沙发", "Sectional", FORM, ("sectional", "l shaped", "l-shaped")),
-    ("modular", "模块化", "Modular", FORM, ("modular",)),
-    ("slat", "木条/板条", "Slat", FORM, ("slat", "slatted", "spindle")),
-    ("pedestal", "独脚底座", "Pedestal", FORM, ("pedestal",)),
-    ("floating", "悬挂/壁挂", "Floating / wall-mounted", FORM,
-     ("floating", "wall mounted", "wall-mounted")),
-    ("tufted", "拉扣", "Tufted", FORM, ("tufted", "tufting")),
-    ("channel", "直条绗缝", "Channel tufted", FORM, ("channel tufted", "channel back")),
-    # ---- feature -----------------------------------------------------------
-    ("storage", "带收纳", "With storage", FEATURE,
-     ("with storage", "storage drawer", "hidden storage")),
-    ("convertible", "可变形/沙发床", "Convertible / sleeper", FEATURE,
-     ("convertible", "sleeper", "pull out")),
-    ("reclining", "可躺/电动", "Reclining / power", FEATURE,
-     ("recliner", "reclining", "power reclining")),
-    ("adjustable", "可调节", "Adjustable", FEATURE, ("adjustable", "height adjustable")),
-    ("extendable", "可延长", "Extendable", FEATURE, ("extendable", "extending", "drop leaf")),
-    ("charging", "带充电口", "Charging / USB", FEATURE,
-     ("usb", "charging station", "power outlet")),
-    ("lift_top", "升降台面", "Lift top", FEATURE, ("lift top", "lift-top")),
-    ("no_assembly", "免组装", "No assembly", FEATURE,
-     ("no assembly", "pre assembled", "preassembled", "fully assembled")),
-    # ---- size --------------------------------------------------------------
-    ("narrow", "窄进深", "Narrow / slim", SIZE, ("narrow", "slim", "shallow")),
-    ("small_space", "小户型", "Small space", SIZE,
-     ("small space", "apartment", "compact", "space saving")),
-    ("oversized", "超大尺寸", "Oversized", SIZE, ("oversized", "extra large", "xl")),
-    ("deep", "大进深", "Deep seat", SIZE, ("deep seat", "extra deep")),
-    # ---- style -------------------------------------------------------------
-    ("mid_century", "中古现代", "Mid-century", STYLE, ("mid century", "mid-century", "mcm")),
-    ("farmhouse", "农舍风", "Farmhouse", STYLE, ("farmhouse", "rustic")),
-    ("boho", "波西米亚", "Boho", STYLE, ("boho", "bohemian")),
-    ("japandi", "日式北欧", "Japandi", STYLE, ("japandi", "wabi sabi")),
-    ("scandinavian", "北欧", "Scandinavian", STYLE, ("scandinavian", "nordic")),
-    ("industrial", "工业风", "Industrial", STYLE, ("industrial",)),
-    ("coastal", "海岸风", "Coastal", STYLE, ("coastal", "nautical")),
-    ("art_deco", "装饰艺术", "Art deco", STYLE, ("art deco", "deco")),
-    ("minimalist", "极简", "Minimalist", STYLE, ("minimalist", "minimal")),
-    # ---- room --------------------------------------------------------------
-    ("entryway", "玄关", "Entryway", ROOM, ("entryway", "hallway", "foyer", "mudroom")),
-    ("dining", "餐厅", "Dining room", ROOM, ("dining room", "dining")),
-    ("living", "客厅", "Living room", ROOM, ("living room",)),
-    ("bedroom", "卧室", "Bedroom", ROOM, ("bedroom",)),
-    ("home_office", "居家办公", "Home office", ROOM, ("home office", "office desk")),
-    ("nursery", "儿童房", "Nursery / kids", ROOM, ("nursery", "kids", "toddler")),
-    ("outdoor", "户外", "Outdoor / patio", ROOM, ("outdoor", "patio")),
-)
+# Syntax, not domain: a bigram must not be glued across one of these, or
+# "cabinet with storage" becomes the term "with storage".
+_FUNCTION_WORDS = frozenset("""
+a an and are as at be but by for from has have in into is it its of off on or
+over per the their this to under up use used using via was were what when which
+who will with without your you our we all any both each few more most other
+some such than that these those too very can just not no nor own same so
+""".split())
 
-# An element has to clear all three before it may be called a trend. One phrase
-# moving 40% is one phrase, not a direction.
+# Words that mean nothing alone but carry a real term when paired. "top" is
+# marketing copy; "lift top" is a mechanism. "inch" is a unit; "12 inch" is a
+# dimension decision. So these are barred as terms in their own right and
+# allowed inside a pair — which is the difference between filtering noise and
+# deleting the vocabulary.
+_WEAK_WORDS = frozenset("""
+inch inches cm mm ft feet lb lbs kg pound pounds count size sized
+set pack piece pieces pcs pc x new best top great high low home style styles
+design designs quality premium
+""".split())
+
+# A term this common inside one node is that node's own name for itself.
+# Deliberately high: a real category noun is in nearly every title ("sideboard"
+# in Sideboards), while a style that is genuinely winning can easily reach half.
+# Cutting at 45% would have deleted the most successful element on the shelf and
+# called it a filter. What slips through goes to the model's `drop` flag, which
+# is the right place for a judgement call.
+MAX_DOC_FREQ = 0.6
+# Below this many listings, document frequency cannot tell a category noun from a
+# popular style — in a node of four titles, three is both.
+MIN_DOCS_FOR_DF = 20
+# Below this a term is one listing's copywriting, not a market signal.
+MIN_TITLE_ASINS = 3
 MIN_KEYWORDS = 2
 MIN_SEARCHES = 3_000.0
+# How many mined terms are worth putting in front of the model to name.
+MAX_TERMS = 40
+
 RISING_PCT = 10.0
 FALLING_PCT = -10.0
 
-_PATTERNS: dict[str, re.Pattern[str]] = {
-    key: re.compile(r"\b(?:" + "|".join(re.escape(t) for t in tokens) + r")\b")
-    for key, _zh, _en, _kind, tokens in VOCABULARY
-}
-_BY_KEY = {key: (zh, en, kind) for key, zh, en, kind, _t in VOCABULARY}
+# Which window a growth figure came from. Reported alongside the number because
+# "up 18%" means different things over a month and over a year, and a seasonal
+# category will disagree with itself between the two.
+STORED, MOM, YOY = "stored", "mom", "yoy"
 
-
-def label_for(key: str, zh: bool) -> str:
-    entry = _BY_KEY.get(key)
-    if not entry:
-        return key
-    return entry[0] if zh else entry[1]
+_WORD = re.compile(r"[a-z][a-z0-9\-']*|\d+(?:\.\d+)?")
 
 
 def kind_label(kind: str, zh: bool) -> str:
@@ -133,10 +107,201 @@ def kind_label(kind: str, zh: bool) -> str:
     return names[0] if zh else names[1]
 
 
-# Which window a growth figure came from, worst to best. Reported alongside the
-# number because "up 18%" means different things over a month and over a year,
-# and a seasonal category will disagree with itself between the two.
-STORED, MOM, YOY = "stored", "mom", "yoy"
+# ------------------------------------------------------------------ mining ----
+
+def _tokens(text: str) -> list[str]:
+    return [w for w in _WORD.findall((text or "").lower()) if len(w) > 1]
+
+
+def _terms(tokens: Sequence[str]) -> set[str]:
+    """Unigrams and bigrams, function words dropped from both.
+
+    Bigrams matter: "lift top" and "solid wood" are single design decisions that
+    either half alone would misrepresent. A bigram with a function word at an
+    edge is not formed at all — "with storage" is "storage".
+    """
+    out: set[str] = set()
+    out.update(t for t in tokens
+               if t not in _FUNCTION_WORDS and t not in _WEAK_WORDS and not t.isdigit())
+    for left, right in zip(tokens, tokens[1:]):
+        if left in _FUNCTION_WORDS or right in _FUNCTION_WORDS:
+            continue
+        out.add(f"{left} {right}")
+    return out
+
+
+def _brand_terms(rows: Iterable[Mapping[str, Any]]) -> set[str]:
+    """Brand names as they appear in the same rows, so the exclusion ages with them."""
+    out: set[str] = set()
+    for row in rows:
+        for token in _tokens(str(row.get("brand") or "")):
+            if token not in _FUNCTION_WORDS:
+                out.add(token)
+    return out
+
+
+def mine(products: Sequence[Mapping[str, Any]],
+         keywords: Sequence[Mapping[str, Any]] = (),
+         *, previous: Sequence[Mapping[str, Any]] = ()) -> list[dict]:
+    """Discover the terms the market itself uses, with both halves measured.
+
+    Supply comes from listing titles weighted by revenue — ten listings nobody
+    buys prove a style is *available*, not that it works. Demand comes from the
+    search phrases carrying the same term. A term found on only one side is kept:
+    demand with no shelf behind it is the most interesting reading there is.
+    """
+    total_revenue = sum((_num(p.get("revenue")) or 0.0) for p in products)
+    brands = _brand_terms(products)
+
+    # Document frequency is per node: "desk" is the category in Home Office Desks
+    # and a genuine feature term in Sideboards.
+    by_node: dict[str, list[set[str]]] = {}
+    rows: list[tuple[set[str], float, float | None]] = []
+    for product in products:
+        title = str(product.get("title") or "")
+        if not title:
+            continue
+        terms = _terms(_tokens(title))
+        by_node.setdefault(str(product.get("node_id_path") or ""), []).append(terms)
+        rows.append((terms, _num(product.get("revenue")) or 0.0,
+                     _num(product.get("price"))))
+
+    common: set[str] = set()
+    for docs in by_node.values():
+        if len(docs) < MIN_DOCS_FOR_DF:
+            continue
+        counts: dict[str, int] = {}
+        for terms in docs:
+            for term in terms:
+                counts[term] = counts.get(term, 0) + 1
+        common |= {term for term, hits in counts.items()
+                   if hits / len(docs) > MAX_DOC_FREQ}
+
+    def excluded(term: str) -> bool:
+        parts = term.split(" ")
+        return any(part in common or part in brands for part in parts)
+
+    shelf: dict[str, dict] = {}
+    for terms, revenue, price in rows:
+        for term in terms:
+            if excluded(term):
+                continue
+            bucket = shelf.setdefault(term, {"asins": 0, "revenue": 0.0, "_prices": []})
+            bucket["asins"] += 1
+            bucket["revenue"] += revenue
+            if price is not None:
+                bucket["_prices"].append(price)
+
+    demand = _demand_terms(keywords, previous, excluded=excluded)
+
+    out: list[dict] = []
+    for term in set(shelf) | set(demand):
+        supply = shelf.get(term) or {"asins": 0, "revenue": 0.0, "_prices": []}
+        want = demand.get(term) or {}
+        prices = supply.get("_prices") or []
+        out.append({
+            "term": term,
+            "asins": supply["asins"],
+            "revenue": round(supply["revenue"], 2),
+            "revenue_share_pct": (round(supply["revenue"] / total_revenue * 100.0, 1)
+                                  if total_revenue > 0 else 0.0),
+            "avg_price": round(sum(prices) / len(prices), 2) if prices else None,
+            "shelf_rated": supply["asins"] >= MIN_TITLE_ASINS,
+            "searches": int(want.get("searches") or 0),
+            "keyword_count": int(want.get("keyword_count") or 0),
+            "growth_pct": want.get("growth_pct"),
+            "window": want.get("window") or "",
+            "keywords": want.get("keywords") or [],
+            "rated": bool(want.get("rated")),
+        })
+    # Ranked by the money first: a term nobody sells is worth reading only after
+    # the terms somebody sells.
+    out.sort(key=lambda t: (t["revenue_share_pct"], t["searches"]), reverse=True)
+    return _dedupe(out)[:MAX_TERMS]
+
+
+def _demand_terms(keywords: Sequence[Mapping[str, Any]],
+                  previous: Sequence[Mapping[str, Any]],
+                  *, excluded) -> dict[str, dict]:
+    before = {str(r.get("keyword") or ""): _num(r.get("searches")) or 0.0
+              for r in previous}
+    buckets: dict[str, dict] = {}
+    for row in keywords:
+        phrase = str(row.get("keyword") or "").strip()
+        if not phrase:
+            continue
+        searches = _num(row.get("searches")) or 0.0
+        growth, window = _growth_of(row, before)
+        for term in _terms(_tokens(phrase)):
+            if excluded(term):
+                continue
+            bucket = buckets.setdefault(term, {
+                "searches": 0.0, "keyword_count": 0, "keywords": [],
+                "_weighted": 0.0, "_weight": 0.0, "_windows": {},
+            })
+            bucket["searches"] += searches
+            bucket["keyword_count"] += 1
+            bucket["keywords"].append({"keyword": phrase, "searches": searches,
+                                       "growth_pct": growth})
+            if growth is not None and searches > 0:
+                bucket["_weighted"] += growth * searches
+                bucket["_weight"] += searches
+                bucket["_windows"][window] = bucket["_windows"].get(window, 0.0) + searches
+
+    for bucket in buckets.values():
+        weight = bucket.pop("_weight")
+        weighted = bucket.pop("_weighted")
+        windows = bucket.pop("_windows")
+        # Search-weighted: a 300%-growth phrase with 40 searches a month is noise
+        # next to a 12% move on a phrase with 40,000.
+        bucket["growth_pct"] = round(weighted / weight, 1) if weight else None
+        bucket["window"] = max(windows, key=windows.get) if windows else ""
+        bucket["keywords"] = sorted(bucket["keywords"],
+                                    key=lambda k: k["searches"], reverse=True)[:5]
+        bucket["searches"] = round(bucket["searches"])
+        bucket["rated"] = bool(bucket["growth_pct"] is not None
+                               and bucket["keyword_count"] >= MIN_KEYWORDS
+                               and bucket["searches"] >= MIN_SEARCHES)
+    return buckets
+
+
+def _dedupe(terms: Sequence[dict]) -> list[dict]:
+    """Drop a unigram a bigram already says better, and vice versa.
+
+    "fluted" and "fluted door" are mined from the same listings. Keeping both
+    puts one design decision on the chart twice and splits nothing. The narrower
+    term wins when it carries nearly all of the broader one; otherwise the
+    broader term is the real one and the bigram is one phrasing of it.
+    """
+    by_term = {t["term"]: t for t in terms}
+    covers: dict[str, list[str]] = {}
+    drop: set[str] = set()
+    for term, row in by_term.items():
+        if " " not in term:
+            continue
+        for half in term.split(" "):
+            parent = by_term.get(half)
+            if parent is None:
+                continue
+            # The pair only displaces the single word when it is substantial in
+            # its own right and covers nearly all of it. Without the first
+            # condition a one-off phrasing ("oak sideboard", seen once) would
+            # delete the material it mentions.
+            if row["asins"] >= max(MIN_TITLE_ASINS, parent["asins"] * 0.8):
+                covers.setdefault(half, []).append(term)
+            else:
+                drop.add(term)
+    for half, pairs in covers.items():
+        if half in drop:
+            continue
+        # Covered by exactly one pair: the market always says it the same way, so
+        # the pair is the term. Covered by several: the word appears in varied
+        # phrasings, which is what makes the word itself the term.
+        if len(pairs) == 1 and pairs[0] not in drop:
+            drop.add(half)
+        else:
+            drop.update(pairs)
+    return [t for t in terms if t["term"] not in drop]
 
 
 def _growth_of(row: Mapping[str, Any],
@@ -152,80 +317,53 @@ def _growth_of(row: Mapping[str, Any],
     now = _num(row.get("searches"))
     before = (previous or {}).get(keyword)
     if now is not None and before:
-        # Two months we stored and can point at, so this wins when it exists.
         return (now - before) / before * 100.0, STORED
-    for column, window in (("searches_mom_pct", MOM), ("searches_yoy_pct", YOY),
-                           ("searches_growth", MOM)):
+    for column, window in (("searches_mom_pct", MOM), ("searches_yoy_pct", YOY)):
         value = _num(row.get(column))
-        if value is None:
-            continue
-        # The vendor reports these as a percentage on keyword_research and as a
-        # ratio on some others; nothing in this market grows 0.4% and says so.
-        return (value * 100.0 if -3.0 <= value <= 3.0 else value), window
-    return None, ""
+        if value is not None:
+            # These two are percentages by definition — searchMonthlyCr is -8.13
+            # for "down 8.13%". No guessing, and so no way for a real 3% move to
+            # be inflated a hundredfold.
+            return value, window
+    # The legacy column, written before the two windows were separated. Its unit
+    # genuinely varied by source, so here the guess is unavoidable; it is confined
+    # to rows this release will never write again.
+    legacy = _num(row.get("searches_growth"))
+    if legacy is None:
+        return None, ""
+    return (legacy * 100.0 if -3.0 < legacy < 3.0 else legacy), MOM
 
 
-def scan(
-    keywords: Sequence[Mapping[str, Any]],
-    *, previous: Sequence[Mapping[str, Any]] = (),
-) -> list[dict]:
-    """Aggregate stored keyword rows into element rows, strongest demand first.
+# ------------------------------------------------------------------ naming ----
+# The model's only job here: say what each mined term *is*, in the reader's
+# language, and drop the ones that are not design attributes. It computes
+# nothing — every number above survives untouched.
 
-    ``previous`` is the same query one month back; when a phrase appears in both
-    the change is computed from the two stored values rather than trusted to the
-    vendor's own growth column.
+def apply_naming(terms: Sequence[dict], naming: Mapping[str, Mapping[str, Any]],
+                 zh: bool) -> list[dict]:
+    """Attach labels and kinds, dropping what the model marked as not an attribute.
+
+    A term the model did not answer for keeps its own words as its label. An
+    unnamed real term is worth more than a named invented one, and the whole
+    point of mining is that the vocabulary is not ours to pre-approve.
     """
-    before = {str(r.get("keyword") or ""): _num(r.get("searches")) or 0.0
-              for r in previous}
-    buckets: dict[str, dict[str, Any]] = {}
-    for row in keywords:
-        phrase = str(row.get("keyword") or "").strip().lower()
-        if not phrase:
-            continue
-        searches = _num(row.get("searches")) or 0.0
-        growth, window = _growth_of(row, before)
-        for key, pattern in _PATTERNS.items():
-            if not pattern.search(phrase):
-                continue
-            bucket = buckets.setdefault(key, {
-                "key": key, "kind": _BY_KEY[key][2], "keywords": [],
-                "searches": 0.0, "_weighted": 0.0, "_weight": 0.0, "_windows": {},
-            })
-            bucket["keywords"].append({"keyword": str(row.get("keyword")),
-                                       "searches": searches, "growth_pct": growth})
-            bucket["searches"] += searches
-            if growth is not None and searches > 0:
-                bucket["_weighted"] += growth * searches
-                bucket["_weight"] += searches
-                bucket["_windows"][window] = bucket["_windows"].get(window, 0.0) + searches
-
     out: list[dict] = []
-    for bucket in buckets.values():
-        weight = bucket.pop("_weight")
-        weighted = bucket.pop("_weighted")
-        windows = bucket.pop("_windows")
-        # The window most of this element's search volume was measured over. A
-        # bucket can mix them when the phrases came from different tools, and the
-        # label has to say which one dominates rather than imply they agree.
-        bucket["window"] = max(windows, key=windows.get) if windows else ""
-        # Search-weighted: a 300%-growth phrase with 40 searches a month is noise
-        # next to a 12% move on a phrase with 40,000.
-        bucket["growth_pct"] = round(weighted / weight, 1) if weight else None
-        bucket["keyword_count"] = len(bucket["keywords"])
-        bucket["keywords"] = sorted(bucket["keywords"],
-                                    key=lambda k: k["searches"], reverse=True)[:5]
-        bucket["searches"] = round(bucket["searches"])
-        bucket["rated"] = bool(
-            bucket["growth_pct"] is not None
-            and bucket["keyword_count"] >= MIN_KEYWORDS
-            and bucket["searches"] >= MIN_SEARCHES)
-        out.append(bucket)
-    out.sort(key=lambda b: b["searches"], reverse=True)
+    for row in terms:
+        entry = naming.get(row["term"]) or {}
+        if entry.get("drop"):
+            continue
+        kind = str(entry.get("kind") or OTHER)
+        if kind not in KINDS:
+            kind = OTHER
+        label = str(entry.get("label_zh" if zh else "label_en") or "").strip()
+        out.append({**row, "key": row["term"], "kind": kind,
+                    "label": label or row["term"],
+                    "kind_label": kind_label(kind, zh)})
     return out
 
 
 def split(rows: Iterable[dict], *, limit: int = 6) -> tuple[list[dict], list[dict]]:
-    """``(rising, falling)`` — only elements that cleared the evidence bar."""
+    """``(rising, falling)`` — only terms that cleared the evidence bar."""
     rated = [r for r in rows if r.get("rated")]
     rising = sorted([r for r in rated if (r["growth_pct"] or 0) >= RISING_PCT],
                     key=lambda r: r["growth_pct"], reverse=True)[:limit]
@@ -234,11 +372,15 @@ def split(rows: Iterable[dict], *, limit: int = 6) -> tuple[list[dict], list[dic
     return rising, falling
 
 
-def localize(rows: Sequence[dict], zh: bool) -> list[dict]:
-    """Attach display labels. Kept out of :func:`scan` so the arithmetic stays
-    language-free and a test can assert on keys rather than on translations."""
-    return [{**row, "label": label_for(row["key"], zh),
-             "kind_label": kind_label(row["kind"], zh)} for row in rows]
+def naming_brief(terms: Sequence[dict]) -> str:
+    """The mined terms as the model receives them, for naming only."""
+    lines = ["MINED DESIGN TERMS (discovered from listing titles and search phrases; "
+             "the numbers are final — classify and name, never evaluate):",
+             "term | head ASINs | revenue share | monthly searches"]
+    for row in terms:
+        lines.append(f"{row['term']} | {row['asins']} | {row['revenue_share_pct']}% | "
+                     f"{row['searches']:,}")
+    return "\n".join(lines)
 
 
 def brief(rising: Sequence[dict], falling: Sequence[dict], zh: bool) -> str:
@@ -248,91 +390,11 @@ def brief(rising: Sequence[dict], falling: Sequence[dict], zh: bool) -> str:
     lines = ["ELEMENT DEMAND (search-weighted, computed server-side — do not restate "
              "the percentages, cite the keyword evidence instead):"]
     for row in rising:
-        lines.append(f"  RISING {row['key']} ({row['kind']}) {row['growth_pct']:+.1f}% "
-                     f"over {row['keyword_count']} phrases, {row['searches']:,} searches")
+        lines.append(f"  RISING {row.get('label') or row['term']} "
+                     f"({row.get('kind', '')}) {row['growth_pct']:+.1f}% over "
+                     f"{row['keyword_count']} phrases, {row['searches']:,} searches")
     for row in falling:
-        lines.append(f"  FALLING {row['key']} ({row['kind']}) {row['growth_pct']:+.1f}% "
-                     f"over {row['keyword_count']} phrases, {row['searches']:,} searches")
+        lines.append(f"  FALLING {row.get('label') or row['term']} "
+                     f"({row.get('kind', '')}) {row['growth_pct']:+.1f}% over "
+                     f"{row['keyword_count']} phrases, {row['searches']:,} searches")
     return "\n".join(lines)
-
-
-# --------------------------------------------------------------- shelf side ----
-# Demand says what people ask for; this says what is already selling. Both come
-# from calls the sweep already makes — the titles arrive with every
-# ``product_research`` row — so the whole supply half of the element picture
-# costs nothing extra.
-
-MIN_SHELF_ASINS = 3
-
-
-def shelf_share(products: Sequence[Mapping[str, Any]]) -> list[dict]:
-    """Element share of the head set's revenue, matched on listing titles.
-
-    Revenue rather than listing count on purpose: ten listings nobody buys prove
-    a style is *available*, not that it works. A listing carrying three elements
-    counts toward all three, so the shares sum past 100 — they are "share of head
-    revenue whose listing mentions this", not slices of a pie, and the chart says
-    so.
-    """
-    total = sum((_num(p.get("revenue")) or 0.0) for p in products)
-    if total <= 0:
-        return []
-    buckets: dict[str, dict[str, Any]] = {}
-    for product in products:
-        title = str(product.get("title") or "").strip().lower()
-        if not title:
-            continue
-        revenue = _num(product.get("revenue")) or 0.0
-        price = _num(product.get("price"))
-        for key, pattern in _PATTERNS.items():
-            if not pattern.search(title):
-                continue
-            bucket = buckets.setdefault(key, {
-                "key": key, "kind": _BY_KEY[key][2], "asins": 0,
-                "revenue": 0.0, "_prices": [],
-            })
-            bucket["asins"] += 1
-            bucket["revenue"] += revenue
-            if price is not None:
-                bucket["_prices"].append(price)
-
-    out: list[dict] = []
-    for bucket in buckets.values():
-        prices = bucket.pop("_prices")
-        bucket["avg_price"] = round(sum(prices) / len(prices), 2) if prices else None
-        bucket["revenue_share_pct"] = round(bucket["revenue"] / total * 100.0, 1)
-        bucket["revenue"] = round(bucket["revenue"], 2)
-        bucket["shelf_rated"] = bucket["asins"] >= MIN_SHELF_ASINS
-        out.append(bucket)
-    out.sort(key=lambda b: b["revenue_share_pct"], reverse=True)
-    return out
-
-
-def merge(demand: Sequence[Mapping[str, Any]],
-          shelf: Sequence[Mapping[str, Any]]) -> list[dict]:
-    """One row per element carrying both halves, for the demand-vs-shelf matrix.
-
-    An element present on only one side is kept, not dropped: a style with search
-    growth and no shelf presence is the most interesting cell on the chart, and a
-    style holding revenue with no search trend behind it is the second most.
-    """
-    rows: dict[str, dict] = {}
-    for item in demand:
-        rows[item["key"]] = {**item}
-    for item in shelf:
-        rows.setdefault(item["key"], {"key": item["key"], "kind": item["kind"],
-                                      "keywords": [], "searches": 0,
-                                      "growth_pct": None, "keyword_count": 0,
-                                      "rated": False, "window": ""})
-        rows[item["key"]].update({
-            "asins": item["asins"], "revenue": item["revenue"],
-            "revenue_share_pct": item["revenue_share_pct"],
-            "avg_price": item["avg_price"], "shelf_rated": item["shelf_rated"],
-        })
-    for row in rows.values():
-        row.setdefault("asins", 0)
-        row.setdefault("revenue", 0.0)
-        row.setdefault("revenue_share_pct", 0.0)
-        row.setdefault("avg_price", None)
-        row.setdefault("shelf_rated", False)
-    return sorted(rows.values(), key=lambda r: r["searches"], reverse=True)

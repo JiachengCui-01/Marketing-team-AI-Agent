@@ -659,6 +659,27 @@ CREATE INDEX IF NOT EXISTS idx_market_kw_asin_asin
 -- Review PROSE is not retained: it is third-party text whose analytical value is
 -- spent once themed, and keeping it bloats the DB. What is retained is the theme,
 -- its counts, and short supporting quotes so a pain point stays auditable.
+-- The model's naming of the terms mined from titles and search phrases. Cached
+-- rather than recomputed per render for two reasons: a label that changes
+-- wording between two runs of the same month reads as the market moving, and
+-- classifying forty terms is a model call nobody should pay for twice.
+--
+-- Deliberately not keyed by period. A term's *kind* does not change month to
+-- month — "boucle" is a material in March and in November — while its numbers
+-- change constantly and are never stored here.
+CREATE TABLE IF NOT EXISTS market_element_terms (
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    term TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'other',
+    label_zh TEXT NOT NULL DEFAULT '',
+    label_en TEXT NOT NULL DEFAULT '',
+    -- The model's verdict that this is not a design attribute at all: a size
+    -- number, a shipping promise, a word that survived the frequency filter.
+    dropped INTEGER NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (marketplace, term)
+);
+
 CREATE TABLE IF NOT EXISTS market_review_themes (
     id TEXT PRIMARY KEY,
     marketplace TEXT NOT NULL DEFAULT 'US',
@@ -3317,6 +3338,7 @@ def reset_for_tests() -> None:
                         DROP TABLE IF EXISTS market_evidence;
                         DROP TABLE IF EXISTS market_scores;
                         DROP TABLE IF EXISTS market_review_themes;
+                        DROP TABLE IF EXISTS market_element_terms;
                         DROP TABLE IF EXISTS market_keyword_asin_edges;
                         DROP TABLE IF EXISTS market_keyword_metrics;
                         DROP TABLE IF EXISTS market_product_history;

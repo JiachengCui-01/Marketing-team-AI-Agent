@@ -629,19 +629,30 @@ def variation_depth_expected(facts: NodeFacts) -> Alert | None:
 
     Variation count is a product-programme fact, not a marketing one: it decides
     how many colourways and sizes tooling has to cover before launch.
+
+    Judged against the department rather than against a number somebody picked.
+    "Four variants is a lot" is only true relative to what the rest of the shelf
+    does — in a category where everyone ships eight it is a thin range, and the
+    absolute threshold this used to carry said the opposite.
     """
     counts = [c for c in (_num(p.get("variations")) for p in facts.products)
               if c is not None]
     depth = _median(counts)
     if depth is None:
         return None
-    severity = _by(((6.0, HIGH), (4.0, MEDIUM), (3.0, LOW)), depth)
+    peer = facts.peers.get("variations")
+    if peer:
+        severity = _by(((1.5, HIGH), (1.25, MEDIUM), (1.1, LOW)), depth / peer)
+    else:
+        # No department reading yet — say nothing rather than fall back to a
+        # number that would be a guess wearing a threshold's clothes.
+        return None
     if severity is None:
         return None
     return Alert(
         id="variation_depth_expected", kind=RISK, family="product", severity=severity,
-        magnitude=min(100.0, depth * 12.0), metric="variations",
-        value=depth, unit="", extra={"asins": len(counts)},
+        magnitude=min(100.0, depth / peer * 40.0), metric="variations",
+        value=depth, baseline=peer, unit="", extra={"asins": len(counts)},
     )
 
 
@@ -840,10 +851,10 @@ _TEXT: dict[str, dict[str, tuple[str, str]]] = {
                "Shelf average {value} lb and {volume} in³. Weight fixes the freight tier, the damage rate and the cost of a return, and it is decided at the sketch stage."),
     },
     "variation_depth_expected": {
-        "zh": ("货架按系列卖，不是按单品",
-               "头部 ASIN 变体数中位 {value}（{asins} 个样本）。只上一个 SKU 等于拿单品对打整个系列，开模和备货要按系列算。"),
-        "en": ("The shelf sells ranges, not single SKUs",
-               "Median {value} variations across the head ASINs ({asins} sampled). A one-SKU launch competes against a full range; tooling and stock have to be planned that way."),
+        "zh": ("变体深度高于部门中位",
+               "头部 ASIN 变体数中位 {value}，部门中位 {baseline}（{asins} 个样本）。这个类目按系列卖，开模和备货要按系列算。"),
+        "en": ("Variant depth above the department median",
+               "Median {value} variations across the head ASINs against a department median of {baseline} ({asins} sampled). This category sells ranges; tooling and stock have to be planned that way."),
     },
     "design_fixable_share": {
         "zh": ("{value}% 的差评是设计能解决的",
@@ -1120,6 +1131,10 @@ def peer_medians(
 
     return {
         "revenue_growth_pct": _median(growths),
+        # Filled by the caller from the product rows — variation depth lives on
+        # listings, not on the category snapshot, and "a lot of variants" only
+        # means anything against what the rest of the department ships.
+        "variations": None,
         "total_revenue": median_of("total_revenue"),
         "avg_price": median_of("avg_price"),
         "avg_rating": median_of("avg_rating"),

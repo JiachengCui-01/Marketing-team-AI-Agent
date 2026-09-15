@@ -21,7 +21,7 @@ import json
 import sqlite3
 import time
 import uuid
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from server import db
 
@@ -719,6 +719,46 @@ def keyword_edges(marketplace: str, asin: str, period: str, *, limit: int = 30) 
 
 
 # ----------------------------------------------------------------- reviews ----
+
+def element_naming(marketplace: str = "US") -> dict[str, dict]:
+    """The model's cached classification of mined terms, keyed by term."""
+    db._ensure()
+    with db.connect() as conn:
+        rows = _rows(conn.execute(
+            "SELECT term, kind, label_zh, label_en, dropped FROM market_element_terms "
+            "WHERE marketplace = ?", (marketplace,)))
+    return {row["term"]: {**row, "drop": bool(row["dropped"])} for row in rows}
+
+
+def save_element_naming(marketplace: str, entries: Iterable[Mapping[str, Any]]) -> int:
+    """Upsert the naming for the terms the model answered for.
+
+    An upsert rather than a replace: terms the model was not shown this month
+    keep the classification they already had, so a term that drops out of the
+    top forty and comes back does not arrive unnamed.
+    """
+    db._ensure()
+    now = _now()
+    count = 0
+    with db.connect() as conn:
+        for entry in entries:
+            term = str(entry.get("term") or "").strip().lower()
+            if not term:
+                continue
+            conn.execute(
+                "INSERT INTO market_element_terms (marketplace, term, kind, label_zh, "
+                "label_en, dropped, updated_at) VALUES (?,?,?,?,?,?,?) "
+                "ON CONFLICT(marketplace, term) DO UPDATE SET kind = excluded.kind, "
+                "label_zh = excluded.label_zh, label_en = excluded.label_en, "
+                "dropped = excluded.dropped, updated_at = excluded.updated_at",
+                (marketplace, term, str(entry.get("kind") or "other"),
+                 str(entry.get("label_zh") or "")[:40],
+                 str(entry.get("label_en") or "")[:40],
+                 1 if entry.get("drop") else 0, now),
+            )
+            count += 1
+    return count
+
 
 def replace_review_themes(
     marketplace: str, node_id_path: str, period: str, themes: Iterable[dict],

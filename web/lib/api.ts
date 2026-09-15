@@ -1752,6 +1752,8 @@ export type MarketDirection = {
 };
 
 export type MarketElement = {
+  /** The mined term, in the market's own words. Also the row's key. */
+  term: string;
   key: string;
   kind: string;
   label: string;

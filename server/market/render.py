@@ -282,6 +282,34 @@ TOOL_OPPORTUNITY = {
 }
 
 
+TOOL_ELEMENTS = {
+    "name": "publish_element_naming",
+    "description": "Name and classify the design terms mined from the market's own text.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "terms": {"type": "array", "items": {"type": "object", "properties": {
+                "term": {"type": "string", "description":
+                         "Must be copied exactly from the supplied list."},
+                "kind": {"enum": ["material", "form", "feature", "size", "style",
+                                  "room", "other"]},
+                "label_zh": {"type": "string", "description":
+                             "<=12 chars. The term as a furniture buyer would say it "
+                             "in Chinese, e.g. 'fluted' -> 竖纹. Keep the English word "
+                             "when it is what the trade actually says (boucle)."},
+                "label_en": {"type": "string", "description": "<=24 chars."},
+                "drop": {"type": "boolean", "description":
+                         "True when the term is not a design attribute at all — a "
+                         "shipping promise, a warranty, a marketing adjective, a bare "
+                         "measurement, a category noun that slipped the filter. "
+                         "Dropping is expected: a mined list is raw."},
+            }, "required": ["term", "kind", "drop"]}},
+        },
+        "required": ["terms"],
+    },
+}
+
+
 class RenderError(RuntimeError):
     """The caller asked for something that cannot exist (unknown node, no client)."""
 
@@ -389,6 +417,11 @@ def render_overview(
 ) -> dict:
     """Render 全局汇总 from stored data. Makes zero vendor calls."""
     period = period or store.latest_period(marketplace) or gateway.previous_period()
+    # Name any newly mined term before the panel is built, so the chart and the
+    # brief use the same labels. Costs one model call the first time a term
+    # appears and nothing afterwards.
+    name_elements(client, marketplace, period, language,
+                  terms=panels.mined_terms(marketplace, period))
     payload = build_overview(marketplace, period, language)
     if not payload["board"]:
         record = _data_gap(marketplace, period, "overview", language, None,
@@ -519,6 +552,38 @@ def render_category(
         dashboard=payload, summary=payload["narrative"], evidence=index.all_rows(),
         vendor_tools=_tools_used(index), data_as_of=_data_as_of(index),
         completeness=completeness)
+
+
+def name_elements(client, marketplace: str, period: str, language: str,
+                  *, terms: Sequence[dict]) -> int:
+    """Classify the mined terms and cache the result. Returns how many were named.
+
+    Called from the overview render because that is where the mining happens, and
+    skipped entirely when every term already has a classification — a term's kind
+    does not change month to month, so this is a once-per-new-term cost rather
+    than a per-render one.
+    """
+    known = store.element_naming(marketplace)
+    fresh = [row for row in terms if row["term"] not in known]
+    if not fresh or client is None:
+        return 0
+    payload, source = _run_tool(
+        client, tool=TOOL_ELEMENTS, user=elements.naming_brief(fresh),
+        language=language, max_tokens=3000)
+    if source != "llm":
+        # A failed call must not be cached as an answer, or a transient outage
+        # would leave every term of that month permanently unnamed.
+        return 0
+    allowed = {row["term"] for row in fresh}
+    named = {str(item.get("term") or "").strip().lower(): item
+             for item in payload.get("terms", [])
+             if str(item.get("term") or "").strip().lower() in allowed}
+    # Every term we asked about gets a row, answered or not. Without this a term
+    # the model skipped is "fresh" again on the next render, and the naming call
+    # repeats for the life of the month.
+    entries = [named.get(term) or {"term": term, "kind": elements.OTHER}
+               for term in allowed]
+    return store.save_element_naming(marketplace, entries)
 
 
 def _theme_reviews(client, marketplace: str, node_id_path: str, period: str,
