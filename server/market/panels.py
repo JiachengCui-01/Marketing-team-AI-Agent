@@ -706,14 +706,12 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
     # The vendor-data-family count is gone from here: the coverage strip below
     # names every family and says which ones landed, so a bare "12/22" at the top
     # was a worry with nowhere to go.
-    dept_share = _department_share(board, snapshots)
     kpis = [
         _revenue_tile(coverage_stats, head_revenue, zh),
         _coverage_tile(coverage_stats, zh),
         tile("追踪子类目" if zh else "Tracked sub-categories", str(len(board)),
-             (f"覆盖家具部门在售数的 {dept_share:.0f}%" if zh
-              else f"{dept_share:.0f}% of the department's listings")
-             if dept_share is not None else ""),
+             ("家具 / 户外 / 办公 四个部门，按月遍历自动纳入" if zh
+              else "furniture, patio and office, enrolled by the monthly walk")),
         tile("类目均价中位" if zh else "Median category price",
              money(scoring._median([r["median_price"] for r in board]))),
         tile("最佳机会类目" if zh else "Top opportunity",
@@ -775,22 +773,6 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
                        if r["return_ratio_pct"] is not None],
         "coverage": families,
     }
-
-
-def _department_share(board, snapshots) -> float | None:
-    """What share of the department's listings the tracked categories cover.
-
-    The department root carries its own listing count, so this is measured rather
-    than asserted — and it is the honest answer to "is this really the whole
-    market": it is the part of it this brand builds in.
-    """
-    root = snapshots.get(taxonomy.FURNITURE_ROOT) or {}
-    total = scoring._num(root.get("total_products"))
-    if not total:
-        return None
-    tracked = sum(scoring._num((snapshots.get(r["node_key"]) or {})
-                               .get("total_products")) or 0.0 for r in board)
-    return min(100.0, tracked / total * 100.0) if tracked else None
 
 
 def _coverage_totals(board: Sequence[dict]) -> dict:

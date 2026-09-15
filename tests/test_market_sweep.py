@@ -150,6 +150,116 @@ class PlanningTests(SweepTestCase):
                                  leaves)
 
 
+class EnrolmentTests(SweepTestCase):
+    """The monthly walk enrols what it finds, instead of recording and ignoring it.
+
+    ``_department_roll`` always listed each department root's children and wrote a
+    snapshot per child — and then marked every one ``tracked=False`` unless it was
+    in the hand-listed catalog. So the board stayed at twelve categories while the
+    warehouse knew about forty.
+    """
+
+    def _job(self, kind: str, subject_id: str = "", period: str = PERIOD) -> dict:
+        spec = jobs.BY_KIND[kind]
+        store.enqueue_job(marketplace="US", job_kind=kind,
+                          subject_kind=spec.subject_kind,
+                          subject_id=subject_id or taxonomy.FURNITURE_ROOT,
+                          period=period, est_calls=spec.est_calls)
+        return next(j for j in store.due_jobs("US", limit=500) if j["job_kind"] == kind)
+
+    def roll(self, rows: list[dict]) -> None:
+        payload = json.dumps({"code": "OK", "data": {"items": rows}})
+
+        def vendor(tool: str, arguments: dict) -> str:
+            return payload if tool == "market_research" else fixture_vendor(tool, arguments)
+
+        with mock.patch.object(gateway.sellersprite, "call_tool", side_effect=vendor):
+            jobs.run_job(self._job("department_roll"))
+
+    def node(self, path: str, label: str, products: float) -> dict:
+        return {"nodeIdPath": path, "nodeLabelPath": label, "totalProducts": products,
+                "totalRevenue": 1_000_000.0, "avgPrice": 200.0}
+
+    def test_a_discovered_category_becomes_a_board_row(self) -> None:
+        path = "1055398:1063306:1063308:3733321"
+        self.roll([self.node(path, "Home & Kitchen:Furniture:Bedroom Furniture:Dressers",
+                             9_000.0)])
+        tracked = {n["node_id_path"] for n in taxonomy.tracked_nodes()}
+        self.assertIn(path, tracked)
+        self.assertIn(path, {n["node_id_path"] for n in taxonomy.leaf_nodes()})
+
+    def test_a_category_too_small_to_repay_a_pack_is_recorded_not_enrolled(self) -> None:
+        path = "1055398:1063306:1063308:9999901"
+        self.roll([self.node(path, "Home & Kitchen:Furniture:Bedroom Furniture:Bed Rails",
+                             12.0)])
+        self.assertNotIn(path, {n["node_id_path"] for n in taxonomy.tracked_nodes()})
+        # Recorded, so next month's walk does not have to rediscover it.
+        self.assertIsNotNone(store.get_node("US", path))
+
+    def test_the_other_departments_are_in_scope_now(self) -> None:
+        """Patio, office seating and pet beds sit outside Home & Kitchen, which is
+        what made them invisible."""
+        patio = "2972638011:553824:3480731"
+        office = "1064954:1069102:1069104"
+        self.roll([
+            self.node(patio, "Patio, Lawn & Garden:Patio Furniture & Accessories:"
+                             "Patio Seating", 14_000.0),
+            self.node(office, "Office Products:Office Furniture & Lighting:Chairs",
+                      11_000.0),
+        ])
+        tracked = {n["node_id_path"] for n in taxonomy.tracked_nodes()}
+        self.assertIn(patio, tracked)
+        self.assertIn(office, tracked)
+
+    def test_out_of_scope_rows_are_ignored_entirely(self) -> None:
+        self.roll([self.node("1:2:3", "Grocery:Paper Goods:Napkins", 90_000.0)])
+        self.assertNotIn("1:2:3", {n["node_id_path"] for n in taxonomy.tracked_nodes()})
+
+    def test_the_walk_covers_every_department_root(self) -> None:
+        seen: list[str] = []
+
+        def vendor(tool: str, arguments: dict) -> str:
+            if tool == "market_research":
+                seen.append(str((arguments.get("request") or {}).get("nodeIdPath")))
+                return json.dumps({"code": "OK", "data": {"items": []}})
+            return fixture_vendor(tool, arguments)
+
+        with mock.patch.object(gateway.sellersprite, "call_tool", side_effect=vendor):
+            jobs.run_job(self._job("department_roll"))
+        # A set, not a sequence: the gateway retries an empty reply once without
+        # returnFields, so each root legitimately appears twice here.
+        self.assertEqual(set(seen), set(taxonomy.AREA_ROOTS))
+
+    def test_the_tracked_set_is_capped_so_a_month_can_still_finish(self) -> None:
+        """Each tracked node costs roughly two dozen calls a month; an unbounded
+        walk enrols faster than the budget can collect."""
+        rows = [self.node(f"1055398:1063306:1063318:90000{i:02d}",
+                          f"Home & Kitchen:Furniture:Living Room Furniture:Cat {i}",
+                          float(1_000 + i))
+                for i in range(80)]
+        self.roll(rows)
+        tracked = taxonomy.tracked_nodes()
+        self.assertLessEqual(len(tracked), taxonomy.MAX_TRACKED_NODES)
+        # The catalog survives the cap whatever its size.
+        kept = {n["node_id_path"] for n in tracked}
+        for path in taxonomy.TRACKED_PATHS:
+            with self.subTest(path=path):
+                self.assertIn(path, kept)
+
+    def test_the_cap_drops_the_smallest_first(self) -> None:
+        store.upsert_nodes([
+            {"marketplace": "US", "node_id_path": f"x:{i}",
+             "node_label_path": f"Home & Kitchen:Furniture:Cat {i}",
+             "tracked": True, "tier": 2, "products": float(i)}
+            for i in range(1, 6)])
+        store.cap_tracked_nodes("US", len(taxonomy.TRACKED_PATHS) + 2,
+                                keep=taxonomy.TRACKED_PATHS)
+        kept = {n["node_id_path"] for n in taxonomy.tracked_nodes()}
+        self.assertIn("x:5", kept)
+        self.assertIn("x:4", kept)
+        self.assertNotIn("x:1", kept)
+
+
 class ListingDepthTests(SweepTestCase):
     """The pull stops when a page stops moving the number, not after three pages.
 

@@ -134,6 +134,39 @@ def get_node(marketplace: str, node_id_path: str) -> dict | None:
     return dict(row) if row else None
 
 
+def cap_tracked_nodes(marketplace: str, limit: int, *,
+                      keep: Iterable[str] = ()) -> int:
+    """Untrack the smallest categories once the tracked set passes ``limit``.
+
+    An engineering limit, not an editorial one. Each tracked node costs roughly
+    two dozen vendor calls a month, so an unbounded discovery walk can enrol
+    faster than the daily budget can collect — and a month that never finishes
+    collecting is worth less than a smaller month that does. The nodes dropped
+    are the ones with the fewest listings, and the checked-in catalog is never
+    dropped whatever its size.
+
+    Returns how many were untracked.
+    """
+    protected = set(keep)
+    db._ensure()
+    with db.connect() as conn:
+        rows = _rows(conn.execute(
+            "SELECT node_id_path, products FROM market_nodes "
+            "WHERE marketplace = ? AND tracked = 1", (marketplace,)))
+        if len(rows) <= limit:
+            return 0
+        ranked = sorted(rows, key=lambda r: (r["node_id_path"] in protected,
+                                             float(r["products"] or 0.0)),
+                        reverse=True)
+        drop = [r["node_id_path"] for r in ranked[limit:]
+                if r["node_id_path"] not in protected]
+        for path in drop:
+            conn.execute("UPDATE market_nodes SET tracked = 0 "
+                         "WHERE marketplace = ? AND node_id_path = ?",
+                         (marketplace, path))
+    return len(drop)
+
+
 def list_nodes(marketplace: str = "US", *, tracked_only: bool = True) -> list[dict]:
     db._ensure()
     sql = "SELECT * FROM market_nodes WHERE marketplace = ?"

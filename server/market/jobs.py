@@ -122,43 +122,77 @@ def _ok(reply: VendorReply) -> bool:
 
 def _department_roll(*, marketplace: str, period: str, subject_id: str,
                      bucket: str) -> JobResult:
-    """The furniture department's children, ranked by revenue.
+    """Every department root's children, ranked by revenue — and enrolled.
 
-    This is the only job that discovers nodes: a sub-category that grew into the
-    top of the department should not need a code change to become visible.
+    This walk already existed for the furniture root and already wrote a snapshot
+    per child. What it did not do was *enrol* them: every discovered node was
+    marked ``tracked=False`` unless it appeared in the checked-in catalog, so the
+    board stayed at the twelve categories somebody had listed by hand while the
+    warehouse knew about forty.
+
+    ``market_research`` with ``nodeIdPathEqual=false`` returns the descendant
+    nodes rather than products, which makes it a tree walk we already pay for.
+    One call per department root, so covering four departments costs four calls a
+    month rather than a keyword-search-per-product-line.
+
+    A node is enrolled when it is in scope and carries at least
+    ``MIN_DISCOVERED_LISTINGS`` listings. Newly enrolled nodes are picked up by
+    the *next* run's ``plan_period`` — this job runs after planning, so the month
+    it discovers a category is the month before it collects it.
     """
-    reply = gateway.call(
-        "market_research",
-        _request(marketplace=marketplace, nodeIdPath=taxonomy.FURNITURE_ROOT,
-                 nodeIdPathEqual="false", month=period, size=50,
-                 order={"field": "total_amount", "desc": True}),
-        bucket=bucket, purpose="department roll-up", marketplace=marketplace,
-    )
-    if not _ok(reply):
-        return JobResult(status="pending", calls=int(reply.billable), detail=reply.detail)
-
+    calls = 0
     discovered = 0
-    for row in extract.rows(reply):
-        path = str(row.get("nodeIdPath") or "").strip()
-        label = str(row.get("nodeLabelPath") or "").strip()
-        if not path or not taxonomy.is_furniture(label):
+    enrolled = 0
+    detail: list[str] = []
+
+    for root in taxonomy.AREA_ROOTS:
+        reply = gateway.call(
+            "market_research",
+            _request(marketplace=marketplace, nodeIdPath=root, nodeIdPathEqual="false",
+                     month=period, size=50, order={"field": "total_amount", "desc": True}),
+            bucket=bucket, purpose=f"roll-up {root}", marketplace=marketplace,
+        )
+        calls += int(reply.billable)
+        if not _ok(reply):
+            detail.append(f"{root}: {reply.detail}")
             continue
-        store.upsert_nodes([{
-            "marketplace": marketplace, "node_id_path": path, "node_label_path": label,
-            "tracked": path in taxonomy.TRACKED_PATHS,
-            "tier": 1 if path in taxonomy.TIER1_PATHS else 2,
-            "products": extract.number(row.get("totalProducts")),
-            "brand_category": taxonomy.brand_category_for(label),
-        }])
-        index = EvidenceIndex(marketplace=marketplace, period=period)
-        metrics = extract.extract_market_research(reply, node_id_path=path,
-                                                  period=period, index=index)
-        if metrics:
-            store.upsert_node_snapshot(marketplace, path, period, metrics)
-            store.record_evidence(index.all_rows())
-            discovered += 1
-    return JobResult(status="done", calls=int(reply.billable),
-                     detail=f"{discovered} category rows")
+
+        for row in extract.rows(reply):
+            path = str(row.get("nodeIdPath") or "").strip()
+            label = str(row.get("nodeLabelPath") or "").strip()
+            if not path or not taxonomy.in_scope(label):
+                continue
+            listings = extract.number(row.get("totalProducts"))
+            # Enrol it, unless it is too small to repay a monthly pack. The
+            # checked-in catalog is tracked regardless of size: those are the
+            # categories the product line is built on.
+            keep = (path in taxonomy.TRACKED_PATHS
+                    or (listings or 0) >= taxonomy.MIN_DISCOVERED_LISTINGS)
+            store.upsert_nodes([{
+                "marketplace": marketplace, "node_id_path": path,
+                "node_label_path": label,
+                "tracked": keep,
+                "tier": 1 if path in taxonomy.TIER1_PATHS else 2,
+                "products": listings,
+                "brand_category": taxonomy.brand_category_for(label),
+            }])
+            if keep and path not in taxonomy.TRACKED_PATHS:
+                enrolled += 1
+            index = EvidenceIndex(marketplace=marketplace, period=period)
+            metrics = extract.extract_market_research(reply, node_id_path=path,
+                                                      period=period, index=index)
+            if metrics:
+                store.upsert_node_snapshot(marketplace, path, period, metrics)
+                store.record_evidence(index.all_rows())
+                discovered += 1
+
+    if not discovered and not enrolled:
+        return JobResult(status="pending", calls=calls,
+                         detail="; ".join(detail)[:300] or "no department rows")
+    store.cap_tracked_nodes(marketplace, taxonomy.MAX_TRACKED_NODES,
+                            keep=taxonomy.TRACKED_PATHS)
+    return JobResult(status="done", calls=calls,
+                     detail=f"{discovered} category rows, {enrolled} newly tracked")
 
 
 def _category_structure(*, marketplace: str, period: str, subject_id: str,
@@ -622,8 +656,10 @@ CATALOG: tuple[JobSpec, ...] = (
     # board that can describe today rather than last month.
     JobSpec("category_pulse", "node", 15, 1, "week", _category_pulse,
             targets_open_month=True),
-    JobSpec("department_roll", "department", 20, 1, "month", _department_roll,
-            scope="department"),
+    # Two per root in the worst case: the gateway retries an empty reply once
+    # without returnFields, and a department can legitimately answer empty.
+    JobSpec("department_roll", "department", 20, len(taxonomy.AREA_ROOTS) * 2, "month",
+            _department_roll, scope="department"),
     JobSpec("category_structure", "node", 30, 2, "month", _category_structure),
     JobSpec("category_demand", "node", 30, 1, "month", _category_demand),
     JobSpec("category_price_bands", "node", 35, 1, "month",

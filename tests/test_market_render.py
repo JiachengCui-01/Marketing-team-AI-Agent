@@ -457,13 +457,14 @@ class HeadlineTileTests(RenderTestCase):
         self.assertEqual(tile["value"], "0 / 1")
         self.assertIn("仅 1/2", tile["hint"])
 
-    def test_the_tracked_category_count_says_what_it_covers(self) -> None:
-        """"Is this the whole market" deserves a measured answer, not silence."""
-        store.upsert_node_snapshot("US", taxonomy.FURNITURE_ROOT, PERIOD,
-                                   {"total_products": 10_000.0},
-                                   completeness=1.0, missing=[])
-        store.upsert_node_snapshot("US", BUFFETS, PERIOD, {"total_products": 2_500.0})
-        self.assertIn("25%", self.tiles()["追踪子类目"]["hint"])
+    def test_the_tracked_category_count_names_its_scope(self) -> None:
+        """A share of the furniture root would be a share of the wrong denominator
+        now that three other departments are in scope, and a wrong denominator is
+        worse than none."""
+        hint = self.tiles()["追踪子类目"]["hint"]
+        self.assertIn("户外", hint)
+        self.assertIn("遍历", hint)
+        self.assertNotIn("%", hint)
 
 
 class PriceCurveTests(RenderTestCase):

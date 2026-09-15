@@ -40,32 +40,77 @@ class CatalogTests(unittest.TestCase):
     def test_tracked_nodes_bootstrap_on_first_read(self) -> None:
         self.assertEqual(len(taxonomy.tracked_nodes()), len(taxonomy.TRACKED_NODES))
 
-    def test_every_product_line_has_at_least_one_node(self) -> None:
-        """A product line with no node is a line the system can never analyze."""
+    # The three departments beyond furniture are entered through their roots and
+    # populated by the monthly walk, so the checked-in catalog carries a root for
+    # them rather than a hand-listed leaf. Pet Supplies has neither: its browse id
+    # was not in the captured product_node reply, and guessing a browse id is the
+    # one thing this module must never do — a wrong id answers with a real-looking
+    # market that is not the one asked for.
+    _AWAITING_A_NODE_ID = frozenset({"pet beds and furniture"})
+
+    def test_every_product_line_has_a_way_in(self) -> None:
+        """A line with no node at all is a line the system can never analyze."""
         covered = {n["brand_category"] for n in taxonomy.TRACKED_NODES}
         for category in PRODUCT_CATEGORIES:
+            if category in self._AWAITING_A_NODE_ID:
+                continue
             with self.subTest(category=category):
                 self.assertIn(category, covered)
 
-    def test_catalog_paths_are_unique_and_inside_the_furniture_tree(self) -> None:
+    def test_the_lines_awaiting_an_id_are_declared_not_forgotten(self) -> None:
+        """A silently unserved product line is the failure this test exists for."""
+        covered = {n["brand_category"] for n in taxonomy.TRACKED_NODES}
+        for category in self._AWAITING_A_NODE_ID:
+            with self.subTest(category=category):
+                self.assertIn(category, PRODUCT_CATEGORIES)
+                self.assertNotIn(category, covered)
+
+    def test_every_scope_department_has_a_walk_root(self) -> None:
+        """The walk is the only route to a leaf now, so a department with no root
+        in it is a department that can never be collected."""
+        labels = {n["node_id_path"]: n["node_label_path"].lower()
+                  for n in taxonomy.TRACKED_NODES}
+        for root in taxonomy.AREA_ROOTS:
+            with self.subTest(root=root):
+                self.assertIn(root, labels)
+                self.assertTrue(taxonomy.in_scope(labels[root]))
+
+    def test_catalog_paths_are_unique_and_inside_the_scope(self) -> None:
+        """Scope, not the furniture tree: patio, office seating and pet beds sit in
+        three other Amazon departments, which is why scoping to Furniture alone
+        made them invisible."""
         paths = [n["node_id_path"] for n in taxonomy.TRACKED_NODES]
         self.assertEqual(len(paths), len(set(paths)))
         for node in taxonomy.TRACKED_NODES:
             with self.subTest(node=node["node_id_path"]):
-                self.assertTrue(taxonomy.is_furniture(node["node_label_path"]))
-                self.assertTrue(node["node_id_path"].startswith(taxonomy.FURNITURE_ROOT))
+                self.assertTrue(taxonomy.in_scope(node["node_label_path"]))
+                self.assertTrue(any(node["node_id_path"].startswith(root)
+                                    for root in taxonomy.AREA_ROOTS))
 
-    def test_leaf_nodes_exclude_the_department_roll_up(self) -> None:
-        """The root is the sum of the categories; ranking it against them is nonsense."""
+    def test_leaf_nodes_exclude_every_department_roll_up(self) -> None:
+        """A roll-up is the sum of its own descendants; ranking one against them
+        would put a total at the top of a list of parts."""
         leaves = {n["node_id_path"] for n in taxonomy.leaf_nodes()}
-        self.assertNotIn(taxonomy.FURNITURE_ROOT, leaves)
-        self.assertEqual(len(leaves), len(taxonomy.TRACKED_NODES) - 1)
+        for root in taxonomy.AREA_ROOTS:
+            with self.subTest(root=root):
+                self.assertNotIn(root, leaves)
+        self.assertEqual(len(leaves),
+                         len(taxonomy.TRACKED_NODES) - len(taxonomy.ROLLUP_PATHS))
 
-    def test_tier_one_covers_every_product_line(self) -> None:
-        """Tier 1 pays for the expensive traffic and review packs, so a line with
-        no tier-1 node would never get pain points."""
+    def test_tier_one_covers_every_furniture_product_line(self) -> None:
+        """Tier 1 pays for the per-ASIN traffic and review packs, so a line with no
+        tier-1 node never gets pain points.
+
+        The three new departments enter at tier 2 deliberately: their leaves are
+        discovered rather than chosen, and enrolling an unknown number of nodes at
+        four extra calls each is how a month stops finishing. They are promoted by
+        editing the catalog once the walk shows which leaves matter.
+        """
         tier1 = {n["brand_category"] for n in taxonomy.TRACKED_NODES if n["tier"] == 1}
-        for category in PRODUCT_CATEGORIES:
+        for category in ("sofas and sectionals", "bed frames and headboards",
+                         "dining tables and chairs",
+                         "storage cabinets and sideboards", "desks",
+                         "coffee and side tables"):
             with self.subTest(category=category):
                 self.assertIn(category, tier1)
 
@@ -95,14 +140,33 @@ class NodeResolutionTests(unittest.TestCase):
         self.assertIsNone(taxonomy.pick_node("not json", "desks"))
         self.assertIsNone(taxonomy.pick_node(json.dumps({"data": []}), "desks"))
 
-    def test_parse_nodes_keeps_only_the_furniture_subtree(self) -> None:
+    def test_parse_nodes_keeps_the_whole_scope(self) -> None:
+        """Patio and Office rows are in scope now; Grocery still is not."""
         nodes = taxonomy.parse_nodes(fixture("product_node"))
         self.assertTrue(nodes)
         for node in nodes:
-            self.assertTrue(taxonomy.is_furniture(node["node_label_path"]))
-        # The fixture deliberately includes Patio and Office rows.
-        raw = json.loads(fixture("product_node"))["data"]
-        self.assertLess(len(nodes), len(raw))
+            self.assertTrue(taxonomy.in_scope(node["node_label_path"]))
+        labels = " ".join(n["node_label_path"] for n in nodes)
+        self.assertIn("Patio", labels)
+        self.assertIn("Office Products", labels)
+
+    def test_parse_nodes_rejects_what_is_out_of_scope(self) -> None:
+        payload = json.dumps({"data": [
+            {"nodeIdPath": "1:2", "nodeLabelPath": "Grocery:Paper Goods",
+             "products": 9000}]})
+        self.assertEqual(taxonomy.parse_nodes(payload), [])
+
+    def test_a_seed_narrows_a_department_as_wide_as_pet_supplies(self) -> None:
+        """A search for "dog beds" also matches food and grooming nodes, and the
+        department prefix alone cannot tell them apart."""
+        payload = json.dumps({"data": [
+            {"nodeIdPath": "p:1", "nodeLabelPath": "Pet Supplies:Dogs:Beds & Furniture",
+             "products": 9000},
+            {"nodeIdPath": "p:2", "nodeLabelPath": "Pet Supplies:Dogs:Food",
+             "products": 9000}]})
+        kept = {n["node_id_path"] for n in
+                taxonomy.parse_nodes(payload, seed="dog beds pet furniture")}
+        self.assertEqual(kept, {"p:1"})
 
     def test_parse_nodes_marks_catalog_membership(self) -> None:
         nodes = {n["node_id_path"]: n for n in taxonomy.parse_nodes(fixture("product_node"))}
