@@ -32,10 +32,10 @@ MARKETPLACE = "US"
 FURNITURE_ROOT = "1055398:1063306"
 FURNITURE_ROOT_LABEL = "Home & Kitchen:Furniture"
 
-# The browse scope this business sells into. Four departments, because Amazon
+# The browse scope this business sells into. Three departments, because Amazon
 # does not keep the product line in one place: patio furniture lives under Patio,
-# Lawn & Garden, task seating under Office Products, and pet beds under Pet
-# Supplies. Scoping to Furniture alone made those three invisible.
+# Lawn & Garden and task seating under Office Products. Scoping to Furniture alone
+# made both invisible.
 #
 # Still a scope and not a free-for-all: ``product_node`` answers a furniture query
 # with whatever matches, and a "sofa" result under Toys is a doll's couch.
@@ -44,29 +44,8 @@ SCOPE_PREFIXES: tuple[str, ...] = (
     _HOME_FURNITURE_PREFIX,
     "patio, lawn & garden:patio furniture",
     "office products:office furniture",
-    "pet supplies",
 )
 _STOPWORDS = {"and", "or", "the", "of", "with", "for", "&"}
-
-# The seed queries discovery runs, one per product line. These are the business's
-# own product lines rather than a guess about what matters — which is why they
-# live next to ``PRODUCT_CATEGORIES`` and read the same.
-DISCOVERY_SEEDS: tuple[tuple[str, str], ...] = (
-    ("sofas and sectionals", "sofas and sectionals"),
-    ("bed frames headboards", "bed frames and headboards"),
-    ("dining tables chairs", "dining tables and chairs"),
-    ("storage cabinets sideboards", "storage cabinets and sideboards"),
-    ("dressers armoires wardrobes", "storage cabinets and sideboards"),
-    ("bookcases shelving units", "storage cabinets and sideboards"),
-    ("desks home office", "desks"),
-    ("coffee tables end tables", "coffee and side tables"),
-    ("nightstands accent tables", "coffee and side tables"),
-    ("patio furniture sets outdoor", "outdoor and patio furniture"),
-    ("outdoor sofa dining set", "outdoor and patio furniture"),
-    ("office chairs desk chairs", "office chairs and seating"),
-    ("dog beds pet furniture", "pet beds and furniture"),
-    ("cat tree pet house", "pet beds and furniture"),
-)
 
 # A node this small does not repay a monthly pack, and the cap keeps one odd
 # ``product_node`` reply from quietly enrolling the whole marketplace and eating
@@ -158,10 +137,9 @@ TRACKED_PATHS: frozenset[str] = frozenset(node["node_id_path"] for node in TRACK
 # come from the same captured ``product_node`` reply as the rest of the catalog,
 # so bootstrapping still costs no vendor calls.
 #
-# Pet Supplies is absent: its browse id was not in the captured reply, and
-# guessing a browse node id is the one thing in this module that must never
-# happen — a wrong id answers with a real-looking market that is not the one
-# asked for. It is enrolled the moment the id is supplied.
+# Adding a department means adding its root here. Never by guessing the id: a
+# wrong browse id answers with a real-looking market that is not the one asked
+# for, which is the worst failure this module can have.
 AREA_ROOTS: tuple[str, ...] = (
     FURNITURE_ROOT,
     "2972638011:553824",        # Patio, Lawn & Garden:Patio Furniture & Accessories
@@ -297,10 +275,9 @@ def parse_nodes(payload: str, *, marketplace: str = MARKETPLACE,
 
     ``seed`` is the query that produced the reply. When given, a node is kept only
     if its own leaf label shares a word with the query — the department prefix
-    alone is too loose for a department as wide as Pet Supplies, where a search
-    for "dog beds" also matches food and grooming nodes. Deriving the test from
-    the query rather than from a list of furniture words keeps the filter honest
-    as the seeds change.
+    alone is too loose when a department carries more than furniture, as Office
+    Products does. Deriving the test from the query rather than from a list of
+    furniture words keeps the filter honest as the queries change.
     """
     try:
         data = json.loads(payload)

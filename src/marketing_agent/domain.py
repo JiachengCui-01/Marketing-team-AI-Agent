@@ -46,10 +46,9 @@ PRODUCT_CATEGORIES = (
     "coffee and side tables",
     # Added alongside the furniture lines: same freight profile, same buyer, and
     # they sit in different Amazon departments rather than under Furniture, which
-    # is why the browse scope below is a list of departments and not one root.
+    # is why the browse scope is a list of departments and not one root.
     "outdoor and patio furniture",
     "office chairs and seating",
-    "pet beds and furniture",
 )
 
 # The attributes that actually decide a furniture purchase.

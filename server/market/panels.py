@@ -710,7 +710,7 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
         _revenue_tile(coverage_stats, head_revenue, zh),
         _coverage_tile(coverage_stats, zh),
         tile("追踪子类目" if zh else "Tracked sub-categories", str(len(board)),
-             ("家具 / 户外 / 办公 四个部门，按月遍历自动纳入" if zh
+             ("家具 / 户外 / 办公 三个部门，按月遍历自动纳入" if zh
               else "furniture, patio and office, enrolled by the monthly walk")),
         tile("类目均价中位" if zh else "Median category price",
              money(scoring._median([r["median_price"] for r in board]))),
