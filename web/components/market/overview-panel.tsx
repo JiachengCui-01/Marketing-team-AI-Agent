@@ -385,6 +385,77 @@ export function MarketOverviewPanel({
   );
 }
 
+/** The board row's metrics: each one named, and absent when it has no value.
+ *
+ * `median_price` carries the vendor's ``avgPrice``, not a median — the field name
+ * is wrong and predates this row. Labelled for what it actually holds rather than
+ * for what it is called, because a mislabelled number is worse than a missing one.
+ */
+function BoardMetrics({ row }: { row: MarketBoardRow }) {
+  const { t } = useI18n();
+  const revenue = row.covered_revenue ?? row.revenue_est;
+  const metrics = [
+    revenue != null ? {
+      key: "revenue",
+      label: t.gmRowRevenue,
+      value: fmtMoney(revenue),
+      estimated: true,
+      // How much of the category that sum actually covered; the number is a
+      // roll-up of the ASINs we hold, never the whole shelf.
+      suffix: row.covered_asins ? (
+        <span className="ml-1 text-fg-subtle">
+          {row.covered_asins}
+          {row.product_pool ? `/${row.product_pool.toLocaleString()}` : ""} ASIN
+        </span>
+      ) : null,
+      title: row.product_pool
+        ? `${t.gmCoverage} ${row.covered_asins}/${row.product_pool}`
+        : undefined,
+    } : null,
+    row.growth_pct != null ? {
+      key: "growth",
+      label: t.gmRowGrowth,
+      value: fmtPct(row.growth_pct),
+      title: t.gmRowGrowthHint,
+    } : null,
+    row.median_price != null ? {
+      key: "price",
+      label: t.gmRowPrice,
+      value: fmtMoney(row.median_price),
+    } : null,
+    row.top5_brand_share_pct != null ? {
+      key: "top5",
+      label: t.gmRowTop5,
+      value: fmtPct(row.top5_brand_share_pct),
+    } : null,
+  ].filter(Boolean) as {
+    key: string; label: string; value: string; estimated?: boolean;
+    suffix?: React.ReactNode; title?: string;
+  }[];
+
+  if (!metrics.length) {
+    return <p className="mt-1.5 text-[11px] text-fg-subtle">{t.gmRowNoMetrics}</p>;
+  }
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-x-5 gap-y-1.5">
+      {metrics.map((metric) => (
+        <div key={metric.key} title={metric.title}>
+          <div className="flex items-center gap-1 text-[10px] leading-none text-fg-subtle">
+            {metric.label}
+            {metric.estimated ? (
+              <span className="bi-chip bi-chip-estimated">{t.evEstimated}</span>
+            ) : null}
+          </div>
+          <div className="mt-0.5 text-[11px] tabular-nums text-fg-muted">
+            {metric.value}
+            {metric.suffix}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function BoardRow({
   row,
   rank,
@@ -423,22 +494,7 @@ function BoardRow({
           {verdict?.rationale ? (
             <p className="mt-0.5 text-[11px] text-fg-muted">{verdict.rationale}</p>
           ) : null}
-          <div className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px] text-fg-muted sm:grid-cols-4">
-            <span title={row.product_pool
-              ? `${t.gmCoverage} ${row.covered_asins}/${row.product_pool}`
-              : undefined}>
-              {fmtMoney(row.covered_revenue ?? row.revenue_est)}*
-              {row.covered_asins ? (
-                <span className="ml-1 text-fg-subtle">
-                  ({row.covered_asins}
-                  {row.product_pool ? `/${row.product_pool.toLocaleString()}` : ""})
-                </span>
-              ) : null}
-            </span>
-            <span>{fmtPct(row.growth_pct)}</span>
-            <span>{fmtMoney(row.median_price)}</span>
-            <span>{fmtPct(row.top5_brand_share_pct)}</span>
-          </div>
+          <BoardMetrics row={row} />
         </div>
         <div className="w-28 shrink-0 text-right">
           <div className="text-lg font-semibold" style={{ fontVariantNumeric: "tabular-nums" }}>
