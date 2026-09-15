@@ -48,9 +48,9 @@ class CurveTests(unittest.TestCase):
         """Imputing would rank a category with no data above one with bad data."""
         self.assertEqual(scoring.piecewise(None, ((0.0, 0.0), (1.0, 100.0))), 0.0)
 
-    def test_the_aov_curve_rejects_both_ends(self) -> None:
-        """Freight economics, not taste: $120 cannot absorb LTL plus a return, and
-        $3,000 is a showroom decision this brand does not serve."""
+    def test_the_fallback_curve_still_rejects_both_ends(self) -> None:
+        """With no distribution collected the shipped curve is all there is, and a
+        board that scored every category zero on price would rank on noise."""
         cheap = scoring.score_category(snapshot(avg_price=110.0))["breakdown"]["aov_fit"]
         sweet = scoring.score_category(snapshot(avg_price=450.0))["breakdown"]["aov_fit"]
         dear = scoring.score_category(snapshot(avg_price=3_000.0))["breakdown"]["aov_fit"]
@@ -66,6 +66,93 @@ class CurveTests(unittest.TestCase):
         low = scoring.score_product({"rating": 3.4})["breakdown"]["quality_fit"]
         self.assertGreater(best, high)
         self.assertGreater(best, low)
+
+
+class PriceModelTests(unittest.TestCase):
+    """Price fit is read off the department's own revenue distribution.
+
+    It used to be a constant curve peaking around $300-900. That asserted two
+    different things at once — where this business can make money, and where the
+    market takes its money — and only the first of those is ours to declare.
+    """
+
+    def listings(self, spec: list[tuple[float, float]]) -> list[dict]:
+        """(price, revenue) pairs, repeated enough to clear the binning floor."""
+        out = []
+        while len(out) < scoring.MIN_PRICE_ROWS:
+            out += [{"price": price, "revenue": revenue} for price, revenue in spec]
+        return out
+
+    def test_the_peak_follows_the_money_not_a_constant(self) -> None:
+        cheap_market = self.listings([(80.0, 900_000.0), (400.0, 20_000.0)])
+        curve = scoring.price_model_from_listings(cheap_market)
+        self.assertGreater(scoring.piecewise(80.0, curve),
+                           scoring.piecewise(400.0, curve))
+
+    def test_the_same_price_scores_differently_in_two_departments(self) -> None:
+        """Which is the whole point: $400 is premium in one shelf and mid in another."""
+        budget = scoring.price_model_from_listings(
+            self.listings([(90.0, 800_000.0), (400.0, 40_000.0)]))
+        premium = scoring.price_model_from_listings(
+            self.listings([(90.0, 40_000.0), (400.0, 800_000.0)]))
+        self.assertLess(scoring.piecewise(400.0, budget),
+                        scoring.piecewise(400.0, premium))
+
+    def test_bins_hold_equal_counts_so_bucket_width_cannot_skew_it(self) -> None:
+        spec = [(float(p), 1_000.0) for p in range(50, 450, 10)]
+        curve = scoring.price_model_from_listings(
+            [{"price": p, "revenue": r} for p, r in spec])
+        values = [value for _price, value in curve]
+        # Revenue is flat across the range, so every bin reads the same.
+        self.assertAlmostEqual(min(values), max(values), places=0)
+
+    def test_too_few_priced_listings_is_none_not_a_curve_from_nine_rows(self) -> None:
+        self.assertIsNone(scoring.price_model_from_listings(
+            [{"price": 100.0, "revenue": 1.0}] * 9))
+
+    def test_listings_without_a_price_or_revenue_are_skipped(self) -> None:
+        rows = self.listings([(200.0, 10_000.0)])
+        rows += [{"price": None, "revenue": 99_000_000.0},
+                 {"price": 500.0, "revenue": None}]
+        curve = scoring.price_model_from_listings(rows)
+        self.assertTrue(all(price > 0 for price, _v in curve))
+
+    # ---- the vendor's bands, for when listings are thin --------------------
+
+    def test_band_labels_are_parsed_including_the_open_top(self) -> None:
+        self.assertEqual(scoring.band_bounds("150-200"), (150.0, 200.0))
+        self.assertEqual(scoring.band_bounds("$1,000+"), (1000.0, 2000.0))
+        self.assertIsNone(scoring.band_bounds("unknown"))
+
+    def test_the_band_curve_peaks_on_the_fattest_band(self) -> None:
+        curve = scoring.price_model([
+            {"bucket_key": "50-100", "revenue": 100_000.0},
+            {"bucket_key": "100-150", "revenue": 200_000.0},
+            {"bucket_key": "150-200", "revenue": 900_000.0},
+        ])
+        self.assertEqual(scoring.piecewise(175.0, curve), 100.0)
+        self.assertLess(scoring.piecewise(75.0, curve), 50.0)
+
+    def test_no_usable_bands_falls_back_rather_than_zeroing_the_factor(self) -> None:
+        """A factor that scores zero for everyone silently deletes its own weight."""
+        curve = scoring.price_model([{"bucket_key": "unknown", "revenue": 5.0}])
+        self.assertGreater(scoring.piecewise(450.0, curve), 0.0)
+
+    def test_the_ui_is_shown_nothing_while_the_fallback_is_in_use(self) -> None:
+        """Presenting a shipped constant as a reading is the thing to avoid."""
+        self.assertEqual(scoring.price_curve_rows(scoring.price_model([])), [])
+        real = scoring.price_model([{"bucket_key": "50-100", "revenue": 10.0},
+                                    {"bucket_key": "100-150", "revenue": 20.0}])
+        self.assertEqual(len(scoring.price_curve_rows(real)), 2)
+
+    def test_a_supplied_curve_reaches_both_scorers(self) -> None:
+        curve = ((100.0, 100.0), (1_000.0, 0.0))
+        category = scoring.score_category(snapshot(avg_price=100.0), aov_curve=curve)
+        product = scoring.score_product({"price": 100.0}, aov_curve=curve)
+        self.assertAlmostEqual(category["breakdown"]["aov_fit"],
+                               scoring.CATEGORY_WEIGHTS["aov_fit"], places=1)
+        self.assertAlmostEqual(product["breakdown"]["aov_fit"],
+                               scoring.PRODUCT_WEIGHTS["aov_fit"], places=1)
 
 
 class CategoryScoreTests(unittest.TestCase):
@@ -187,7 +274,7 @@ class ScoreModelTests(unittest.TestCase):
         model = scoring.score_model()
         self.assertEqual(model["category_weights"], scoring.CATEGORY_WEIGHTS)
         self.assertEqual(model["risk_key"], scoring.RISK_KEY)
-        self.assertEqual(model["version"], "v2")
+        self.assertEqual(model["version"], f"v{scoring.FORMULA_VERSION}")
 
     def test_every_breakdown_key_is_in_the_weight_table(self) -> None:
         result = scoring.score_category(snapshot())

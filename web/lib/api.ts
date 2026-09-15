@@ -1921,6 +1921,10 @@ export type MarketDashboard = {
   // Overview ships a row per node; the deep dive ships one object for the node
   // it is about. Both shapes are read by name, never indexed positionally.
   concentration?: any;
+  /** The price -> fit curve the score was computed against this month. Empty
+   *  while the shipped fallback is in use, so the UI never presents a constant
+   *  as a reading. */
+  price_fit?: { price: number; fit: number }[];
   elements?: MarketElement[];
   /** Demand trend against shelf presence — the chart a design review opens with. */
   element_matrix?: {

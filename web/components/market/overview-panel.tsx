@@ -21,6 +21,7 @@ import {
   BandHistogram,
   Bullet,
   DeltaBullet,
+  DistributionBars,
   ElementMatrix,
   Quadrant,
   ScoreBar,
@@ -287,6 +288,18 @@ export function MarketOverviewPanel({
                              listingLabel={t.gmPriceListings}
                              revenueLabel={t.gmPriceRevenue}
                              leadLabel={t.gmBandLead} />
+              {/* The curve the price factor was scored against, shown because a
+                  score nobody can inspect is a score nobody should trust. It is
+                  absent while the shipped fallback is in use, on purpose. */}
+              <Block label={t.gmPriceFit} data={dashboard?.price_fit}>
+                <p className="mb-1 text-[10px] text-fg-subtle">{t.gmPriceFitHint}</p>
+                <DistributionBars
+                  buckets={(dashboard?.price_fit ?? []).map((row: any) => ({
+                    bucket_key: fmtMoney(row.price), products_pct: row.fit,
+                  }))}
+                  label={t.gmPriceFit}
+                />
+              </Block>
             </Section>
 
             <Section title={t.gmNewProduct} data={dashboard?.newproduct}>

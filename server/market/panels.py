@@ -563,6 +563,31 @@ def _with_product_peers(peers: dict, marketplace: str, period: str) -> dict:
     return {**peers, "variations": depth}
 
 
+def price_curve(marketplace: str, period: str) -> tuple[tuple[float, float], ...]:
+    """Where the department's revenue sits by price, as a scoring curve.
+
+    Computed once per render and handed to every node's score. Reading it per
+    node would score each category against its own prices, which is circular —
+    a category is always perfectly priced for itself.
+
+    Listings first, vendor bands second, shipped constant last. Each step down is
+    a step further from the market's own reading, and the panel shows which one
+    was used so a score is never taken on faith.
+    """
+    from_listings = scoring.price_model_from_listings(
+        store.all_products(marketplace, period))
+    if from_listings is not None:
+        return from_listings
+    bands: dict[str, dict] = {}
+    for node in taxonomy.leaf_nodes(marketplace):
+        for bucket in store.get_distribution(marketplace, node["node_id_path"],
+                                             period, "price"):
+            entry = bands.setdefault(bucket["bucket_key"],
+                                     {"bucket_key": bucket["bucket_key"], "revenue": 0.0})
+            entry["revenue"] += bucket.get("revenue") or 0.0
+    return scoring.price_model(list(bands.values()))
+
+
 def mined_terms(marketplace: str, period: str) -> list[dict]:
     """The design terms this month's data contains, before anything names them.
 
@@ -591,6 +616,8 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
          if path != taxonomy.FURNITURE_ROOT}), marketplace, period)
 
     totals = store.product_totals(marketplace, period)
+    # One curve for the whole board, read off the department's own price bands.
+    aov_curve = price_curve(marketplace, period)
     # Element demand is department-wide: a style does not belong to one node, and
     # reading it per node would split "fluted" across six categories and bury it.
     # Mined from the market's own words, then named by the model and cached.
@@ -608,7 +635,8 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
             continue
         history = histories.get(path, [])
         keywords = store.top_keywords(marketplace, path, period, limit=20)
-        score = scoring.score_category(snap, history=history, keywords=keywords)
+        score = scoring.score_category(snap, history=history, keywords=keywords,
+                                       aov_curve=aov_curve)
         completeness, missing = jobs.node_completeness(marketplace, path, period)
         label = taxonomy.short_label(node["node_label_path"])
         board.append({
@@ -720,6 +748,9 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
                                pct((snapshots.get(r["node_key"]) or {}).get("top5_product_crn"))}
                           for r in board if r["top5_brand_share_pct"] is not None],
         "physical": _physical_rows(board, snapshots),
+        # The curve the price factor was actually scored against, so a reader can
+        # see what "price fit" means this month instead of taking it on faith.
+        "price_fit": scoring.price_curve_rows(aov_curve),
         "elements": element_rows,
         "element_matrix": _element_matrix(element_rows, zh),
         "follow": _follow(board, rising_elements, zh),
@@ -993,7 +1024,9 @@ def build_category(marketplace: str, node_id_path: str, period: str,
     distributions = store.all_distributions(marketplace, node_id_path, period)
     concentration = store.all_concentration(marketplace, node_id_path, period)
     trend_index = store.keyword_series(marketplace, node_id_path)
-    score = scoring.score_category(snap, history=history, keywords=keywords)
+    aov_curve = price_curve(marketplace, period)
+    score = scoring.score_category(snap, history=history, keywords=keywords,
+                                   aov_curve=aov_curve)
     completeness, missing = jobs.node_completeness(marketplace, node_id_path, period)
     label = taxonomy.label_for(node_id_path, marketplace)
 
@@ -1014,7 +1047,8 @@ def build_category(marketplace: str, node_id_path: str, period: str,
     opportunities = []
     for product in products[:MAX_OPPORTUNITIES]:
         product_score = scoring.score_product(
-            product, snapshot=snap, history=history, keywords=keywords, pain=themes)
+            product, snapshot=snap, history=history, keywords=keywords, pain=themes,
+            aov_curve=aov_curve)
         opportunities.append({
             "id": f"{node_id_path}|{product['asin']}|{period}",
             "anchor_asin": product["asin"],

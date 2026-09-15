@@ -179,7 +179,8 @@ class OverviewTests(RenderTestCase):
     def test_the_weights_ship_with_the_dashboard(self) -> None:
         client = FakeClient({"publish_market_overview": self.OVERVIEW})
         record = render.render_overview(client=client, period=PERIOD)
-        self.assertEqual(record["dashboard"]["score_model"]["version"], "v2")
+        self.assertEqual(record["dashboard"]["score_model"]["version"],
+                         f"v{scoring.FORMULA_VERSION}")
 
     def test_an_empty_period_is_a_data_gap_and_costs_no_model_call(self) -> None:
         """Spending a model call to write 'I have no data' is absurd."""
@@ -393,6 +394,55 @@ class BoardReadTests(RenderTestCase):
         brief = render._board_brief(payload["board"], "zh")
         self.assertIn("分主要来自", brief)
         self.assertIn("96.4 lb", brief)
+
+
+class PriceCurveTests(RenderTestCase):
+    """The price factor is scored against the department, not against a constant."""
+
+    def test_one_curve_is_computed_and_shared_by_every_node(self) -> None:
+        """Scoring each category against its own prices would be circular — a
+        category is always perfectly priced for itself."""
+        with mock.patch.object(scoring, "score_category",
+                               wraps=scoring.score_category) as scored:
+            render.build_overview("US", PERIOD, "zh")
+        curves = {tuple(call.kwargs["aov_curve"]) for call in scored.call_args_list}
+        self.assertEqual(len(curves), 1)
+
+    def test_the_curve_comes_from_the_stored_price_bands(self) -> None:
+        curve = panels.price_curve("US", PERIOD)
+        # The seed's bands are 50-100 and 100-150; midpoints 75 and 125.
+        self.assertEqual([round(price) for price, _fit in curve], [75, 125])
+
+    def test_the_ui_is_given_the_curve_that_was_actually_used(self) -> None:
+        payload = render.build_overview("US", PERIOD, "zh")
+        self.assertEqual([row["price"] for row in payload["price_fit"]], [75, 125])
+
+    def test_an_empty_warehouse_falls_back_and_shows_nothing(self) -> None:
+        """A shipped constant presented as a reading is the thing to avoid."""
+        db.reset_for_tests()
+        taxonomy.ensure_nodes()
+        store.upsert_node_snapshot("US", BUFFETS, PERIOD, {"avg_price": 450.0,
+                                                           "total_revenue": 1_000.0},
+                                   completeness=0.1, missing=[])
+        payload = render.build_overview("US", PERIOD, "zh")
+        self.assertEqual(payload["price_fit"], [])
+        row = next(r for r in payload["board"] if r["node_key"] == BUFFETS)
+        # Still scored, because a factor that zeroes for everyone deletes its weight.
+        self.assertGreater(row["score_breakdown"]["aov_fit"], 0)
+
+    def test_listings_outrank_the_vendor_bands_when_there_are_enough(self) -> None:
+        """The vendor returns three or four bands and its top one is a property of
+        its binning, not of the market."""
+        store.upsert_products([{"marketplace": "US", "asin": f"BP{i}", "brand": "Demo",
+                                "title": f"Listing {i}"} for i in range(40)])
+        store.upsert_product_metrics([
+            {"marketplace": "US", "asin": f"BP{i}", "period": PERIOD,
+             "node_id_path": BUFFETS, "price": 800.0, "revenue": 500_000.0,
+             "source_tool": "product_research"} for i in range(40)])
+        curve = panels.price_curve("US", PERIOD)
+        prices = [round(price) for price, _fit in curve]
+        self.assertNotEqual(prices, [75, 125], "still reading the vendor bands")
+        self.assertIn(800, prices)
 
 
 class ElementNamingTests(RenderTestCase):

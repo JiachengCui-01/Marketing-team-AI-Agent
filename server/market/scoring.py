@@ -7,9 +7,10 @@ anyway. Three reasons, each learned from the v1 implementation:
 * The board is a **ranking**. A model re-reading the same payload transcribes
   slightly differently every run, and rank churn from an LLM re-read is
   indistinguishable from a real market move.
-* ``aov_fit`` encodes this company's freight economics — a $120 sideboard cannot
-  absorb LTL plus a return. That is a constant, not an inference, and a prompt
-  invites it to be argued away.
+* ``aov_fit`` is read off the department's own revenue-by-price-band histogram
+  rather than from a curve somebody wrote down. Which price a category sells at
+  is a fact about the market, and the market publishes it every month; asserting
+  it as a constant meant the board could not notice the shelf moving.
 * v1 recomputed the score from the model's own formatted strings
   (``_number("$638,074")``), so one transcription slip silently became a score.
   Reading ``REAL`` columns deletes that whole class of bug.
@@ -20,9 +21,10 @@ with no data above one with bad data. Coverage is reported separately as
 """
 from __future__ import annotations
 
-from typing import Any, Sequence
+import re
+from typing import Any, Mapping, Sequence
 
-FORMULA_VERSION = 2
+FORMULA_VERSION = 3
 
 CATEGORY_WEIGHTS: dict[str, float] = {
     "demand_scale": 10,
@@ -51,10 +53,6 @@ _DEMAND_SCALE = ((0.0, 0.0), (200_000.0, 25.0), (1_000_000.0, 60.0),
                  (3_000_000.0, 85.0), (10_000_000.0, 100.0))
 _DEMAND_GROWTH = ((-40.0, 0.0), (-10.0, 20.0), (0.0, 40.0), (10.0, 65.0),
                   (25.0, 85.0), (50.0, 100.0))
-# Freight economics, not taste: below ~$200 LTL and a return eat the margin; above
-# ~$1,400 the purchase turns into a showroom decision this brand does not serve.
-_AOV_FIT = ((0.0, 0.0), (120.0, 10.0), (200.0, 45.0), (300.0, 80.0), (450.0, 100.0),
-            (900.0, 100.0), (1_400.0, 70.0), (2_500.0, 35.0), (4_000.0, 10.0))
 # Top-5 brand revenue share, as a percentage. The curve inverts it: low share is
 # an opening, high share is a wall.
 _CONCENTRATION = ((10.0, 100.0), (25.0, 85.0), (40.0, 60.0), (55.0, 35.0),
@@ -80,6 +78,136 @@ _QUALITY_FIT = ((0.0, 0.0), (3.5, 20.0), (3.8, 65.0), (4.2, 100.0), (4.5, 85.0),
                 (5.0, 60.0))
 _BSR_TREND = ((-60.0, 100.0), (-20.0, 80.0), (0.0, 50.0), (20.0, 25.0), (60.0, 0.0))
 _PAIN_HEADROOM = ((0.0, 0.0), (2.0, 15.0), (5.0, 45.0), (10.0, 75.0), (18.0, 100.0))
+
+
+# ------------------------------------------------------------- price model ----
+# ``aov_fit`` used to be a constant: a curve peaking around $300-900, written to
+# encode this company's freight economics. It was defended in this module's
+# docstring as "a constant, not an inference", and that defence was half right —
+# the freight floor is a fact about the business, but *where the money sits* is a
+# fact about the market, and the constant was asserting both.
+#
+# Now the shape comes from the department's own revenue-by-price-band histogram:
+# the bands the peer categories actually take their money in. A category priced
+# where the department's revenue concentrates scores high; one priced out at a
+# tail scores low, whether that tail is cheap or expensive.
+
+# What the shipped curve says, kept for exactly one purpose: scoring before any
+# price distribution has been collected. A board that scored every category zero
+# on price for its first month would rank on noise.
+_AOV_FALLBACK = ((0.0, 0.0), (120.0, 10.0), (200.0, 45.0), (300.0, 80.0),
+                 (450.0, 100.0), (900.0, 100.0), (1_400.0, 70.0), (2_500.0, 35.0),
+                 (4_000.0, 10.0))
+
+_BAND_RANGE = re.compile(r"(\d+(?:\.\d+)?)\s*[-–~]\s*(\d+(?:\.\d+)?)")
+_BAND_OPEN = re.compile(r"(?:>|≥|over|above)?\s*(\d+(?:\.\d+)?)\s*\+?$")
+
+
+def band_bounds(label: str) -> tuple[float, float] | None:
+    """``"150-200"`` → ``(150, 200)``; ``"1000+"`` → ``(1000, 2000)``.
+
+    An open-ended top band is given a finite width so it has a midpoint like
+    every other band. Doubling is arbitrary but bounded, and the alternative —
+    dropping the band — throws away the one that usually holds the premium
+    revenue this business cares most about.
+    """
+    text = str(label or "").replace("$", "").replace(",", "").strip().lower()
+    if not text:
+        return None
+    match = _BAND_RANGE.search(text)
+    if match:
+        low, high = float(match.group(1)), float(match.group(2))
+        return (low, high) if high > low else None
+    match = _BAND_OPEN.search(text)
+    if match:
+        low = float(match.group(1))
+        return low, low * 2.0
+    return None
+
+
+# Listings, not vendor bins, are the preferred input. The vendor returns three
+# or four price bands per node and its top band is a property of its binning, not
+# of the market — treating "no band above $200" as "nobody buys above $200" would
+# be the same kind of assertion this change exists to remove. Real listings carry
+# their own prices and cover the range the department actually sells in.
+MIN_PRICE_ROWS = 20
+PRICE_BINS = 8
+
+
+def price_model_from_listings(
+    products: Sequence[Mapping[str, Any]],
+) -> tuple[tuple[float, float], ...] | None:
+    """A price → 0-100 curve from the department's own listings.
+
+    Equal-count bins: every bin holds the same number of listings, so the
+    differences between them are purely about where the revenue is, not about how
+    wide somebody drew the bucket. The bin's median price is its x, its summed
+    revenue is its y, and the whole curve is normalised so the fattest bin is 100.
+
+    ``None`` when there are too few priced listings to bin — the caller falls
+    back rather than scoring a whole board off nine products.
+    """
+    pairs = sorted(
+        (price, revenue)
+        for price, revenue in ((_num(p.get("price")), _num(p.get("revenue")))
+                               for p in products)
+        if price and price > 0 and revenue and revenue > 0)
+    if len(pairs) < MIN_PRICE_ROWS:
+        return None
+    size = max(2, len(pairs) // PRICE_BINS)
+    points: list[tuple[float, float]] = []
+    for start in range(0, len(pairs), size):
+        chunk = pairs[start:start + size]
+        if len(chunk) < 2:
+            # Fold a stray tail into the bin before it rather than let two
+            # listings define their own price band.
+            break
+        prices = [price for price, _revenue in chunk]
+        points.append((_median(prices) or prices[0],
+                       sum(revenue for _price, revenue in chunk)))
+    if len(points) < 2:
+        return None
+    peak = max(value for _mid, value in points)
+    if peak <= 0:
+        return None
+    return tuple((mid, value / peak * 100.0) for mid, value in points)
+
+
+def price_model(bands: Sequence[Mapping[str, Any]]) -> tuple[tuple[float, float], ...]:
+    """The same curve from the vendor's price bands, for when listings are thin.
+
+    Points are (band midpoint, revenue normalised so the fattest band is 100).
+    ``piecewise`` interpolates between them and holds flat outside — which is the
+    honest behaviour here precisely because the band list is truncated: the
+    absence of a band above the top one is the absence of a *bucket*, not
+    evidence that nobody buys there.
+
+    Returns the shipped fallback when the bands carry no revenue — not an empty
+    curve, because a factor that scores zero for every category would silently
+    delete its own weight from the ranking.
+    """
+    points: list[tuple[float, float]] = []
+    for band in bands:
+        bounds = band_bounds(band.get("bucket_key") or band.get("label"))
+        revenue = _num(band.get("revenue"))
+        if bounds is None or revenue is None or revenue <= 0:
+            continue
+        points.append(((bounds[0] + bounds[1]) / 2.0, revenue))
+    if len(points) < 2:
+        return _AOV_FALLBACK
+    peak = max(value for _mid, value in points)
+    if peak <= 0:
+        return _AOV_FALLBACK
+    points.sort(key=lambda p: p[0])
+    return tuple((mid, value / peak * 100.0) for mid, value in points)
+
+
+def price_curve_rows(curve: Sequence[tuple[float, float]]) -> list[dict]:
+    """The curve as rows a panel can show. Empty while the fallback is in use, so
+    the UI shows nothing rather than presenting a shipped constant as a reading."""
+    if tuple(curve) == _AOV_FALLBACK:
+        return []
+    return [{"price": round(mid), "fit": round(value, 1)} for mid, value in curve]
 
 
 def clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
@@ -208,9 +336,16 @@ def _assemble(
 
 def score_category(
     snapshot: dict, *, history: Sequence[dict] = (), keywords: Sequence[dict] = (),
+    aov_curve: Sequence[tuple[float, float]] | None = None,
 ) -> dict:
-    """Score one category-month from its stored facts."""
+    """Score one category-month from its stored facts.
+
+    ``aov_curve`` comes from :func:`price_model` over the department's price
+    bands. Defaulted rather than required so a caller with no distribution — a
+    test, a cold warehouse — still scores something explainable.
+    """
     snapshot = snapshot or {}
+    curve = tuple(aov_curve) if aov_curve else _AOV_FALLBACK
     concentration = _num(snapshot.get("top5_brand_crn"))
     entrenchment = _num(snapshot.get("hl_avg_ratings")) or _num(snapshot.get("avg_ratings"))
     sdr = _median([_num(k.get("supply_demand_ratio")) for k in keywords]) if keywords else None
@@ -219,7 +354,7 @@ def score_category(
         "demand_scale": piecewise(_num(snapshot.get("total_revenue")), _DEMAND_SCALE),
         "demand_growth": piecewise(growth_pct(history), _DEMAND_GROWTH)
                          if growth_pct(history) is not None else None,
-        "aov_fit": piecewise(_num(snapshot.get("avg_price")), _AOV_FIT)
+        "aov_fit": piecewise(_num(snapshot.get("avg_price")), curve)
                    if _num(snapshot.get("avg_price")) is not None else None,
         # Stored as a fraction; the curve is written in percentage points.
         "concentration": piecewise(concentration * 100.0, _CONCENTRATION)
@@ -240,10 +375,12 @@ def score_category(
 def score_product(
     metrics: dict, *, snapshot: dict | None = None, history: Sequence[dict] = (),
     keywords: Sequence[dict] = (), pain: Sequence[dict] = (),
+    aov_curve: Sequence[tuple[float, float]] | None = None,
 ) -> dict:
     """Score one product opportunity anchored on a real ASIN."""
     metrics = metrics or {}
     snapshot = snapshot or {}
+    curve = tuple(aov_curve) if aov_curve else _AOV_FALLBACK
 
     units = _num(metrics.get("units"))
     revenue = _num(metrics.get("revenue"))
@@ -274,7 +411,7 @@ def score_product(
     points = {
         "demand": demand,
         "growth": growth,
-        "aov_fit": piecewise(_num(metrics.get("price")), _AOV_FIT)
+        "aov_fit": piecewise(_num(metrics.get("price")), curve)
                    if _num(metrics.get("price")) is not None else None,
         "competition": competition,
         "quality_fit": piecewise(_num(metrics.get("rating")), _QUALITY_FIT)

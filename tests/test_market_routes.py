@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from marketing_agent.tools.mcp_client import McpUnavailable
 from server import db, routes
 from server.main import app
-from server.market import gateway, jobs, prd, store, taxonomy
+from server.market import gateway, jobs, prd, scoring, store, taxonomy
 from tests.test_market_render import BUFFETS, PERIOD, FakeClient, seed_warehouse
 
 
@@ -48,7 +48,8 @@ class MarketRouteTests(unittest.TestCase):
     def test_config_ships_nodes_and_weights(self) -> None:
         body = self.client.get("/api/market/config", headers=self.headers).json()
         self.assertTrue(any(n["node_key"] == BUFFETS for n in body["nodes"]))
-        self.assertEqual(body["score_model"]["version"], "v2")
+        self.assertEqual(body["score_model"]["version"],
+                         f"v{scoring.FORMULA_VERSION}")
 
     def test_config_no_longer_ships_a_view_switch(self) -> None:
         """Both surfaces show every section; nothing is gated by role."""
