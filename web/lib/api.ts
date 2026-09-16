@@ -1727,7 +1727,13 @@ export type MarketKpi = {
   label: string;
   value: string;
   hint?: string;
+  /** The vendor modelled this figure (every money number) rather than reading it. */
   estimated?: boolean;
+  /** Read off the listing or the category page. Marked explicitly so an unmarked
+   *  tile is a bug rather than an unstated claim. */
+  observed?: boolean;
+  /** This server's own arithmetic — a score, a signal count. Not a market fact. */
+  computed?: boolean;
 };
 
 /** One line of the server's written read of a board row. `read` and `facts` are

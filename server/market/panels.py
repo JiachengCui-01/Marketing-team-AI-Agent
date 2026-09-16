@@ -74,8 +74,25 @@ def money(value: Any) -> str:
     return f"${number:,.0f}"
 
 
-def tile(label: str, value: str, hint: str = "", estimated: bool = False) -> dict:
-    return {"label": label, "value": value, "hint": hint, "estimated": estimated}
+def tile(label: str, value: str, hint: str = "", estimated: bool = False,
+         observed: bool = False, computed: bool = False) -> dict:
+    """One KPI, and where its number came from.
+
+    Three sources, all marked, because an unmarked tile used to mean any of them
+    and a reader cannot tell those apart:
+
+    * ``observed`` — read off the listing or the category page. A price, a rating,
+      a listing count.
+    * ``estimated`` — the vendor's model. Every money figure is one: Amazon
+      publishes category units and revenue to nobody, so SellerSprite infers them
+      from BSR, and a finished month does not change that.
+    * ``computed`` — our own arithmetic. A score, a signal count. Not a market
+      fact at all, which is worth saying before it gets read as one.
+    """
+    return {"label": label, "value": value, "hint": hint,
+            "estimated": estimated,
+            "observed": observed and not estimated,
+            "computed": computed and not (estimated or observed)}
 
 
 def filled(tiles: Sequence[dict]) -> list[dict]:
@@ -711,18 +728,25 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
         _coverage_tile(coverage_stats, zh),
         tile("追踪子类目" if zh else "Tracked sub-categories", str(len(board)),
              ("家具 / 户外 / 办公 三个部门，按月遍历自动纳入" if zh
-              else "furniture, patio and office, enrolled by the monthly walk")),
+              else "furniture, patio and office, enrolled by the monthly walk"),
+             observed=True),
         tile("类目均价中位" if zh else "Median category price",
-             money(scoring._median([r["median_price"] for r in board]))),
+             money(scoring._median([r["median_price"] for r in board])),
+             ("售价是挂牌实测值，不经建模" if zh
+              else "price is read off the listing, not modelled"),
+             observed=True),
         tile("最佳机会类目" if zh else "Top opportunity",
              board[0]["label"] if board else "—",
-             f"{board[0]['category_score']}/100" if board else ""),
+             f"{board[0]['category_score']}/100" if board else "",
+             computed=True),
         tile("高价值机会信号" if zh else "High-value openings",
              str(watch["counts"]["opportunity_high"]),
-             f"{watch['counts']['opportunity_total']} " + ("条机会" if zh else "openings")),
+             f"{watch['counts']['opportunity_total']} " + ("条机会" if zh else "openings"),
+             computed=True),
         tile("高风险信号" if zh else "High-severity risks",
              str(watch["counts"]["risk_high"]),
-             f"{watch['counts']['risk_total']} " + ("条风险" if zh else "risks")),
+             f"{watch['counts']['risk_total']} " + ("条风险" if zh else "risks"),
+             computed=True),
         _return_risk_tile(board, zh),
     ]
 
@@ -818,8 +842,13 @@ def _revenue_tile(stats: Mapping[str, Any], head_revenue: float | None,
                     estimated=True)
     return tile("追踪类目月销售额" if zh else "Tracked-category revenue",
                 money(covered),
-                ("已采集 ASIN 逐条求和，非厂商头部口径" if zh
-                 else "summed from the collected ASIN rows, not the vendor head total"),
+                # Why it is modelled, not whether the month has finished. A closed
+                # month does not turn a BSR inference into a measurement.
+                ("逐条 ASIN 求和。销量与销售额由厂商按 BSR 推算 —— "
+                 "亚马逊不向任何人公开类目销售额，月份结不结束都一样" if zh
+                 else "summed row by row. Units and revenue are the vendor's model "
+                      "over BSR — Amazon publishes category revenue to nobody, "
+                      "closed month or not"),
                 estimated=True)
 
 
@@ -851,7 +880,8 @@ def _coverage_tile(stats: Mapping[str, Any], zh: bool) -> dict:
         hint = (f"触及页数上限，最深类目边际页仍贡献 {tail:.1f}%" if zh
                 else f"hit the page cap; the deepest category's last page still "
                      f"added {tail:.1f}%")
-    return tile("已采集 listing" if zh else "Listings summed", f"{asins:,}", hint)
+    return tile("已采集 listing" if zh else "Listings summed", f"{asins:,}", hint,
+                observed=True)
 
 
 def _return_risk_tile(board: Sequence[dict], zh: bool) -> dict:
@@ -873,11 +903,13 @@ def _return_risk_tile(board: Sequence[dict], zh: bool) -> dict:
         return tile("退货率高于同级的类目" if zh else "Above-average return risk",
                     str(len(worse)),
                     (f"{len(known)} 个类目全部已取到退货率" if zh
-                     else f"all {len(known)} categories have a known rate"))
+                     else f"all {len(known)} categories have a known rate"),
+                    observed=True)
     return tile("退货率高于同级的类目" if zh else "Above-average return risk",
                 f"{len(worse)} / {len(known)}",
                 (f"仅 {len(known)}/{len(board)} 个类目取到退货率" if zh
-                 else f"only {len(known)} of {len(board)} have a known rate"))
+                 else f"only {len(known)} of {len(board)} have a known rate"),
+                observed=True)
 
 
 def _department_trend(histories: Mapping[str, Sequence[dict]],
@@ -1222,11 +1254,13 @@ def _category_kpis(snap: Mapping[str, Any], zh: bool) -> list[dict]:
     return [
         tile("类目月销售额" if zh else "Category revenue",
              money(snap.get("total_revenue")),
-             ("厂商按头部约 100 个链接建模估算" if zh
-              else "vendor model over its ~100 head listings"),
+             ("厂商按 BSR 推算，且只覆盖它分析的约 100 个头部链接" if zh
+              else "the vendor's BSR model, over the ~100 head listings it analyses"),
              estimated=True),
         tile("均价" if zh else "Average price", money(snap.get("avg_price")),
-             "新品定价的锚" if zh else "the anchor a new product prices against"),
+             "新品定价的锚，挂牌实测值" if zh
+             else "the anchor a new product prices against; read off the listing",
+             observed=True),
         tile("平均重量 / 体积" if zh else "Average weight / volume",
              f"{round(scoring._num(snap.get('avg_weight')), 1)} lb / "
              f"{int(scoring._num(snap.get('avg_volume'))):,} in³"
@@ -1234,33 +1268,44 @@ def _category_kpis(snap: Mapping[str, Any], zh: bool) -> list[dict]:
              and scoring._num(snap.get("avg_volume")) is not None
              else (f"{round(scoring._num(snap.get('avg_weight')), 1)} lb"
                    if scoring._num(snap.get("avg_weight")) is not None else "—"),
-             "运费档与破损率的上游" if zh else "upstream of freight tier and damage rate"),
+             "运费档与破损率的上游" if zh else "upstream of freight tier and damage rate",
+             observed=True),
         tile("退货率 / 同级均值" if zh else "Return rate vs peers",
              f"{pct(snap.get('return_ratio'))}% / {pct(snap.get('return_ratio_avg'))}%"
              if snap.get("return_ratio") is not None else "—",
              "一次货运退货吃掉整单毛利" if zh
-             else "one freight return costs more than the order's margin"),
+             else "one freight return costs more than the order's margin",
+             observed=True),
         tile("类目均分" if zh else "Average rating",
              f"{snap.get('avg_rating')}★" if snap.get("avg_rating") is not None else "—",
              f"{'头部评论数' if zh else 'head reviews'} {int(snap['hl_avg_ratings'])}"
-             if scoring._num(snap.get("hl_avg_ratings")) else ""),
+             if scoring._num(snap.get("hl_avg_ratings")) else "",
+             observed=True),
         tile("在售 / 卖家 / 品牌" if zh else "Listings / sellers / brands",
              " / ".join(str(int(v)) if v is not None else "—"
                         for v in (scoring._num(snap.get("total_products")),
                                   scoring._num(snap.get("sellers")),
                                   scoring._num(snap.get("brands"))))
              if any(snap.get(k) is not None
-                    for k in ("total_products", "sellers", "brands")) else "—"),
+                    for k in ("total_products", "sellers", "brands")) else "—",
+             observed=True),
         tile("Top5 品牌集中度" if zh else "Top-5 brand share",
              f"{pct(snap.get('top5_brand_crn'))}%"
-             if snap.get("top5_brand_crn") is not None else "—"),
+             if snap.get("top5_brand_crn") is not None else "—",
+             ("按销售额算，所以继承销售额的建模口径" if zh
+              else "computed on revenue, so it inherits the revenue model"),
+             estimated=True),
         tile("近 12 月新品占销额" if zh else "New-entrant revenue share",
              f"{round(new_share, 1)}%" if new_share is not None else "—",
+             ("新品数 × 新品均销额 ÷ 类目销额，三项都来自厂商的销量模型" if zh
+              else "new count x new average revenue over category revenue; all "
+                   "three come from the vendor's volume model"),
              estimated=True),
         tile("FBA / 亚马逊自营" if zh else "FBA / Amazon-self",
              f"{pct(snap.get('fba_proportion')) or '—'}% / "
              f"{pct(snap.get('amazon_self_proportion')) or '—'}%"
-             if snap.get("fba_proportion") is not None else "—"),
+             if snap.get("fba_proportion") is not None else "—",
+             observed=True),
     ]
 
 

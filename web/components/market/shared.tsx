@@ -96,8 +96,18 @@ export function KpiRow({ kpis, columns = 5 }: { kpis: MarketKpi[]; columns?: 4 |
         <div key={kpi.label} className="bi-tile">
           <div className="flex items-center gap-1">
             <span className="bi-tile-label">{kpi.label}</span>
+            {/* Both sides are marked. An unmarked tile used to mean either "this
+                is measured" or "nobody labelled it", and on a board with one
+                modelled figure among seven measured ones that ambiguity made the
+                single chip read as a page-wide hedge. */}
             {kpi.estimated ? (
-              <span className="bi-chip bi-chip-estimated">{t.evEstimated}</span>
+              <span className="bi-chip bi-chip-estimated" title={t.kpiModelledWhy}>
+                {t.kpiModelled}
+              </span>
+            ) : kpi.observed ? (
+              <span className="bi-chip bi-chip-observed">{t.evObserved}</span>
+            ) : kpi.computed ? (
+              <span className="bi-chip" title={t.kpiComputedWhy}>{t.kpiComputed}</span>
             ) : null}
           </div>
           <div className="bi-tile-value">{kpi.value}</div>

@@ -416,6 +416,48 @@ class HeadlineTileTests(RenderTestCase):
         payload = render.build_overview("US", PERIOD, "zh")
         self.assertEqual(payload["coverage"]["total"], len(panels.COVERAGE_FAMILIES))
 
+    def test_every_tile_says_where_its_number_came_from(self) -> None:
+        """An unmarked tile used to mean any of three things — measured, modelled,
+        or computed here — and a reader cannot tell those apart. One chip on a
+        board of seven silent tiles then reads as a page-wide hedge."""
+        for surface, kpis in (
+            ("overview", render.build_overview("US", PERIOD, "zh")["headline"]["kpis"]),
+            ("category", render.build_category("US", BUFFETS, PERIOD, "zh")
+             ["header"]["kpis"]),
+        ):
+            for tile in kpis:
+                with self.subTest(surface, label=tile["label"]):
+                    self.assertTrue(
+                        tile["estimated"] or tile["observed"] or tile["computed"],
+                        f"{tile['label']} carries no source")
+
+    def test_a_tile_is_never_two_sources_at_once(self) -> None:
+        for tile in render.build_overview("US", PERIOD, "zh")["headline"]["kpis"]:
+            with self.subTest(label=tile["label"]):
+                marks = sum(bool(tile[k]) for k in ("estimated", "observed", "computed"))
+                self.assertEqual(marks, 1)
+
+    def test_revenue_stays_modelled_on_a_closed_month(self) -> None:
+        """A finished month does not turn a BSR inference into a measurement, and
+        the hint has to say so or the chip reads as a complaint about freshness."""
+        tile = self.tiles()["追踪类目月销售额"]
+        self.assertTrue(tile["estimated"])
+        self.assertIn("BSR", tile["hint"])
+        self.assertIn("亚马逊不向任何人公开", tile["hint"])
+
+    def test_the_measured_figures_are_marked_measured(self) -> None:
+        """Price, listing counts and return rates are read, not inferred — and
+        saying so is what stops the one modelled figure looking like the rule."""
+        tiles = self.tiles()
+        self.assertTrue(tiles["类目均价中位"]["observed"])
+        self.assertTrue(tiles["已采集 listing"]["observed"])
+        self.assertTrue(tiles["退货率高于同级的类目"]["observed"])
+
+    def test_our_own_arithmetic_is_not_dressed_as_a_market_fact(self) -> None:
+        tiles = self.tiles()
+        self.assertTrue(tiles["最佳机会类目"]["computed"])
+        self.assertTrue(tiles["高风险信号"]["computed"])
+
     def test_coverage_states_depth_not_a_count_over_a_count(self) -> None:
         """`2,016 / 505,758` compared listings read against listings reported, under
         a title about revenue. Two counts, and neither is a revenue denominator."""
