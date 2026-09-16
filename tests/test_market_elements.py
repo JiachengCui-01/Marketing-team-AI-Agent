@@ -263,6 +263,16 @@ class BriefTests(unittest.TestCase):
         self.assertIn("fluted | 3 | 21.0% | 17,000", text)
         self.assertIn("never evaluate", text)
 
+    def test_the_naming_brief_states_the_kind_rules(self) -> None:
+        """They lived in the tool schema alone once, and the first production run
+        put every colour under `style` and left `craft` empty."""
+        text = elements.naming_brief([
+            {"term": "burl", "asins": 4, "revenue_share_pct": 3.0, "searches": 9_000}])
+        for kind in elements.KINDS:
+            self.assertIn(kind, text)
+        self.assertIn("fluted", text)
+        self.assertIn("never `style`", text)
+
 
 class StepPeriodTests(unittest.TestCase):
     def test_stepping_back_over_a_year_boundary(self) -> None:

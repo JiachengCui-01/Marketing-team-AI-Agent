@@ -351,7 +351,7 @@ export type ElementScale = {
   max_searches: number;
 };
 
-/** What to draw, and whether the shelf has already answered.
+/** One attribute, full width: the elements that are alternatives to each other.
  *
  * The board says which category to work in. This says what the product should
  * look like, which is the question a design review actually opens with. Both
@@ -359,10 +359,15 @@ export type ElementScale = {
  * the listings that hold the revenue, y from the search phrases that carry the
  * element.
  *
- * The cell that matters is top-left — demand rising, shelf thin. Top-right is
- * real but crowded, bottom-right is what to stop proposing. Those are the
- * sentences, so they are printed on the chart rather than left to be inferred
- * from a dot's position.
+ * A row rather than a tile. Sizes, materials, finishes and surface treatments
+ * each get the full width, because the comparison that matters is between the
+ * dots inside one row — and a three-across grid was spending most of its pixels
+ * making nine of those comparisons possible at once, which is a thing nobody
+ * does.
+ *
+ * The cell that matters is top-left: demand rising, shelf thin. It is tinted in
+ * every row; the four corner names are printed once, by the panel set, rather
+ * than redrawn over the dots they are meant to explain.
  */
 export function ElementMatrix({
   points,
@@ -372,7 +377,6 @@ export function ElementMatrix({
   windowNote,
   sizeNote,
   scale,
-  compact = false,
 }: {
   points: ElementPoint[];
   /** Clockwise from top-left: rising+thin, rising+proven, cooling+heavy, cooling+thin. */
@@ -382,19 +386,22 @@ export function ElementMatrix({
   /** Names the window y was measured over — a month and a year are not the same claim. */
   windowNote: string;
   sizeNote: string;
-  /** Bounds to draw against. Omitted, the panel scales to its own points —
-   *  right for a lone chart, wrong for one panel of a set. */
+  /** Bounds to draw against. Omitted, the row scales to its own points — right
+   *  for a lone chart, wrong for one row of a set. */
   scale?: ElementScale;
-  /** Small-multiple sizing: one attribute per panel, several panels a row. */
-  compact?: boolean;
 }) {
-  if (points.length < (compact ? 1 : 2)) return null;
-  const width = compact ? 330 : 680;
-  const height = compact ? 210 : 300;
-  const padL = compact ? 32 : 46;
-  const padR = compact ? 10 : 16;
-  const padT = compact ? 16 : 20;
-  const padB = compact ? 28 : 40;
+  if (!points.length) return null;
+  // Wide and short. The aspect ratio is the row's height control: the drawing
+  // scales to the column it is in, so 5:1 is what keeps a full-width row about
+  // 190px tall instead of 280 — seven rows of which is a scroll, not a chart.
+  // The absolute numbers are chosen so that scaling lands near 1:1 on a desktop
+  // panel and the 9px type stays the size it was designed at.
+  const width = 1000;
+  const height = 190;
+  const padL = 46;
+  const padR = 20;
+  const padT = 20;
+  const padB = 28;
 
   const shelves = points.map((p) => p.shelf_pct);
   const growths = points.map((p) => p.growth_pct);
@@ -403,8 +410,8 @@ export function ElementMatrix({
   const yMax = scale ? scale.y_max : Math.max(10, ...growths) * 1.1;
   // The x reference is the median, not an arbitrary round number: "more shelf
   // presence than half the elements we track" is a claim the data supports.
-  // Across a set of panels it is the department's median, so the line sits in
-  // the same place in every one of them and the panels can be read as a row.
+  // Across a set of rows it is the department's median, so the line sits in the
+  // same place in every one of them and the rows can be read as a column.
   const sorted = [...shelves].sort((a, b) => a - b);
   const xMid = scale ? scale.x_mid : sorted[Math.floor(sorted.length / 2)];
   const maxSearches = scale
@@ -421,100 +428,81 @@ export function ElementMatrix({
   const placed: { x: number; y: number }[] = [];
 
   return (
-    <div>
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full" style={{ height }}
-           role="img"
-           aria-label={points.map((p) =>
-             `${p.label}: ${xLabel} ${p.shelf_pct.toFixed(1)}%, `
-             + `${yLabel} ${p.growth_pct.toFixed(1)}%`).join("; ")}>
-        <line className="bi-axis-solid" x1={padL} x2={width - padR} y1={py(0)} y2={py(0)} />
-        <line className="bi-axis-solid" x1={px(xMid)} x2={px(xMid)}
-              y1={padT} y2={height - padB} />
+    // No fixed pixel height: with a viewBox and a full-width box the drawing
+    // scales to the column it sits in, which is what makes the row big on a wide
+    // screen instead of a 900px island floating in the middle of one.
+    <svg viewBox={`0 0 ${width} ${height}`} className="w-full"
+         role="img"
+         aria-label={points.map((p) =>
+           `${p.label}: ${xLabel} ${p.shelf_pct.toFixed(1)}%, `
+           + `${yLabel} ${p.growth_pct.toFixed(1)}%`).join("; ")}>
+      {/* The two corners that carry a decision, tinted instead of captioned. A
+          tint survives being repeated down a column of rows; four captions a
+          row do not. */}
+      <rect className="bi-quadrant-open" x={padL} y={padT}
+            width={Math.max(0, px(xMid) - padL)} height={Math.max(0, py(0) - padT)} />
+      <rect className="bi-quadrant-risk" x={px(xMid)} y={py(0)}
+            width={Math.max(0, width - padR - px(xMid))}
+            height={Math.max(0, height - padB - py(0))} />
 
-        <text className="bi-axis-tick" x={padL - 5} y={py(0) + 3} textAnchor="end">0%</text>
-        <text className="bi-axis-tick" x={padL - 5} y={padT + 8} textAnchor="end">
-          {yMax.toFixed(0)}%
-        </text>
-        <text className="bi-axis-tick" x={padL - 5} y={height - padB} textAnchor="end">
-          {yMin.toFixed(0)}%
-        </text>
-        <text className="bi-axis-tick" x={px(xMid)} y={height - padB + 13} textAnchor="middle">
-          {xMid.toFixed(0)}%
-        </text>
-        <text className="bi-axis-tick" x={padL} y={height - padB + 13} textAnchor="start">0</text>
-        <text className="bi-axis-tick" x={width - padR} y={height - padB + 13} textAnchor="end">
-          {compact ? `${xMax.toFixed(0)}%` : `${xMax.toFixed(0)}% · ${xLabel}`}
-        </text>
-        {/* Named once per panel set rather than once per panel: the axes are
-            shared, so repeating their names is noise the dots have to pay for. */}
-        {!compact ? (
-          <text className="bi-axis-tick" x={padL - 5} y={padT - 8} textAnchor="end">
-            {yLabel}
-          </text>
-        ) : null}
+      {/* Zero growth is a fact about the market; the median is a fact about our
+          own tracking list, so it is the dashed one. */}
+      <line className="bi-axis-solid" x1={padL} x2={width - padR} y1={py(0)} y2={py(0)} />
+      <line className="bi-axis-dashed" x1={px(xMid)} x2={px(xMid)}
+            y1={padT} y2={height - padB} />
 
-        {/* Corner names belong on a lone chart. Repeated across nine small
-            panels they say the same four things nine times and collide with the
-            dots they are meant to explain, so the panel set prints them once in
-            its legend instead. */}
-        {!compact ? (
-          <>
-            <text className="bi-quadrant-name" x={padL + 3} y={padT + 10}
-                  textAnchor="start">{quadrants[0]}</text>
-            <text className="bi-quadrant-name" x={width - padR - 3} y={padT + 10}
-                  textAnchor="end">{quadrants[1]}</text>
-            <text className="bi-quadrant-name" x={width - padR - 3} y={height - padB - 5}
-                  textAnchor="end">{quadrants[2]}</text>
-            <text className="bi-quadrant-name" x={padL + 3} y={height - padB - 5}
-                  textAnchor="start">{quadrants[3]}</text>
-          </>
-        ) : null}
+      <text className="bi-axis-tick" x={padL - 6} y={py(0) + 3} textAnchor="end">0%</text>
+      <text className="bi-axis-tick" x={padL - 6} y={padT + 4} textAnchor="end">
+        {yMax.toFixed(0)}%
+      </text>
+      <text className="bi-axis-tick" x={padL - 6} y={height - padB} textAnchor="end">
+        {yMin.toFixed(0)}%
+      </text>
+      <text className="bi-axis-tick" x={px(xMid)} y={height - padB + 13} textAnchor="middle">
+        {xMid.toFixed(0)}%
+      </text>
+      <text className="bi-axis-tick" x={padL} y={height - padB + 13} textAnchor="start">0</text>
+      <text className="bi-axis-tick" x={width - padR} y={height - padB + 13} textAnchor="end">
+        {xMax.toFixed(0)}%
+      </text>
 
-        {ordered.map((point) => {
-          const r = (compact ? 3.5 : 5)
-            + Math.sqrt(point.searches / maxSearches) * (compact ? 7 : 10);
-          const cx = px(point.shelf_pct);
-          const cy = py(point.growth_pct);
-          const rising = point.growth_pct >= 0;
-          // Drop a label rather than stack it: two names on top of each other is
-          // worse than one name and a dot you can hover.
-          const clash = placed.some(
-            (seat) => Math.abs(seat.x - cx) < (compact ? 44 : 58)
-              && Math.abs(seat.y - cy) < 13);
-          if (!clash) placed.push({ x: cx, y: cy });
-          return (
-            <g key={point.key}>
-              {/* The hit target is bigger than the mark; an 8px dot is not a button. */}
-              <circle cx={cx} cy={cy} r={Math.max(15, r + 8)} fill="transparent" />
-              <circle className={rising ? "bi-dot" : "bi-dot bi-dot-risk"}
-                      cx={cx} cy={cy} r={r}>
-                <title>
-                  {`${point.label}（${point.kind_label}） · ${yLabel} `
-                    + `${point.growth_pct >= 0 ? "+" : ""}${point.growth_pct.toFixed(1)}% · `
-                    + `${xLabel} ${point.shelf_pct.toFixed(1)}% · ${point.asins} ASIN · `
-                    + `${point.searches.toLocaleString()} `
-                    + (point.avg_price != null ? `· ${fmtMoney(point.avg_price)}` : "")}
-                </title>
-              </circle>
-              {!clash ? (
-                <text className="bi-quadrant-label" x={cx} y={cy - r - 5} textAnchor="middle">
-                  {truncate(point.label, compact ? 9 : 10)}
-                </text>
-              ) : null}
-            </g>
-          );
-        })}
-      </svg>
-      {/* In a set of panels these two notes are true of every panel, so the
-          wrapper prints them once instead of nine times. */}
-      {!compact ? (
-        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]
-                        text-fg-subtle">
-          <span>{windowNote}</span>
-          <span>{sizeNote}</span>
-        </div>
-      ) : null}
-    </div>
+      {ordered.map((point) => {
+        const r = 4 + Math.sqrt(point.searches / maxSearches) * 11;
+        const cx = px(point.shelf_pct);
+        const cy = py(point.growth_pct);
+        const rising = point.growth_pct >= 0;
+        // Drop a label rather than stack it: two names on top of each other is
+        // worse than one name and a dot you can hover.
+        const clash = placed.some(
+          (seat) => Math.abs(seat.x - cx) < 56 && Math.abs(seat.y - cy) < 13);
+        if (!clash) placed.push({ x: cx, y: cy });
+        return (
+          <g key={point.key}>
+            {/* The hit target is bigger than the mark; an 8px dot is not a button. */}
+            <circle cx={cx} cy={cy} r={Math.max(15, r + 8)} fill="transparent" />
+            {/* Disc for the volume, core for the position. Overlapping discs stay
+                countable because their cores do not merge. */}
+            <circle className={rising ? "bi-dot-disc" : "bi-dot-disc bi-dot-disc-risk"}
+                    cx={cx} cy={cy} r={r} />
+            <circle className={rising ? "bi-dot-core" : "bi-dot-core bi-dot-core-risk"}
+                    cx={cx} cy={cy} r={Math.min(3, r / 3)}>
+              <title>
+                {`${point.label}（${point.kind_label}） · ${yLabel} `
+                  + `${point.growth_pct >= 0 ? "+" : ""}${point.growth_pct.toFixed(1)}% · `
+                  + `${xLabel} ${point.shelf_pct.toFixed(1)}% · ${point.asins} ASIN · `
+                  + `${point.searches.toLocaleString()} `
+                  + (point.avg_price != null ? `· ${fmtMoney(point.avg_price)}` : "")}
+              </title>
+            </circle>
+            {!clash ? (
+              <text className="bi-point-label" x={cx} y={cy - r - 5} textAnchor="middle">
+                {truncate(point.label, 12)}
+              </text>
+            ) : null}
+          </g>
+        );
+      })}
+    </svg>
   );
 }
 
@@ -523,12 +511,12 @@ export function ElementMatrix({
  *
  * One scatter for every element was the wrong unit of comparison. A designer
  * choosing a front profile is not weighing it against a colour, and putting the
- * two on shared axes implies they are alternatives. Within a column they really
- * are: the dots are the options for one decision, so their ranking is the
- * decision, and the top-left corner names the option nobody has built yet.
+ * two on shared axes implies they are alternatives. Within one attribute they
+ * really are: the dots are the options for a single decision, so their ranking
+ * is the decision, and the tinted corner is the option nobody has built yet.
  *
- * The axes are shared across panels, which is what makes a row of small charts
- * legitimate rather than nine charts that happen to sit together.
+ * The axes are shared across the rows, which is what makes a stack of charts
+ * legitimate rather than several charts that happen to sit together.
  */
 export function ElementMatrixGroups({
   groups,
@@ -549,42 +537,54 @@ export function ElementMatrixGroups({
   yLabel: string;
   windowNote: string;
   sizeNote: string;
-  /** Why the chart is split — without it a reader compares across panels. */
+  /** Why the chart is split — without it a reader compares across rows. */
   splitNote: string;
-  /** Suffix for "n elements", e.g. 个 / elements. */
+  /** Suffix for "n elements", e.g. 个 / measured. */
   countLabel: string;
-  /** Suffix for the elements a column measured but could not plot. */
+  /** Suffix for the elements a row measured but could not plot. */
   moreLabel: string;
 }) {
   if (!groups.length) return null;
   return (
     <div>
-      <div className="grid gap-x-4 gap-y-3 md:grid-cols-2 xl:grid-cols-3">
+      <div className="space-y-2.5">
         {groups.map((group) => (
-          <div key={group.kind} className="min-w-0">
-            <div className="flex items-baseline gap-1.5 text-[11px]">
-              <span className="font-medium">{group.kind_label}</span>
-              <span className="text-fg-subtle tabular-nums">
+          <div key={group.kind} className="bi-element-row">
+            {/* The name to the left rather than above: it turns the set into a
+                list of decisions the eye can run down, and gives the drawing the
+                whole width instead of a caption's worth of it. */}
+            <div className="flex shrink-0 flex-row items-baseline gap-2 sm:w-24
+                            sm:flex-col sm:items-start sm:gap-0.5 sm:pt-1">
+              <span className="bi-element-kind">{group.kind_label}</span>
+              <span className="text-[10px] tabular-nums text-fg-subtle">
                 {group.total} {countLabel}
               </span>
               {group.dropped > 0 ? (
-                <span className="text-fg-subtle tabular-nums">
-                  ·&nbsp;{group.dropped} {moreLabel}
+                <span className="text-[10px] tabular-nums text-fg-subtle">
+                  {group.dropped} {moreLabel}
                 </span>
               ) : null}
             </div>
-            <ElementMatrix points={group.points} quadrants={quadrants} xLabel={xLabel}
-                           yLabel={yLabel} windowNote={windowNote} sizeNote={sizeNote}
-                           scale={scale} compact />
+            <div className="min-w-0 flex-1">
+              <ElementMatrix points={group.points} quadrants={quadrants} xLabel={xLabel}
+                             yLabel={yLabel} windowNote={windowNote} sizeNote={sizeNote}
+                             scale={scale} />
+            </div>
           </div>
         ))}
       </div>
-      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]
                       text-fg-subtle">
-        {/* Said once for the whole set rather than drawn into every panel. */}
-        <span>↖&nbsp;{quadrants[0]}</span>
+        {/* Said once for the whole set rather than drawn into every row. The
+            two tinted corners carry their tint as the swatch, so the legend is
+            also the key to the shading. */}
+        <span className="flex items-center gap-1">
+          ↖<i className="bi-legend-swatch bi-legend-open" />{quadrants[0]}
+        </span>
         <span>↗&nbsp;{quadrants[1]}</span>
-        <span>↘&nbsp;{quadrants[2]}</span>
+        <span className="flex items-center gap-1">
+          ↘<i className="bi-legend-swatch bi-legend-risk" />{quadrants[2]}
+        </span>
         <span>↙&nbsp;{quadrants[3]}</span>
       </div>
       <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]

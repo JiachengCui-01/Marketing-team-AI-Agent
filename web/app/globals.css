@@ -1601,6 +1601,64 @@ select.field:focus {
     fill: rgb(var(--danger) / 0.5);
     stroke: rgb(var(--bg-elevated));
   }
+  /* ---- element matrix: one attribute per row ---- */
+  .bi-element-row {
+    @apply flex flex-col gap-1 rounded-xl border border-border px-3 py-2.5
+           transition-colors duration-200 sm:flex-row sm:items-center sm:gap-3;
+    background: rgb(var(--bg-elevated));
+  }
+  .bi-element-row:hover {
+    border-color: rgb(var(--feature-selection) / 0.32);
+  }
+  .bi-element-kind {
+    @apply inline-flex rounded-md px-1.5 py-0.5 text-[11px] font-medium leading-tight;
+    background: rgb(var(--feature-selection) / 0.1);
+    color: rgb(var(--feature-selection));
+  }
+  /* The disc carries the search volume, the core the position — two marks
+     because one 20px blob cannot do both without hiding its own centre. */
+  .bi-dot-disc {
+    fill: rgb(var(--feature-selection) / 0.2);
+    stroke: rgb(var(--feature-selection) / 0.45);
+    stroke-width: 1;
+  }
+  .bi-dot-disc-risk {
+    fill: rgb(var(--danger) / 0.16);
+    stroke: rgb(var(--danger) / 0.42);
+  }
+  .bi-dot-core {
+    fill: rgb(var(--feature-selection));
+  }
+  .bi-dot-core-risk {
+    fill: rgb(var(--danger));
+  }
+  /* The two corners a decision comes out of, tinted so the reader does not have
+     to hold "left of the dashed line and above zero" in their head. */
+  .bi-quadrant-open {
+    fill: rgb(var(--success) / 0.05);
+  }
+  .bi-quadrant-risk {
+    fill: rgb(var(--danger) / 0.04);
+  }
+  .bi-legend-swatch {
+    @apply inline-block h-2 w-2 shrink-0 rounded-[2px];
+  }
+  .bi-legend-open {
+    background: rgb(var(--success) / 0.35);
+  }
+  .bi-legend-risk {
+    background: rgb(var(--danger) / 0.3);
+  }
+  /* A point label lands on top of dots and reference lines, so it carries its
+     own background-coloured outline rather than hoping for empty space. */
+  .bi-point-label {
+    fill: rgb(var(--fg-muted));
+    font-size: 9.5px;
+    paint-order: stroke;
+    stroke: rgb(var(--bg-elevated));
+    stroke-width: 3px;
+    stroke-linejoin: round;
+  }
   .bi-axis {
     stroke: rgb(var(--border));
     stroke-width: 1;
@@ -1609,6 +1667,13 @@ select.field:focus {
   .bi-axis-solid {
     stroke: rgb(var(--fg-subtle) / 0.55);
     stroke-width: 1;
+  }
+  /* Also a reference, but one of ours rather than the market's: the median of
+     the elements we happen to track. Dashed so it does not read as a zero. */
+  .bi-axis-dashed {
+    stroke: rgb(var(--fg-subtle) / 0.4);
+    stroke-width: 1;
+    stroke-dasharray: 3 3;
   }
   .bi-axis-tick {
     fill: rgb(var(--fg-subtle));

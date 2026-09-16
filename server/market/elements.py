@@ -68,11 +68,16 @@ KIND_LABELS: dict[str, tuple[str, str]] = {
 # first. `other` is last and is the bucket a reader should be able to ignore.
 KIND_ORDER = (CRAFT, MATERIAL, COLOR, SIZE, FORM, FEATURE, STYLE, ROOM, OTHER)
 
-# Bumped whenever the kind vocabulary changes. Naming is cached per term and
-# never expires — without a version, every term classified before `craft` and
-# `color` existed would keep the kind it was given when they did not, and the
-# new columns would fill up only with terms the market happened to coin since.
-NAMING_VERSION = 2
+# Bumped whenever the kind vocabulary or the classification rules change. Naming
+# is cached per term and never expires — without a version, every term
+# classified before `craft` and `color` existed would keep the kind it was given
+# when they did not, and the new columns would fill up only with terms the market
+# happened to coin since.
+#
+# 3: the rules moved from the tool schema into the brief. Version 2 shipped with
+# both kinds available and still filed 白色 and 黑色 under `style`, so those rows
+# are a wrong answer rather than an old one and have to be asked again.
+NAMING_VERSION = 3
 
 # Syntax, not domain: a bigram must not be glued across one of these, or
 # "cabinet with storage" becomes the term "with storage".
@@ -398,9 +403,36 @@ def split(rows: Iterable[dict], *, limit: int = 6) -> tuple[list[dict], list[dic
     return rising, falling
 
 
+# The kind rules live in the brief, not only in the tool's field description.
+# They were only in the schema first, and the first production run filed 白色 and
+# 黑色 under `style` and left `craft` empty — the model reads a user message far
+# more carefully than an enum's `description`. Each line names the *decision* the
+# kind stands for, because "is fluting a style?" has no answer while "is fluting
+# a tooling decision or a mood?" does.
+_KIND_RULES = """HOW TO CLASSIFY (exactly one kind per term, the narrowest that fits):
+  material — what the thing is made of: solid wood, rattan, boucle, marble, mdf
+  craft    — what was done to the surface, or how it was built: a tooling and
+             lead-time decision. fluted, reeded, burl / burl grain, cane weave,
+             carved, tufted, hammered, distressed, live edge, woven
+  color    — a colour or a finish tone: black, white, walnut, oak (as a tone),
+             sage, cream. Any colour word is `color`, never `style`.
+  size     — a dimension or capacity decision: oversized, 70 inch, 3 drawer,
+             king, full size, extra wide
+  form     — the overall shape: arched, round, l shaped, low profile
+  feature  — what it does: lift top, charging station, adjustable shelf
+  style    — a named look and nothing else: japandi, mid century, farmhouse,
+             boho. Not a catch-all — if the term is a colour, a surface
+             treatment or a material, it is one of those instead.
+  room     — where it goes: living room, entryway
+  other    — a real design attribute that fits none of the above
+Drop a term that is not a design attribute at all: a shipping promise, a
+warranty, a marketing adjective, a bare number, a category noun."""
+
+
 def naming_brief(terms: Sequence[dict]) -> str:
     """The mined terms as the model receives them, for naming only."""
-    lines = ["MINED DESIGN TERMS (discovered from listing titles and search phrases; "
+    lines = [_KIND_RULES, "",
+             "MINED DESIGN TERMS (discovered from listing titles and search phrases; "
              "the numbers are final — classify and name, never evaluate):",
              "term | head ASINs | revenue share | monthly searches"]
     for row in terms:
