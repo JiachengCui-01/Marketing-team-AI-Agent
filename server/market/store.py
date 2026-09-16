@@ -758,8 +758,8 @@ def element_naming(marketplace: str = "US") -> dict[str, dict]:
     db._ensure()
     with db.connect() as conn:
         rows = _rows(conn.execute(
-            "SELECT term, kind, label_zh, label_en, dropped FROM market_element_terms "
-            "WHERE marketplace = ?", (marketplace,)))
+            "SELECT term, kind, label_zh, label_en, dropped, naming_version "
+            "FROM market_element_terms WHERE marketplace = ?", (marketplace,)))
     return {row["term"]: {**row, "drop": bool(row["dropped"])} for row in rows}
 
 
@@ -780,14 +780,17 @@ def save_element_naming(marketplace: str, entries: Iterable[Mapping[str, Any]]) 
                 continue
             conn.execute(
                 "INSERT INTO market_element_terms (marketplace, term, kind, label_zh, "
-                "label_en, dropped, updated_at) VALUES (?,?,?,?,?,?,?) "
+                "label_en, dropped, naming_version, updated_at) VALUES (?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(marketplace, term) DO UPDATE SET kind = excluded.kind, "
                 "label_zh = excluded.label_zh, label_en = excluded.label_en, "
-                "dropped = excluded.dropped, updated_at = excluded.updated_at",
+                "dropped = excluded.dropped, "
+                "naming_version = excluded.naming_version, "
+                "updated_at = excluded.updated_at",
                 (marketplace, term, str(entry.get("kind") or "other"),
                  str(entry.get("label_zh") or "")[:40],
                  str(entry.get("label_en") or "")[:40],
-                 1 if entry.get("drop") else 0, now),
+                 1 if entry.get("drop") else 0,
+                 int(entry.get("naming_version") or 0), now),
             )
             count += 1
     return count

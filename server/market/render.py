@@ -291,8 +291,26 @@ TOOL_ELEMENTS = {
             "terms": {"type": "array", "items": {"type": "object", "properties": {
                 "term": {"type": "string", "description":
                          "Must be copied exactly from the supplied list."},
-                "kind": {"enum": ["material", "form", "feature", "size", "style",
-                                  "room", "other"]},
+                "kind": {
+                    "enum": ["material", "form", "feature", "size", "color",
+                             "craft", "style", "room", "other"],
+                    "description":
+                        "Exactly one, and the narrowest that fits. "
+                        "material = what it is made of (solid wood, rattan, "
+                        "boucle, marble). craft = what was done to the surface "
+                        "or how it was built — a tooling and lead-time decision "
+                        "(fluted, reeded, burl / burl grain, cane weave, carved, "
+                        "tufted, hammered, distressed, live edge). "
+                        "color = a colour or finish tone (black, white, walnut, "
+                        "sage). size = a dimension or capacity decision "
+                        "(oversized, 3 drawer, 70 inch, king). "
+                        "form = overall shape (arched, round, l shaped). "
+                        "feature = what it does (lift top, charging station). "
+                        "style = a named look only (japandi, mid century, farmhouse) "
+                        "— never use it as a catch-all for craft or colour. "
+                        "room = where it goes. other = a real attribute that fits "
+                        "none of these.",
+                },
                 "label_zh": {"type": "string", "description":
                              "<=12 chars. The term as a furniture buyer would say it "
                              "in Chinese, e.g. 'fluted' -> 竖纹. Keep the English word "
@@ -564,12 +582,17 @@ def name_elements(client, marketplace: str, period: str, language: str,
     than a per-render one.
     """
     known = store.element_naming(marketplace)
-    fresh = [row for row in terms if row["term"] not in known]
+    # Stale as well as missing: a term classified under an older kind vocabulary
+    # is filed in a column that no longer means what it meant, and re-asking is
+    # the only way the new columns ever fill with terms the market already had.
+    fresh = [row for row in terms
+             if int((known.get(row["term"]) or {}).get("naming_version") or 0)
+             < elements.NAMING_VERSION]
     if not fresh or client is None:
         return 0
     payload, source = _run_tool(
         client, tool=TOOL_ELEMENTS, user=elements.naming_brief(fresh),
-        language=language, max_tokens=3000)
+        language=language, max_tokens=8000)
     if source != "llm":
         # A failed call must not be cached as an answer, or a transient outage
         # would leave every term of that month permanently unnamed.
@@ -581,7 +604,8 @@ def name_elements(client, marketplace: str, period: str, language: str,
     # Every term we asked about gets a row, answered or not. Without this a term
     # the model skipped is "fresh" again on the next render, and the naming call
     # repeats for the life of the month.
-    entries = [named.get(term) or {"term": term, "kind": elements.OTHER}
+    entries = [{**(named.get(term) or {"term": term, "kind": elements.OTHER}),
+                "naming_version": elements.NAMING_VERSION}
                for term in allowed]
     return store.save_element_naming(marketplace, entries)
 

@@ -40,19 +40,39 @@ from .scoring import _num
 
 # Kinds the model may assign. An enum rather than free text so the UI can group
 # by it and so two runs cannot produce both "material" and "materials".
-MATERIAL, FORM, FEATURE, SIZE, STYLE, ROOM, OTHER = (
-    "material", "form", "feature", "size", "style", "room", "other")
-KINDS = (MATERIAL, FORM, FEATURE, SIZE, STYLE, ROOM, OTHER)
+#
+# `craft` and `colour` are separate kinds rather than shades of `style` because
+# they are separate decisions on a drawing. "Fluted" and "burl" are things the
+# factory does to a surface — a tooling quote and a lead time; "walnut" is what
+# the surface is; "black" is what it is finished in. Folding all three into one
+# axis is what made the old chart unreadable: a size, a material and a colour
+# sat side by side with nothing to say which comparison was meaningful.
+MATERIAL, FORM, FEATURE, SIZE, COLOR, CRAFT, STYLE, ROOM, OTHER = (
+    "material", "form", "feature", "size", "color", "craft", "style", "room",
+    "other")
+KINDS = (MATERIAL, FORM, FEATURE, SIZE, COLOR, CRAFT, STYLE, ROOM, OTHER)
 
 KIND_LABELS: dict[str, tuple[str, str]] = {
     MATERIAL: ("材质", "Material"),
     FORM: ("形态", "Form"),
     FEATURE: ("功能", "Feature"),
     SIZE: ("尺寸", "Size"),
+    COLOR: ("颜色", "Colour"),
+    CRAFT: ("工艺 · 纹样", "Craft and pattern"),
     STYLE: ("风格", "Style"),
     ROOM: ("空间", "Room"),
     OTHER: ("其他", "Other"),
 }
+
+# Reading order for the grouped chart: the decisions a designer makes first come
+# first. `other` is last and is the bucket a reader should be able to ignore.
+KIND_ORDER = (CRAFT, MATERIAL, COLOR, SIZE, FORM, FEATURE, STYLE, ROOM, OTHER)
+
+# Bumped whenever the kind vocabulary changes. Naming is cached per term and
+# never expires — without a version, every term classified before `craft` and
+# `color` existed would keep the kind it was given when they did not, and the
+# new columns would fill up only with terms the market happened to coin since.
+NAMING_VERSION = 2
 
 # Syntax, not domain: a bigram must not be glued across one of these, or
 # "cabinet with storage" becomes the term "with storage".
@@ -89,7 +109,13 @@ MIN_TITLE_ASINS = 3
 MIN_KEYWORDS = 2
 MIN_SEARCHES = 3_000.0
 # How many mined terms are worth putting in front of the model to name.
-MAX_TERMS = 40
+# Forty was set when every element shared one scatter, where forty dots is
+# already past readable. Split across nine attribute columns it left most of
+# them with two or three points — a colour column that knows about white and
+# black only is worse than no colour column. Naming is cached per term, so the
+# larger list costs one model call the first time a term appears and nothing
+# after that.
+MAX_TERMS = 90
 
 RISING_PCT = 10.0
 FALLING_PCT = -10.0

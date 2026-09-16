@@ -594,6 +594,24 @@ class ElementNamingTests(RenderTestCase):
         self.assertEqual(first, 1)
         self.assertEqual(second, 1, "the second render must not re-ask")
 
+    def test_a_term_named_under_an_older_vocabulary_is_asked_again(self) -> None:
+        """`craft` and `color` were added after these rows were written. Trusting
+        the cache would leave both columns empty except for terms the market
+        happened to coin after the release."""
+        self.seed()
+        client = self.client()
+        render.render_overview(client=client, period=PERIOD)
+        with db.connect() as conn:
+            conn.execute("UPDATE market_element_terms SET naming_version = 0")
+
+        render.render_overview(client=client, period=PERIOD)
+
+        asked = [p for p in client.prompts if "MINED DESIGN TERMS" in p]
+        self.assertEqual(len(asked), 2)
+        self.assertIn("fluted", asked[1])
+        self.assertEqual(store.element_naming("US")["fluted"]["naming_version"],
+                         elements.NAMING_VERSION)
+
     def test_a_term_the_model_skipped_is_still_recorded(self) -> None:
         """An unanswered term would otherwise look fresh forever."""
         self.seed()
@@ -689,6 +707,91 @@ class ElementMatrixTests(RenderTestCase):
         matrix = render.build_overview("US", PERIOD, "zh")["element_matrix"]
         self.assertEqual(len(matrix["quadrants"]), 4)
         self.assertIn("货架未跟上", matrix["quadrants"][0])
+
+
+class ElementMatrixGroupTests(RenderTestCase):
+    """One panel per attribute. A colour is not an alternative to a size, and a
+    single scatter carrying both invited exactly that comparison."""
+
+    TITLES = [
+        "Fluted Oak Sideboard", "Fluted Walnut Console", "Fluted Arch Cabinet",
+        "Burl Oak Sideboard", "Burl Walnut Credenza", "Burl Arch Cabinet",
+        "Black Oak Sideboard", "Black Walnut Console", "Black Arch Cabinet",
+        "70 Inch Oak Sideboard", "70 Inch Walnut Console", "70 Inch Arch Cabinet",
+    ]
+    NAMING = {
+        "fluted": "craft", "burl": "craft",
+        "black": "color", "70 inch": "size", "oak": "material",
+    }
+
+    def seed(self) -> None:
+        store.upsert_products([
+            {"marketplace": "US", "asin": f"BG{i}", "brand": "Demo", "title": title}
+            for i, title in enumerate(self.TITLES)])
+        store.upsert_product_metrics([
+            {"marketplace": "US", "asin": f"BG{i}", "period": PERIOD,
+             "node_id_path": BUFFETS, "price": 399.0, "revenue": 100_000.0,
+             "source_tool": "product_research"}
+            for i in range(len(self.TITLES))])
+        store.upsert_keyword_metrics([
+            {"marketplace": "US", "keyword": f"{term} {noun}", "period": PERIOD,
+             "node_id_path": BUFFETS, "searches": 9_000.0,
+             "searches_mom_pct": growth, "source_tool": "keyword_research"}
+            for term, growth in (("fluted", 24.0), ("burl", 31.0), ("black", -12.0),
+                                 ("70 inch", 8.0), ("oak", 15.0))
+            for noun in ("sideboard", "console")])
+        store.save_element_naming("US", [
+            {"term": term, "kind": kind, "label_zh": term, "label_en": term,
+             "drop": False, "naming_version": elements.NAMING_VERSION}
+            for term, kind in self.NAMING.items()])
+
+    def groups(self) -> dict[str, list[str]]:
+        matrix = render.build_overview("US", PERIOD, "zh")["element_matrix"]
+        return {g["kind"]: [p["key"] for p in g["points"]] for g in matrix["groups"]}
+
+    def test_craft_is_its_own_column(self) -> None:
+        """The column this chart was missing: fluting and burl are tooling and
+        lead-time decisions, not a style mood and not a material."""
+        self.seed()
+        groups = self.groups()
+        self.assertEqual(sorted(groups.get(elements.CRAFT, [])), ["burl", "fluted"])
+
+    def test_colour_and_size_do_not_share_a_panel_with_craft(self) -> None:
+        self.seed()
+        groups = self.groups()
+        self.assertEqual(groups.get(elements.COLOR), ["black"])
+        self.assertEqual(groups.get(elements.SIZE), ["70 inch"])
+        self.assertNotIn("black", groups.get(elements.CRAFT, []))
+
+    def test_the_columns_come_back_in_reading_order(self) -> None:
+        self.seed()
+        matrix = render.build_overview("US", PERIOD, "zh")["element_matrix"]
+        kinds = [g["kind"] for g in matrix["groups"]]
+        self.assertEqual(kinds, [k for k in elements.KIND_ORDER if k in kinds])
+
+    def test_every_panel_is_drawn_against_one_shared_scale(self) -> None:
+        """Per-panel bounds would let two dots in the same position mean two
+        different numbers, which is the one thing a set of small charts owes."""
+        self.seed()
+        matrix = render.build_overview("US", PERIOD, "zh")["element_matrix"]
+        scale = matrix["scale"]
+        plotted = [p for g in matrix["groups"] for p in g["points"]]
+        self.assertGreaterEqual(scale["x_max"], max(p["shelf_pct"] for p in plotted))
+        self.assertLessEqual(scale["y_min"], min(p["growth_pct"] for p in plotted))
+        self.assertGreaterEqual(scale["y_max"], max(p["growth_pct"] for p in plotted))
+        self.assertEqual(scale["max_searches"],
+                         max(p["searches"] for p in matrix["points"]))
+
+    def test_a_panel_reports_what_it_could_not_draw(self) -> None:
+        """A reader who can see six were measured and four drawn can tell a thin
+        attribute from a truncated one."""
+        self.seed()
+        with mock.patch.object(panels, "MAX_MATRIX_POINTS_PER_KIND", 1):
+            matrix = render.build_overview("US", PERIOD, "zh")["element_matrix"]
+        craft = next(g for g in matrix["groups"] if g["kind"] == elements.CRAFT)
+        self.assertEqual(len(craft["points"]), 1)
+        self.assertEqual(craft["total"], 2)
+        self.assertEqual(craft["dropped"], 1)
 
 
 class GrowthWindowTests(RenderTestCase):

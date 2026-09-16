@@ -60,6 +60,22 @@ CREATE TABLE market_keyword_metrics (
 """
 
 
+# And the element naming table before the kind vocabulary was versioned.
+_PRE_VERSION_ELEMENT_TERMS = """
+DROP TABLE IF EXISTS market_element_terms;
+CREATE TABLE market_element_terms (
+    marketplace TEXT NOT NULL DEFAULT 'US',
+    term TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'other',
+    label_zh TEXT NOT NULL DEFAULT '',
+    label_en TEXT NOT NULL DEFAULT '',
+    dropped INTEGER NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (marketplace, term)
+);
+"""
+
+
 class SchemaUpgradeTests(unittest.TestCase):
     """``init()`` must survive meeting a database from an earlier release.
 
@@ -138,6 +154,48 @@ class SchemaUpgradeTests(unittest.TestCase):
         row = store.top_keywords("US", self.NODE, "202608")[0]
         self.assertEqual(row["searches_mom_pct"], 12.5)
         self.assertEqual(row["rank_12w"], 1220)
+
+    def test_init_upgrades_a_database_that_predates_the_naming_version(self) -> None:
+        """A classification cached before `craft` and `color` existed was made
+        from a shorter menu, so it has to be re-asked rather than trusted."""
+        db.reset_for_tests()
+        db.init()
+        now = time.time()
+        with db.connect() as conn:
+            conn.executescript(_PRE_VERSION_ELEMENT_TERMS)
+            self.assertNotIn("naming_version",
+                             db._table_columns(conn, "market_element_terms"))
+            conn.execute(
+                "INSERT INTO market_element_terms (marketplace, term, kind, "
+                "label_zh, label_en, dropped, updated_at) "
+                "VALUES ('US', 'fluted', 'style', '竖纹', 'Fluted', 0, ?)", (now,))
+        db._INITIALIZED = False
+
+        db.init()                      # must not raise
+
+        with db.connect() as conn:
+            self.assertIn("naming_version",
+                          db._table_columns(conn, "market_element_terms"))
+        cached = store.element_naming("US")["fluted"]
+        # Kept, so nothing goes unlabelled in the meantime; stamped 0, so the
+        # next render asks again under the vocabulary that has a craft column.
+        self.assertEqual(cached["kind"], "style")
+        self.assertEqual(cached["naming_version"], 0)
+
+    def test_an_upgraded_element_table_still_accepts_writes(self) -> None:
+        db.reset_for_tests()
+        db.init()
+        with db.connect() as conn:
+            conn.executescript(_PRE_VERSION_ELEMENT_TERMS)
+        db._INITIALIZED = False
+        db.init()
+
+        store.save_element_naming("US", [
+            {"term": "burl", "kind": "craft", "label_zh": "木瘤纹",
+             "label_en": "Burl", "drop": False, "naming_version": 2}])
+        cached = store.element_naming("US")["burl"]
+        self.assertEqual(cached["kind"], "craft")
+        self.assertEqual(cached["naming_version"], 2)
 
     def test_rows_predating_the_column_become_monthly_rows(self) -> None:
         """The default has to backfill, or the board loses every month it had."""

@@ -22,7 +22,7 @@ import {
   Bullet,
   DeltaBullet,
   DistributionBars,
-  ElementMatrix,
+  ElementMatrixGroups,
   Quadrant,
   ScoreBar,
   Sparkline,
@@ -187,10 +187,13 @@ export function MarketOverviewPanel({
             </Section>
 
             <Section title={t.gmElements} hint={t.gmElementsHint}
-                     data={(dashboard?.element_matrix?.points ?? []).length >= 2
-                       ? dashboard?.element_matrix?.points : null}>
-              <ElementMatrix
-                points={dashboard?.element_matrix?.points ?? []}
+                     data={dashboard?.element_matrix?.groups ?? null}
+                     right={<span className="text-[10px] text-fg-subtle">
+                       {t.gmElementGrowth} ↑ · {t.gmElementShelf} →
+                     </span>}>
+              <ElementMatrixGroups
+                groups={dashboard?.element_matrix?.groups ?? []}
+                scale={dashboard?.element_matrix?.scale ?? undefined}
                 quadrants={(dashboard?.element_matrix?.quadrants ?? [
                   "", "", "", ""]) as [string, string, string, string]}
                 xLabel={t.gmElementShelf}
@@ -200,6 +203,9 @@ export function MarketOverviewPanel({
                   : dashboard?.element_matrix?.window === "mixed" ? t.gmWindowMixed
                   : t.gmWindowMom}
                 sizeNote={t.gmElementSize}
+                splitNote={t.gmElementSplit}
+                countLabel={t.gmElementCount}
+                moreLabel={t.gmElementMore}
               />
             </Section>
 

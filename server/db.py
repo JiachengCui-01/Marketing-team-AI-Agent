@@ -680,6 +680,11 @@ CREATE TABLE IF NOT EXISTS market_element_terms (
     -- The model's verdict that this is not a design attribute at all: a size
     -- number, a shipping promise, a word that survived the frequency filter.
     dropped INTEGER NOT NULL DEFAULT 0,
+    -- Which kind vocabulary produced this row. A cached classification is only
+    -- as good as the list of kinds it chose from: terms named before `craft`
+    -- and `color` existed were filed under `style` or `other` and would stay
+    -- there forever. Rows below elements.NAMING_VERSION are re-classified once.
+    naming_version INTEGER NOT NULL DEFAULT 0,
     updated_at REAL NOT NULL,
     PRIMARY KEY (marketplace, term)
 );
@@ -909,6 +914,7 @@ def init() -> None:
             _migrate_snapshot_grain(conn)
             _migrate_product_pool(conn)
             _migrate_keyword_growth(conn)
+            _migrate_element_naming_version(conn)
             _seed_image_templates(conn)
         _INITIALIZED = True
 
@@ -1039,6 +1045,19 @@ def _migrate_evidence_explicit(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE user_marketing_memory_evidence ADD COLUMN explicit INTEGER NOT NULL DEFAULT 0"
         )
+
+
+def _migrate_element_naming_version(conn: sqlite3.Connection) -> None:
+    """Stamp existing classifications as pre-dating the current kind vocabulary.
+
+    Default 0 rather than the current version, and deliberately so: every row
+    already in the table was classified without `craft` or `color` on the menu,
+    so leaving them alone would mean those two columns could only ever fill with
+    terms the market coined after this release.
+    """
+    if "naming_version" not in _table_columns(conn, "market_element_terms"):
+        conn.execute("ALTER TABLE market_element_terms "
+                     "ADD COLUMN naming_version INTEGER NOT NULL DEFAULT 0")
 
 
 def _drop_anonymous_tables_if_needed(conn: sqlite3.Connection) -> None:

@@ -1779,6 +1779,20 @@ export type MarketElement = {
   keywords: { keyword: string; searches: number; growth_pct: number | null }[];
 };
 
+/** One element as the matrix plots it: both halves present, neither inferred. */
+export type MarketElementPoint = {
+  key: string;
+  label: string;
+  kind: string;
+  kind_label: string;
+  shelf_pct: number;
+  growth_pct: number;
+  searches: number;
+  asins: number;
+  avg_price: number | null;
+  window: string;
+};
+
 export type MarketBoardRow = {
   node_key: string;
   node_label_path: string;
@@ -1932,13 +1946,24 @@ export type MarketDashboard = {
    *  as a reading. */
   price_fit?: { price: number; fit: number }[];
   elements?: MarketElement[];
-  /** Demand trend against shelf presence — the chart a design review opens with. */
+  /** Demand trend against shelf presence — the chart a design review opens with.
+   *  `groups` is what the UI draws: one panel per attribute, because a colour and
+   *  a size are not alternatives to each other. `points` is the same elements
+   *  ungrouped, and `scale` the bounds every panel shares. */
   element_matrix?: {
-    points: {
-      key: string; label: string; kind: string; kind_label: string;
-      shelf_pct: number; growth_pct: number; searches: number; asins: number;
-      avg_price: number | null; window: string;
+    points: MarketElementPoint[];
+    groups?: {
+      kind: string;
+      kind_label: string;
+      points: MarketElementPoint[];
+      /** Measured for this attribute, before the per-panel plot cap. */
+      total: number;
+      dropped: number;
     }[];
+    scale?: {
+      x_max: number; x_mid: number; y_min: number; y_max: number;
+      max_searches: number;
+    } | null;
     window: string;
     quadrants: [string, string, string, string];
   };

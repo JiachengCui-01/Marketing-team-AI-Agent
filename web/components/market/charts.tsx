@@ -331,6 +331,26 @@ export type ElementPoint = {
   avg_price: number | null;
 };
 
+export type ElementGroup = {
+  kind: string;
+  kind_label: string;
+  points: ElementPoint[];
+  /** How many elements of this kind were measured, before the plot cap. */
+  total: number;
+  dropped: number;
+};
+
+/** Axis bounds shared by every attribute panel, computed server-side over all
+ *  plotted elements. Without it each panel would silently rescale and two dots
+ *  in the same position would mean two different numbers. */
+export type ElementScale = {
+  x_max: number;
+  x_mid: number;
+  y_min: number;
+  y_max: number;
+  max_searches: number;
+};
+
 /** What to draw, and whether the shelf has already answered.
  *
  * The board says which category to work in. This says what the product should
@@ -351,6 +371,8 @@ export function ElementMatrix({
   yLabel,
   windowNote,
   sizeNote,
+  scale,
+  compact = false,
 }: {
   points: ElementPoint[];
   /** Clockwise from top-left: rising+thin, rising+proven, cooling+heavy, cooling+thin. */
@@ -360,25 +382,34 @@ export function ElementMatrix({
   /** Names the window y was measured over — a month and a year are not the same claim. */
   windowNote: string;
   sizeNote: string;
+  /** Bounds to draw against. Omitted, the panel scales to its own points —
+   *  right for a lone chart, wrong for one panel of a set. */
+  scale?: ElementScale;
+  /** Small-multiple sizing: one attribute per panel, several panels a row. */
+  compact?: boolean;
 }) {
-  if (points.length < 2) return null;
-  const width = 680;
-  const height = 300;
-  const padL = 46;
-  const padR = 16;
-  const padT = 20;
-  const padB = 40;
+  if (points.length < (compact ? 1 : 2)) return null;
+  const width = compact ? 330 : 680;
+  const height = compact ? 210 : 300;
+  const padL = compact ? 32 : 46;
+  const padR = compact ? 10 : 16;
+  const padT = compact ? 16 : 20;
+  const padB = compact ? 28 : 40;
 
   const shelves = points.map((p) => p.shelf_pct);
   const growths = points.map((p) => p.growth_pct);
-  const xMax = Math.max(5, ...shelves) * 1.1;
-  const yMin = Math.min(-10, ...growths) * 1.1;
-  const yMax = Math.max(10, ...growths) * 1.1;
+  const xMax = scale ? scale.x_max : Math.max(5, ...shelves) * 1.1;
+  const yMin = scale ? scale.y_min : Math.min(-10, ...growths) * 1.1;
+  const yMax = scale ? scale.y_max : Math.max(10, ...growths) * 1.1;
   // The x reference is the median, not an arbitrary round number: "more shelf
   // presence than half the elements we track" is a claim the data supports.
+  // Across a set of panels it is the department's median, so the line sits in
+  // the same place in every one of them and the panels can be read as a row.
   const sorted = [...shelves].sort((a, b) => a - b);
-  const xMid = sorted[Math.floor(sorted.length / 2)];
-  const maxSearches = Math.max(1, ...points.map((p) => p.searches));
+  const xMid = scale ? scale.x_mid : sorted[Math.floor(sorted.length / 2)];
+  const maxSearches = scale
+    ? Math.max(1, scale.max_searches)
+    : Math.max(1, ...points.map((p) => p.searches));
 
   const px = (v: number) => padL + (v / xMax) * (width - padL - padR);
   const py = (v: number) =>
@@ -412,32 +443,44 @@ export function ElementMatrix({
         </text>
         <text className="bi-axis-tick" x={padL} y={height - padB + 13} textAnchor="start">0</text>
         <text className="bi-axis-tick" x={width - padR} y={height - padB + 13} textAnchor="end">
-          {xMax.toFixed(0)}% · {xLabel}
+          {compact ? `${xMax.toFixed(0)}%` : `${xMax.toFixed(0)}% · ${xLabel}`}
         </text>
-        <text className="bi-axis-tick" x={padL - 5} y={padT - 8} textAnchor="end">
-          {yLabel}
-        </text>
+        {/* Named once per panel set rather than once per panel: the axes are
+            shared, so repeating their names is noise the dots have to pay for. */}
+        {!compact ? (
+          <text className="bi-axis-tick" x={padL - 5} y={padT - 8} textAnchor="end">
+            {yLabel}
+          </text>
+        ) : null}
 
-        <text className="bi-quadrant-name" x={padL + 3} y={padT + 10} textAnchor="start">
-          {quadrants[0]}
-        </text>
-        <text className="bi-quadrant-name" x={width - padR - 3} y={padT + 10} textAnchor="end">
-          {quadrants[1]}
-        </text>
-        <text className="bi-quadrant-name" x={width - padR - 3} y={height - padB - 5}
-              textAnchor="end">{quadrants[2]}</text>
-        <text className="bi-quadrant-name" x={padL + 3} y={height - padB - 5}
-              textAnchor="start">{quadrants[3]}</text>
+        {/* Corner names belong on a lone chart. Repeated across nine small
+            panels they say the same four things nine times and collide with the
+            dots they are meant to explain, so the panel set prints them once in
+            its legend instead. */}
+        {!compact ? (
+          <>
+            <text className="bi-quadrant-name" x={padL + 3} y={padT + 10}
+                  textAnchor="start">{quadrants[0]}</text>
+            <text className="bi-quadrant-name" x={width - padR - 3} y={padT + 10}
+                  textAnchor="end">{quadrants[1]}</text>
+            <text className="bi-quadrant-name" x={width - padR - 3} y={height - padB - 5}
+                  textAnchor="end">{quadrants[2]}</text>
+            <text className="bi-quadrant-name" x={padL + 3} y={height - padB - 5}
+                  textAnchor="start">{quadrants[3]}</text>
+          </>
+        ) : null}
 
         {ordered.map((point) => {
-          const r = 5 + Math.sqrt(point.searches / maxSearches) * 10;
+          const r = (compact ? 3.5 : 5)
+            + Math.sqrt(point.searches / maxSearches) * (compact ? 7 : 10);
           const cx = px(point.shelf_pct);
           const cy = py(point.growth_pct);
           const rising = point.growth_pct >= 0;
           // Drop a label rather than stack it: two names on top of each other is
           // worse than one name and a dot you can hover.
           const clash = placed.some(
-            (seat) => Math.abs(seat.x - cx) < 58 && Math.abs(seat.y - cy) < 13);
+            (seat) => Math.abs(seat.x - cx) < (compact ? 44 : 58)
+              && Math.abs(seat.y - cy) < 13);
           if (!clash) placed.push({ x: cx, y: cy });
           return (
             <g key={point.key}>
@@ -455,15 +498,98 @@ export function ElementMatrix({
               </circle>
               {!clash ? (
                 <text className="bi-quadrant-label" x={cx} y={cy - r - 5} textAnchor="middle">
-                  {truncate(point.label, 10)}
+                  {truncate(point.label, compact ? 9 : 10)}
                 </text>
               ) : null}
             </g>
           );
         })}
       </svg>
+      {/* In a set of panels these two notes are true of every panel, so the
+          wrapper prints them once instead of nine times. */}
+      {!compact ? (
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]
+                        text-fg-subtle">
+          <span>{windowNote}</span>
+          <span>{sizeNote}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** The same chart once per attribute — sizes beside sizes, finishes beside
+ *  finishes, surface treatments beside surface treatments.
+ *
+ * One scatter for every element was the wrong unit of comparison. A designer
+ * choosing a front profile is not weighing it against a colour, and putting the
+ * two on shared axes implies they are alternatives. Within a column they really
+ * are: the dots are the options for one decision, so their ranking is the
+ * decision, and the top-left corner names the option nobody has built yet.
+ *
+ * The axes are shared across panels, which is what makes a row of small charts
+ * legitimate rather than nine charts that happen to sit together.
+ */
+export function ElementMatrixGroups({
+  groups,
+  scale,
+  quadrants,
+  xLabel,
+  yLabel,
+  windowNote,
+  sizeNote,
+  splitNote,
+  countLabel,
+  moreLabel,
+}: {
+  groups: ElementGroup[];
+  scale?: ElementScale;
+  quadrants: [string, string, string, string];
+  xLabel: string;
+  yLabel: string;
+  windowNote: string;
+  sizeNote: string;
+  /** Why the chart is split — without it a reader compares across panels. */
+  splitNote: string;
+  /** Suffix for "n elements", e.g. 个 / elements. */
+  countLabel: string;
+  /** Suffix for the elements a column measured but could not plot. */
+  moreLabel: string;
+}) {
+  if (!groups.length) return null;
+  return (
+    <div>
+      <div className="grid gap-x-4 gap-y-3 md:grid-cols-2 xl:grid-cols-3">
+        {groups.map((group) => (
+          <div key={group.kind} className="min-w-0">
+            <div className="flex items-baseline gap-1.5 text-[11px]">
+              <span className="font-medium">{group.kind_label}</span>
+              <span className="text-fg-subtle tabular-nums">
+                {group.total} {countLabel}
+              </span>
+              {group.dropped > 0 ? (
+                <span className="text-fg-subtle tabular-nums">
+                  ·&nbsp;{group.dropped} {moreLabel}
+                </span>
+              ) : null}
+            </div>
+            <ElementMatrix points={group.points} quadrants={quadrants} xLabel={xLabel}
+                           yLabel={yLabel} windowNote={windowNote} sizeNote={sizeNote}
+                           scale={scale} compact />
+          </div>
+        ))}
+      </div>
       <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]
                       text-fg-subtle">
+        {/* Said once for the whole set rather than drawn into every panel. */}
+        <span>↖&nbsp;{quadrants[0]}</span>
+        <span>↗&nbsp;{quadrants[1]}</span>
+        <span>↘&nbsp;{quadrants[2]}</span>
+        <span>↙&nbsp;{quadrants[3]}</span>
+      </div>
+      <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]
+                      text-fg-subtle">
+        <span>{splitNote}</span>
         <span>{windowNote}</span>
         <span>{sizeNote}</span>
       </div>

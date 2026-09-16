@@ -317,13 +317,36 @@ def build_current(marketplace: str, language: str, *,
 
 # ----------------------------------------------------------------- overview ----
 
+# How many elements one attribute column may plot. Past this the dots stop being
+# separable at the size a small multiple gets.
+MAX_MATRIX_POINTS_PER_KIND = 14
+# A column with a single element is still drawn. The dot has no distribution
+# behind it, but the axes and the median line are the department's, so "black is
+# the only finish that cleared both bars, and it is cooling" survives — and an
+# attribute that quietly vanishes from the chart is the complaint this split was
+# meant to answer.
+MIN_MATRIX_POINTS_PER_KIND = 1
+
+
 def _element_matrix(rows: Sequence[dict], zh: bool) -> dict:
-    """Demand trend against shelf presence, for the one chart a designer needs.
+    """Demand trend against shelf presence, split by the attribute being decided.
 
     x is the share of head revenue whose listing mentions the element — what is
     already proven to sell. y is how fast the phrases carrying it are growing —
     where demand is going. The interesting cell is top-left: people are asking
     and the shelf has not answered.
+
+    One scatter per attribute rather than one scatter for everything. A single
+    panel put a size, a material, a colour and a surface treatment on the same
+    two axes, which invites a comparison that means nothing: "solid wood outsells
+    black" is not a sentence anybody can act on, while "of the four finishes we
+    track, black is the only one cooling" is. The split is the whole value —
+    within a column every dot is an alternative to every other dot, so the
+    ranking is a choice the designer actually has to make.
+
+    Scales stay shared across the columns (``scale`` below) so a dot in one panel
+    still means the same thing as a dot in the next, and the median shelf line is
+    the department's, not the column's.
 
     Only elements with both halves are plotted. An element with search growth and
     no shelf reading is not a gap in the market, it is a gap in our collection,
@@ -342,7 +365,9 @@ def _element_matrix(rows: Sequence[dict], zh: bool) -> dict:
     points.sort(key=lambda p: p["searches"], reverse=True)
     windows = {p["window"] for p in points if p["window"]}
     return {
-        "points": points[:MAX_DIRECTION_ROWS * 2],
+        "points": points,
+        "groups": _element_groups(points),
+        "scale": _element_scale(points),
         # One window or the reader is comparing a month against a year.
         "window": windows.pop() if len(windows) == 1 else "mixed",
         "quadrants": (("需求在涨·货架未跟上", "需求在涨·已验证",
@@ -350,6 +375,49 @@ def _element_matrix(rows: Sequence[dict], zh: bool) -> dict:
                       if zh else
                       ("Rising, shelf has not answered", "Rising and proven",
                        "Cooling but shelf-heavy", "Cooling and thin")),
+    }
+
+
+def _element_groups(points: Sequence[dict]) -> list[dict]:
+    """One entry per attribute, in ``elements.KIND_ORDER``, thin ones dropped.
+
+    ``dropped`` is reported rather than silently swallowed: a reader who knows
+    six colours were measured and two plotted can tell a thin column from a
+    truncated one, which is exactly the distinction a bare chart destroys.
+    """
+    out: list[dict] = []
+    for kind in elements.KIND_ORDER:
+        members = [p for p in points if p["kind"] == kind]
+        if len(members) < MIN_MATRIX_POINTS_PER_KIND:
+            continue
+        kept = members[:MAX_MATRIX_POINTS_PER_KIND]
+        out.append({
+            "kind": kind,
+            "kind_label": members[0]["kind_label"],
+            "points": kept,
+            "total": len(members),
+            "dropped": len(members) - len(kept),
+        })
+    return out
+
+
+def _element_scale(points: Sequence[dict]) -> dict | None:
+    """The axis bounds every attribute column is drawn against.
+
+    Computed once over every plotted element so the panels are comparable, and
+    so the vertical reference stays "more shelf presence than half the elements
+    this department has" rather than half of whatever landed in one column.
+    """
+    if not points:
+        return None
+    shelves = sorted(p["shelf_pct"] for p in points)
+    growths = [p["growth_pct"] for p in points]
+    return {
+        "x_max": round(max(5.0, max(shelves)) * 1.1, 2),
+        "x_mid": shelves[len(shelves) // 2],
+        "y_min": round(min(-10.0, min(growths)) * 1.1, 2),
+        "y_max": round(max(10.0, max(growths)) * 1.1, 2),
+        "max_searches": max(1, max(p["searches"] for p in points)),
     }
 
 
