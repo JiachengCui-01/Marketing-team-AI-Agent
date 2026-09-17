@@ -22,7 +22,7 @@ import {
   Bullet,
   DeltaBullet,
   DistributionBars,
-  ElementMatrixGroups,
+  ElementComboChart,
   Quadrant,
   ScoreBar,
   Sparkline,
@@ -186,33 +186,42 @@ export function MarketOverviewPanel({
               </div>
             </Section>
 
-            <Section title={t.gmElements} hint={t.gmElementsHint}
-                     data={dashboard?.element_matrix?.groups ?? null}>
-              <ElementMatrixGroups
-                groups={dashboard?.element_matrix?.groups ?? []}
-                scale={dashboard?.element_matrix?.scale ?? undefined}
-                quadrants={(dashboard?.element_matrix?.quadrants ?? [
+            {/* One chart of whole specs, in place of the nine attribute rows.
+                The per-attribute read is still in the element table below; what
+                a design review opens with is the combination. */}
+            <Section title={t.gmCombos} hint={t.gmCombosHint}
+                     data={dashboard?.element_combos?.points ?? null}
+                     right={<span className="text-[10px] text-fg-subtle">
+                       {t.gmElementGrowth} ↑ · {t.gmElementShelf} →
+                     </span>}>
+              <ElementComboChart
+                points={dashboard?.element_combos?.points ?? []}
+                bounds={dashboard?.element_combos?.bounds ?? undefined}
+                scale={dashboard?.element_combos?.scale ?? undefined}
+                total={dashboard?.element_combos?.total}
+                quadrants={(dashboard?.element_combos?.quadrants ?? [
                   "", "", "", ""]) as [string, string, string, string]}
                 xLabel={t.gmElementShelf}
                 yLabel={t.gmElementGrowth}
-                windowNote={
-                  dashboard?.element_matrix?.window === "yoy" ? t.gmWindowYoy
-                  : dashboard?.element_matrix?.window === "mixed" ? t.gmWindowMixed
-                  : t.gmWindowMom}
-                sizeNote={t.gmElementSize}
-                splitNote={t.gmElementSplit}
-                countLabel={t.gmElementCount}
-                moreLabel={t.gmElementMore}
                 medianLabel={t.gmElementMedian}
-                axesNote={t.gmElementAxes}
-                hoverNote={t.gmElementHover}
+                countLabel={t.gmComboCount}
+                moreLabel={t.gmComboMore}
+                notes={[
+                  t.gmCombosStrict,
+                  t.gmCombosOrigin,
+                  dashboard?.element_combos?.window === "yoy" ? t.gmWindowYoy
+                  : dashboard?.element_combos?.window === "mixed" ? t.gmWindowMixed
+                  : t.gmWindowMom,
+                  t.gmElementSize,
+                  t.gmElementHover,
+                  t.gmElementRailNote,
+                ]}
                 tipLabels={{ searches: t.gmElementTipSearches,
                              asins: t.gmElementTipAsins,
                              price: t.gmElementTipPrice,
                              unmeasured: t.gmElementTipUnmeasured }}
                 railLabels={{ noDemand: t.gmElementRailNoDemand,
                               noShelf: t.gmElementRailNoShelf }}
-                railNote={t.gmElementRailNote}
               />
             </Section>
 

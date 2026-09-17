@@ -253,6 +253,104 @@ class NamingTests(unittest.TestCase):
         self.assertEqual(named[0]["searches"], 17_000)
 
 
+class CombinationTests(unittest.TestCase):
+    """Specs, not elements. A single term is an alternative; a combination is a
+    product, and a product is what a brief is written from."""
+
+    NAMED = [
+        {"term": "fluted", "kind": elements.CRAFT, "label": "竖纹",
+         "kind_label": "工艺", "revenue_share_pct": 9.0},
+        {"term": "oak", "kind": elements.MATERIAL, "label": "橡木",
+         "kind_label": "材质", "revenue_share_pct": 8.0},
+        {"term": "walnut", "kind": elements.MATERIAL, "label": "胡桃木",
+         "kind_label": "材质", "revenue_share_pct": 3.0},
+        {"term": "black", "kind": elements.COLOR, "label": "黑色",
+         "kind_label": "颜色", "revenue_share_pct": 7.0},
+        {"term": "clearance", "kind": elements.OTHER, "label": "清仓",
+         "kind_label": "其他", "revenue_share_pct": 6.0},
+    ]
+
+    def products(self, titles: list[str]) -> list[dict]:
+        return [{"asin": f"B{i}", "brand": "Demo", "title": title,
+                 "revenue": 1_000.0, "price": 300.0, "node_id_path": "n:1"}
+                for i, title in enumerate(titles)]
+
+    def test_a_spec_has_to_come_off_real_listings(self) -> None:
+        """The cartesian product of the vocabulary would invent thousands of
+        products nobody has made, each with a measured x axis."""
+        combos = elements.combinations(
+            self.products(["Fluted Oak Sideboard"] * 5), self.NAMED)
+        keys = {c["key"] for c in combos}
+        self.assertIn("fluted+oak", keys)
+        # `black` is in the vocabulary and on no listing, so no spec carries it.
+        self.assertFalse([k for k in keys if "black" in k])
+
+    def test_one_term_per_attribute(self) -> None:
+        """A spec says "the material is oak", not "the materials are oak and
+        walnut" — and it has to pick the same one every month."""
+        combos = elements.combinations(
+            self.products(["Fluted Oak Walnut Sideboard"] * 5), self.NAMED)
+        spec = next(c for c in combos)
+        materials = [p for p in spec["spec"] if p["kind"] == elements.MATERIAL]
+        self.assertEqual(len(materials), 1)
+        # The higher-revenue term of the two, deterministically.
+        self.assertEqual(materials[0]["label"], "橡木")
+
+    def test_a_spec_on_too_few_listings_is_one_sellers_idea(self) -> None:
+        combos = elements.combinations(
+            self.products(["Fluted Oak Sideboard"] * (elements.MIN_COMBO_ASINS - 1)),
+            self.NAMED)
+        self.assertEqual(combos, [])
+
+    def test_a_single_attribute_is_not_a_combination(self) -> None:
+        """That is the element chart, and it already exists."""
+        combos = elements.combinations(
+            self.products(["Fluted Sideboard"] * 6), self.NAMED)
+        self.assertEqual(combos, [])
+
+    def test_a_non_attribute_kind_never_enters_a_spec(self) -> None:
+        """`other` is the bucket for terms we could not place; a spec built out
+        of one would read as a product decision that nobody made."""
+        combos = elements.combinations(
+            self.products(["Clearance Fluted Oak Sideboard"] * 6), self.NAMED)
+        for combo in combos:
+            with self.subTest(combo["key"]):
+                self.assertNotIn("clearance", combo["terms"])
+
+    def test_demand_needs_a_phrase_carrying_the_whole_spec(self) -> None:
+        """A phrase for one half of a spec is not demand for the spec."""
+        combos = elements.combinations(
+            self.products(["Fluted Oak Sideboard"] * 6), self.NAMED,
+            [{"keyword": "fluted sideboard", "searches": 40_000.0,
+              "searches_mom_pct": 30.0},
+             {"keyword": "oak sideboard", "searches": 40_000.0,
+              "searches_mom_pct": 30.0}])
+        spec = next(c for c in combos if c["key"] == "fluted+oak")
+        self.assertIsNone(spec["growth_pct"],
+                          "neither phrase carries both terms")
+        self.assertFalse(spec["rated"])
+
+    def test_a_phrase_carrying_the_whole_spec_is_demand_for_it(self) -> None:
+        combos = elements.combinations(
+            self.products(["Fluted Oak Sideboard"] * 6), self.NAMED,
+            [{"keyword": "fluted oak sideboard", "searches": 40_000.0,
+              "searches_mom_pct": 30.0}])
+        spec = next(c for c in combos if c["key"] == "fluted+oak")
+        self.assertEqual(spec["growth_pct"], 30.0)
+        self.assertTrue(spec["rated"])
+
+    def test_growth_is_never_blended_from_the_parts(self) -> None:
+        """Averaging the constituent terms' growth would fill the chart with
+        numbers nobody measured, on an axis that looks measured."""
+        combos = elements.combinations(
+            self.products(["Fluted Oak Sideboard"] * 6), self.NAMED,
+            [{"keyword": "fluted sideboard", "searches": 90_000.0,
+              "searches_mom_pct": 80.0}])
+        spec = next(c for c in combos if c["key"] == "fluted+oak")
+        self.assertIsNone(spec["growth_pct"])
+        self.assertEqual(spec["searches"], 0)
+
+
 class BriefTests(unittest.TestCase):
     def test_an_empty_read_produces_no_block(self) -> None:
         """An empty heading in the prompt is worse than no heading."""

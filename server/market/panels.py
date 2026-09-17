@@ -14,6 +14,7 @@ what landed so a silently missing family is visible rather than merely absent.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 from . import elements, gateway, jobs, monitor, scoring, store, taxonomy
@@ -331,6 +332,10 @@ MAX_MATRIX_RAIL_PER_KIND = 16
 # push the department median line off the frame.
 MIN_X_SPAN = 5.0
 MIN_Y_SPAN = 25.0
+# How many specs one chart may plot. A spec is a narrow claim, so the tail is
+# long and mostly one-listing noise; the count of what was measured is reported
+# beside the chart so the tail is visible without being drawn.
+MAX_COMBO_POINTS = 45
 
 
 def _element_matrix(rows: Sequence[dict], zh: bool) -> dict:
@@ -372,12 +377,58 @@ def _element_matrix(rows: Sequence[dict], zh: bool) -> dict:
         "scale": _element_scale(points),
         # One window or the reader is comparing a month against a year.
         "window": windows.pop() if len(windows) == 1 else "mixed",
-        "quadrants": (("需求在涨·货架未跟上", "需求在涨·已验证",
-                       "需求转弱·货架仍重", "需求转弱·货架也轻")
-                      if zh else
-                      ("Rising, shelf has not answered", "Rising and proven",
-                       "Cooling but shelf-heavy", "Cooling and thin")),
+        "quadrants": _element_quadrants(zh),
     }
+
+
+def _combo_matrix(combos: Sequence[dict], zh: bool) -> dict:
+    """The spec chart: one point per combination the market has actually built.
+
+    Same two axes as the element read and the same three states — a spec with
+    both halves gets a position, one with only a shelf reading goes in the rail.
+    What changed is the unit. An element is an alternative ("of the finishes we
+    track, black is the only one cooling"); a spec is a product ("a black
+    solid-wood fluted sideboard holds 0.4% of head revenue and its phrases are
+    up 31%"). The second is the sentence a brief is written from.
+
+    One chart rather than a row per attribute, because a spec spans the
+    attributes by construction — there is no attribute to file it under.
+    """
+    points = [
+        {"key": c["key"], "label": c["label"], "kind": "combo",
+         "kind_label": (f"{c['attrs']} 项组合" if zh
+                        else f"{c['attrs']}-attribute spec"),
+         "spec": c["spec"],
+         "shelf_pct": c["revenue_share_pct"] if c.get("shelf_rated") else None,
+         "growth_pct": c["growth_pct"] if _demand_rated(c) else None,
+         "searches": c["searches"], "asins": c["asins"],
+         "avg_price": c["avg_price"], "window": c.get("window") or ""}
+        for c in combos
+        if c.get("shelf_rated") or _demand_rated(c)
+    ]
+    if not points:
+        return {"points": [], "bounds": None, "scale": None, "window": "",
+                "quadrants": _element_quadrants(zh)}
+    points.sort(key=lambda p: p["searches"], reverse=True)
+    windows = {p["window"] for p in points if p["window"]}
+    x_mid = scoring._median(
+        [p["shelf_pct"] for p in points if p["shelf_pct"] is not None]) or 0.0
+    return {
+        "points": points[:MAX_COMBO_POINTS],
+        "bounds": _row_bounds(points[:MAX_COMBO_POINTS], x_mid),
+        "scale": _element_scale(points[:MAX_COMBO_POINTS]),
+        "total": len(combos),
+        "window": windows.pop() if len(windows) == 1 else "mixed",
+        "quadrants": _element_quadrants(zh),
+    }
+
+
+def _element_quadrants(zh: bool) -> tuple[str, str, str, str]:
+    return (("需求在涨·货架未跟上", "需求在涨·已验证",
+             "需求转弱·货架仍重", "需求转弱·货架也轻")
+            if zh else
+            ("Rising, shelf has not answered", "Rising and proven",
+             "Cooling but shelf-heavy", "Cooling and thin"))
 
 
 def _demand_rated(row: Mapping[str, Any]) -> bool:
@@ -739,26 +790,49 @@ def price_curve(marketplace: str, period: str) -> tuple[tuple[float, float], ...
     return scoring.price_model(list(bands.values()))
 
 
-def mined_terms(marketplace: str, period: str) -> list[dict]:
+@dataclass(frozen=True)
+class MiningInputs:
+    """Everything the element read is computed from, fetched once per render.
+
+    Three consumers want the same rows — the mining, the naming call and the
+    spec chart — and each of them reading for itself meant the twenty-thousand
+    row title scan ran two and three times for one dashboard.
+    """
+    products: list[dict]
+    phrases: list[dict]
+    before: list[dict]
+
+
+def mining_inputs(marketplace: str, period: str) -> MiningInputs:
+    """The stored rows the element read takes in.
+
+    None of the limits here is a quality bar — they are fetch caps over rows
+    already bought and stored. At 400 phrases the demand side saw only the head
+    of the department's search vocabulary, so an attribute whose terms live in
+    the middle of that list could not appear at all, however real it was.
+    Reading more stored rows costs a wider SELECT and nothing else.
+    """
+    before = gateway.step_period(period, -1)
+    return MiningInputs(
+        # Every title held for the month. The old 2,500 was a third of what a
+        # full month's listing pull collects, and the third it kept was the
+        # revenue head — where the vocabulary is narrowest and most generic.
+        products=store.all_products(marketplace, period,
+                                    limit=elements.MAX_TITLE_ROWS),
+        phrases=_demand_rows(marketplace, period),
+        before=_demand_rows(marketplace, before) if before else [])
+
+
+def mined_terms(marketplace: str, period: str, *,
+                inputs: MiningInputs | None = None) -> list[dict]:
     """The design terms this month's data contains, before anything names them.
 
     Shared by the panel and by the naming call so there is exactly one answer to
     "which terms did we find" — two definitions would let the model classify a
     list the chart never draws.
     """
-    # None of the limits below is a quality bar — they are fetch caps over rows
-    # already bought and stored. At 400 phrases the demand side saw only the head
-    # of the department's search vocabulary, so an attribute whose terms live in
-    # the middle of that list could not appear at all, however real it was.
-    # Reading more stored rows costs a wider SELECT and nothing else.
-    before = gateway.step_period(period, -1)
-    return elements.mine(
-        # Every title held for the month. The old 2,500 was a third of what a
-        # full month's listing pull collects, and the third it kept was the
-        # revenue head — where the vocabulary is narrowest and most generic.
-        store.all_products(marketplace, period, limit=elements.MAX_TITLE_ROWS),
-        _demand_rows(marketplace, period),
-        previous=_demand_rows(marketplace, before) if before else ())
+    mining = inputs or mining_inputs(marketplace, period)
+    return elements.mine(mining.products, mining.phrases, previous=mining.before)
 
 
 def _demand_rows(marketplace: str, period: str) -> list[dict]:
@@ -782,7 +856,8 @@ def _demand_rows(marketplace: str, period: str) -> list[dict]:
 
 
 def build_overview(marketplace: str, period: str, language: str,
-                   *, terms: Sequence[dict] | None = None) -> dict:
+                   *, terms: Sequence[dict] | None = None,
+                   inputs: MiningInputs | None = None) -> dict:
     """Every deterministic section of the discovery board."""
     zh = _zh(language)
     snapshots = {s["node_id_path"]: s for s in store.list_node_snapshots(marketplace, period)}
@@ -803,12 +878,13 @@ def build_overview(marketplace: str, period: str, language: str,
     # Mined from the market's own words, then named by the model and cached.
     # Both halves come from calls the sweep already makes: the titles arrive with
     # every product_research row, the phrases with every keyword call.
-    # `terms` is passed in by the render, which mined them a moment ago to feed
-    # the naming call. Mining is the most expensive read on this path — every
-    # stored title and phrase for two months, then the whole term pass — and
-    # doing it twice per render bought nothing but a second identical answer.
+    # `terms` and `inputs` are passed in by the render, which mined them a moment
+    # ago to feed the naming call. Mining is the most expensive read on this path
+    # — every stored title and phrase for two months, then the whole term pass —
+    # and doing it twice per render bought nothing but a second identical answer.
+    mining = inputs or mining_inputs(marketplace, period)
     element_rows = elements.apply_naming(
-        mined_terms(marketplace, period) if terms is None else terms,
+        mined_terms(marketplace, period, inputs=mining) if terms is None else terms,
         store.element_naming(marketplace), zh)
     rising_elements, falling_elements = elements.split(element_rows)
     board: list[dict] = []
@@ -951,6 +1027,13 @@ def build_overview(marketplace: str, period: str, language: str,
         "price_fit": scoring.price_curve_rows(aov_curve),
         "elements": element_rows,
         "element_matrix": _element_matrix(element_rows, zh),
+        # The spec chart reads the same mined vocabulary back off the listings,
+        # so it needs the named terms rather than the per-term aggregates — and
+        # the same inputs the mining used, not a second read of them.
+        "element_combos": _combo_matrix(
+            elements.combinations(mining.products, element_rows, mining.phrases,
+                                  previous=mining.before),
+            zh),
         "follow": _follow(board, rising_elements, zh),
         "avoid": _avoid(board, falling_elements, zh),
         "supply": _supply_rows(board, snapshots),

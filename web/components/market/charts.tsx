@@ -338,6 +338,10 @@ export type ElementPoint = {
   searches: number;
   asins: number;
   avg_price: number | null;
+  /** Set when the point is a spec rather than a single element: the combination
+   *  broken out attribute by attribute, for the hover card. A glued label reads
+   *  as one long word; "材质 实木 · 颜色 黑色" reads as a decision. */
+  spec?: { kind: string; kind_label: string; label: string }[];
 };
 
 /** An element measured on both axes, so it has a position to be drawn at. */
@@ -420,6 +424,7 @@ export function ElementMatrix({
   medianLabel,
   tipLabels,
   railLabels,
+  aspect = "row",
 }: {
   /** Field dots and rail marks in one list; `inField` decides which is which. */
   points: ElementPoint[];
@@ -435,6 +440,9 @@ export function ElementMatrix({
   tipLabels: ElementTipLabels;
   /** Names the two rails, e.g. 需求未测到 / 货架未测到. */
   railLabels: { noDemand: string; noShelf: string };
+  /** `row` is one attribute in a stack of rows; `solo` is the single spec chart,
+   *  which carries an order of magnitude more points and needs the height. */
+  aspect?: "row" | "solo";
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [hover, setHover] =
@@ -454,7 +462,7 @@ export function ElementMatrix({
   // The absolute numbers are chosen so that scaling lands near 1:1 on a desktop
   // panel and the 9px type stays the size it was designed at.
   const width = 1000;
-  const height = 200;
+  const height = aspect === "solo" ? 440 : 200;
   // Left pad carries the y tick values only; both axis names are on one line
   // under the plot. Both axes are percentages of completely different things —
   // a share on x, a growth rate on y — so a row that prints only numbers makes
@@ -491,8 +499,16 @@ export function ElementMatrix({
   // is the opposite of the priority order: rail marks paint first so a field dot
   // is never hidden under one, but a measured position deserves its name more
   // than a rail mark does. Biggest first within the field, as before.
+  //
+  // Capped as well as collision-checked. Collision alone is not enough on the
+  // spec chart: forty-five points leave a dense middle where a dozen labels
+  // technically fit and collectively read as noise. Past the cap the name lives
+  // in the hover card, which is where the reader looks for a specific point
+  // anyway.
+  const labelCap = aspect === "solo" ? 16 : ordered.length;
   const labelled = new Set<string>();
   for (const point of ordered) {
+    if (labelled.size >= labelCap) break;
     const cx = px(point.shelf_pct);
     const cy = py(point.growth_pct);
     if (placed.some((seat) => Math.abs(seat.x - cx) < 56
@@ -676,7 +692,7 @@ export function ElementMatrix({
                       cx={cx} cy={cy} r={Math.min(3, r / 3)} />
               {!clash ? (
                 <text className="bi-point-label" x={cx} y={cy - r - 5} textAnchor="middle">
-                  {truncate(point.label, 12)}
+                  {truncate(point.label, aspect === "solo" ? 16 : 12)}
                 </text>
               ) : null}
             </g>
@@ -695,6 +711,15 @@ export function ElementMatrix({
             <span className="bi-dot-tip-name">{hover.point.label}</span>
             <span className="bi-chip bi-chip-observed">{hover.point.kind_label}</span>
           </div>
+          {/* A spec's own rows, above the measurements: which attribute took
+              which value is the thing the reader came for. */}
+          {hover.point.spec?.length ? (
+            <div className="mb-1.5 border-b border-border pb-1.5">
+              {hover.point.spec.map((part) => (
+                <TipRow key={part.kind} label={part.kind_label} value={part.label} />
+              ))}
+            </div>
+          ) : null}
           {/* An unmeasured half says so, in the row where its number would have
               been. Leaving the row out would read as "nothing to say about
               growth"; a dash reads as "we did not measure it", which is the
@@ -763,103 +788,69 @@ function describe(point: ElementPoint, xLabel: string, yLabel: string,
     + (point.avg_price != null ? ` · ${fmtMoney(point.avg_price)}` : "");
 }
 
-/** The same chart once per attribute — sizes beside sizes, finishes beside
- *  finishes, surface treatments beside surface treatments.
+/** Every spec the market has built, on one chart.
  *
- * One scatter for every element was the wrong unit of comparison. A designer
- * choosing a front profile is not weighing it against a colour, and putting the
- * two on shared axes implies they are alternatives. Within one attribute they
- * really are: the dots are the options for a single decision, so their ranking
- * is the decision, and the tinted corner is the option nobody has built yet.
+ * The attribute rows answer "of the finishes we track, which one is cooling".
+ * This answers the question a brief is actually written from: which whole
+ * product — a scene, a size, a material, a colour, a look, a surface treatment —
+ * is selling and which way its demand is moving. A spec spans the attributes by
+ * construction, so there is no attribute to file it under and no row to put it
+ * in; it is one chart or it is nothing.
  *
- * The axes are shared across the rows, which is what makes a stack of charts
- * legitimate rather than several charts that happen to sit together.
+ * Every point came off real listings. Enumerating the combinations of the mined
+ * vocabulary would produce thousands of products nobody has made, and a chart of
+ * hypothetical specs with a measured axis invites the reader to treat noise as
+ * an opening.
  */
-export function ElementMatrixGroups({
-  groups,
+export function ElementComboChart({
+  points,
+  bounds,
   scale,
   quadrants,
   xLabel,
   yLabel,
-  windowNote,
-  sizeNote,
-  splitNote,
+  medianLabel,
+  tipLabels,
+  railLabels,
+  notes,
+  total,
   countLabel,
   moreLabel,
-  medianLabel,
-  axesNote,
-  tipLabels,
-  hoverNote,
-  railLabels,
-  railNote,
 }: {
-  groups: ElementGroup[];
-  scale?: ElementScale;
+  points: ElementPoint[];
+  bounds?: ElementRowScale | null;
+  scale?: ElementScale | null;
   quadrants: [string, string, string, string];
   xLabel: string;
   yLabel: string;
-  windowNote: string;
-  sizeNote: string;
-  /** Why the chart is split — without it a reader compares across rows. */
-  splitNote: string;
-  /** Suffix for "n elements", e.g. 个 / measured. */
-  countLabel: string;
-  /** Suffix for the elements a row measured but could not plot. */
-  moreLabel: string;
-  /** Names the dashed vertical reference, e.g. 中位 / median. */
   medianLabel: string;
-  /** Says out loud that the two axes are percentages of different things. */
-  axesNote: string;
-  /** Row names for the hover card. */
   tipLabels: ElementTipLabels;
-  /** Tells the reader the hover card exists — an affordance nobody discovers
-   *  by being told nothing. */
-  hoverNote: string;
-  /** Names the two rails and explains what a square mark means. */
   railLabels: { noDemand: string; noShelf: string };
-  railNote: string;
+  notes: string[];
+  /** Specs measured, before the plot cap — so a truncated tail is visible. */
+  total?: number;
+  countLabel: string;
+  moreLabel: string;
 }) {
-  if (!groups.length || !scale) return null;
+  if (!points.length || !bounds || !scale) return null;
+  const hidden = Math.max(0, (total ?? points.length) - points.length);
   return (
     <div>
-      <div className="space-y-2.5">
-        {groups.map((group) => (
-          <div key={group.kind}
-               className="bi-card flex flex-col gap-1 px-3 py-2.5
-                          sm:flex-row sm:items-center sm:gap-3">
-            {/* The name to the left rather than above: it turns the set into a
-                list of decisions the eye can run down, and gives the drawing the
-                whole width instead of a caption's worth of it. */}
-            <div className="flex shrink-0 flex-row items-baseline gap-2 sm:w-24
-                            sm:flex-col sm:items-start sm:gap-0.5 sm:pt-1">
-              <span className="bi-chip bi-chip-observed">{group.kind_label}</span>
-              <span className="text-[10px] tabular-nums text-fg-subtle">
-                {group.total} {countLabel}
-              </span>
-              {group.dropped > 0 ? (
-                <span className="text-[10px] tabular-nums text-fg-subtle">
-                  {group.dropped} {moreLabel}
-                </span>
-              ) : null}
-            </div>
-            {/* Capped, because the drawing scales with its box: on a 2560px
-                monitor an uncapped row would be 480px tall with 26px axis type.
-                The cap is well above a normal window, so the row still fills
-                the width everywhere it matters. */}
-            <div className="min-w-0 flex-1 max-w-[1400px]">
-              <ElementMatrix points={group.points} xLabel={xLabel} yLabel={yLabel}
-                             bounds={group.scale ?? fallbackBounds(group.points)}
-                             scale={scale} medianLabel={medianLabel}
-                             tipLabels={tipLabels} railLabels={railLabels} />
-            </div>
-          </div>
-        ))}
+      <div className="mb-1 flex items-baseline gap-2 text-[11px]">
+        <span className="text-fg-subtle tabular-nums">
+          {total ?? points.length} {countLabel}
+        </span>
+        {hidden > 0 ? (
+          <span className="text-fg-subtle tabular-nums">
+            ·&nbsp;{hidden} {moreLabel}
+          </span>
+        ) : null}
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]
+      <ElementMatrix points={points} bounds={bounds} scale={scale} aspect="solo"
+                     xLabel={xLabel} yLabel={yLabel} medianLabel={medianLabel}
+                     tipLabels={tipLabels} railLabels={railLabels} />
+      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]
                       text-fg-subtle">
-        {/* Said once for the whole set rather than drawn into every row. The
-            two tinted corners carry their tint as the swatch, so the legend is
-            also the key to the shading. */}
         <span className="flex items-center gap-1">
           ↖<i className="bi-swatch shrink-0 bi-legend-open" />{quadrants[0]}
         </span>
@@ -869,15 +860,9 @@ export function ElementMatrixGroups({
         </span>
         <span>↙&nbsp;{quadrants[3]}</span>
       </div>
-      <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]
-                      text-fg-subtle">
-        <span>{axesNote}</span>
-        <span>{windowNote}</span>
-        <span>{sizeNote}</span>
-      </div>
-      <div className="mt-0.5 text-[10px] text-fg-subtle">{hoverNote}</div>
-      <div className="mt-0.5 text-[10px] text-fg-subtle">{railNote}</div>
-      <div className="mt-0.5 text-[10px] text-fg-subtle">{splitNote}</div>
+      {notes.map((note) => (
+        <div key={note} className="mt-0.5 text-[10px] text-fg-subtle">{note}</div>
+      ))}
     </div>
   );
 }

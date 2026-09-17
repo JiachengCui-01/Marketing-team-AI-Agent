@@ -488,6 +488,169 @@ Drop a term that is not a design attribute at all: a shipping promise, a
 warranty, a marketing adjective, a bare number, a category noun."""
 
 
+
+# ------------------------------------------------------------ combinations ----
+# A single element is an alternative, not a product. "Fluted" is a decision; a
+# brief is "a black solid-wood fluted sideboard for a bedroom". So the terms get
+# recombined into the specs the market has actually built, and those are what
+# gets plotted.
+
+# Attributes below this many on one listing are not a combination, they are the
+# element chart again.
+MIN_COMBO_ATTRS = 2
+# Listings carrying the exact spec, below which it is one seller's idea rather
+# than a pattern. Higher than the single-term bar: a spec is a narrower claim, so
+# three coincidences prove less than three do for one word.
+MIN_COMBO_ASINS = 4
+# How many specs are worth putting on one chart.
+MAX_COMBOS = 60
+# Attributes in one spec label. Past four the label is a sentence and the point
+# is unreadable; the hover card carries the rest.
+MAX_COMBO_ATTRS = 4
+
+
+def combinations(products: Sequence[Mapping[str, Any]],
+                 named: Sequence[Mapping[str, Any]],
+                 keywords: Sequence[Mapping[str, Any]] = (),
+                 *, previous: Sequence[Mapping[str, Any]] = ()) -> list[dict]:
+    """The specs the market has built, each measured on both halves.
+
+    Every spec here came off a real listing. Enumerating the cartesian product of
+    the mined vocabulary would produce thousands of specs, nearly all of which
+    nobody has ever made — and a chart of hypothetical products with a measured
+    axis is a chart that invites you to read noise as an opening. So the
+    signature is read *off* each listing: which attributes does this title name,
+    and with which words.
+
+    Demand is the strict reading: a phrase has to carry every term in the spec.
+    Most specs will have no phrase at all, and that is the honest answer —
+    "nobody searches for this exact combination" is different from "we blended
+    the growth of its parts", which would be a number we made up.
+    """
+    kinds = {row["term"]: row["kind"] for row in named
+             if row.get("kind") and row["kind"] != OTHER}
+    labels = {row["term"]: row.get("label") or row["term"] for row in named}
+    kind_labels = {row["term"]: row.get("kind_label") or row["kind"] for row in named}
+    # Rank inside a kind, so a title naming two materials picks the same one
+    # every month rather than whichever the tokeniser happened to emit first.
+    rank = {row["term"]: -(row.get("revenue_share_pct") or 0.0) for row in named}
+    if not kinds:
+        return []
+
+    total_revenue = sum((_num(p.get("revenue")) or 0.0) for p in products)
+    specs: dict[tuple[str, ...], dict] = {}
+    for product in products:
+        title = str(product.get("title") or "")
+        if not title:
+            continue
+        present = [t for t in _terms(_tokens(title)) if t in kinds]
+        if not present:
+            continue
+        # One term per attribute: a spec says "the material is oak", not "the
+        # materials are oak and walnut".
+        best: dict[str, str] = {}
+        for term in sorted(present, key=lambda t: (rank[t], t)):
+            best.setdefault(kinds[term], term)
+        if len(best) < MIN_COMBO_ATTRS:
+            continue
+        signature = tuple(best[k] for k in KIND_ORDER if k in best)
+        bucket = specs.setdefault(signature, {
+            "asins": 0, "revenue": 0.0, "_prices": []})
+        bucket["asins"] += 1
+        bucket["revenue"] += _num(product.get("revenue")) or 0.0
+        price = _num(product.get("price"))
+        if price is not None:
+            bucket["_prices"].append(price)
+
+    kept = {sig: agg for sig, agg in specs.items()
+            if agg["asins"] >= MIN_COMBO_ASINS}
+    demand = _combo_demand(kept, keywords, previous)
+
+    out: list[dict] = []
+    for signature, agg in kept.items():
+        want = demand.get(signature) or {}
+        prices = agg["_prices"]
+        shown = signature[:MAX_COMBO_ATTRS]
+        out.append({
+            "key": "+".join(signature),
+            "terms": list(signature),
+            # The spec broken out attribute by attribute, for the hover card:
+            # "材质 实木 · 颜色 黑色" reads; a glued string does not.
+            "spec": [{"kind": kinds[t], "kind_label": kind_labels[t],
+                      "label": labels[t]} for t in signature],
+            "label": " · ".join(labels[t] for t in shown),
+            "attrs": len(signature),
+            "asins": agg["asins"],
+            "revenue": round(agg["revenue"], 2),
+            "revenue_share_pct": (round(agg["revenue"] / total_revenue * 100.0, 1)
+                                  if total_revenue > 0 else 0.0),
+            "avg_price": round(sum(prices) / len(prices), 2) if prices else None,
+            "shelf_rated": True,
+            "searches": int(want.get("searches") or 0),
+            "keyword_count": int(want.get("keyword_count") or 0),
+            "growth_pct": want.get("growth_pct"),
+            "window": want.get("window") or "",
+            "keywords": want.get("keywords") or [],
+            "rated": bool(want.get("rated")),
+        })
+    out.sort(key=lambda c: (c["revenue_share_pct"], c["asins"]), reverse=True)
+    return out[:MAX_COMBOS]
+
+
+def _combo_demand(specs: Mapping[tuple[str, ...], Any],
+                  keywords: Sequence[Mapping[str, Any]],
+                  previous: Sequence[Mapping[str, Any]]) -> dict[tuple[str, ...], dict]:
+    """Phrases that carry every term of a spec, aggregated per spec.
+
+    Quadratic in principle — every phrase against every spec — but both sides are
+    small after their own filters (a few hundred phrases, a few dozen specs), and
+    the inner test is a subset check on a prepared set.
+    """
+    before = {str(r.get("keyword") or ""): _num(r.get("searches")) or 0.0
+              for r in previous}
+    phrases = []
+    for row in keywords:
+        phrase = str(row.get("keyword") or "").strip()
+        if not phrase:
+            continue
+        growth, window = _growth_of(row, before)
+        phrases.append((_terms(_tokens(phrase)), phrase,
+                        _num(row.get("searches")) or 0.0, growth, window))
+
+    buckets: dict[tuple[str, ...], dict] = {}
+    for signature in specs:
+        needed = set(signature)
+        bucket = {"searches": 0.0, "keyword_count": 0, "keywords": [],
+                  "_weighted": 0.0, "_weight": 0.0, "_windows": {}}
+        for terms, phrase, searches, growth, window in phrases:
+            if not needed <= terms:
+                continue
+            bucket["searches"] += searches
+            bucket["keyword_count"] += 1
+            bucket["keywords"].append({"keyword": phrase, "searches": searches,
+                                       "growth_pct": growth})
+            if growth is not None and searches > 0:
+                bucket["_weighted"] += growth * searches
+                bucket["_weight"] += searches
+                bucket["_windows"][window] = (
+                    bucket["_windows"].get(window, 0.0) + searches)
+        if not bucket["keyword_count"]:
+            continue
+        weight = bucket.pop("_weight")
+        weighted = bucket.pop("_weighted")
+        windows = bucket.pop("_windows")
+        bucket["growth_pct"] = round(weighted / weight, 1) if weight else None
+        bucket["window"] = max(windows, key=windows.get) if windows else ""
+        bucket["keywords"] = sorted(bucket["keywords"],
+                                    key=lambda k: k["searches"], reverse=True)[:5]
+        bucket["searches"] = round(bucket["searches"])
+        # A spec is a narrower claim than a word, so one phrase carrying all of
+        # it is evidence where one phrase carrying a single term was not.
+        bucket["rated"] = bool(bucket["growth_pct"] is not None
+                               and bucket["searches"] >= MIN_SEARCHES)
+        buckets[signature] = bucket
+    return buckets
+
 def naming_brief(terms: Sequence[dict]) -> str:
     """The mined terms as the model receives them, for naming only."""
     lines = [_KIND_RULES, "",

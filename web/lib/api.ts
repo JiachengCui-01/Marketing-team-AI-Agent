@@ -1,4 +1,5 @@
-import type { ElementGroup, ElementScale } from "@/components/market/charts";
+import type { ElementGroup, ElementPoint, ElementRowScale, ElementScale }
+  from "@/components/market/charts";
 
 // In production the frontend should prefer the same-origin `/api` rewrite unless
 // NEXT_PUBLIC_API_BASE is explicitly configured. Falling back to 127.0.0.1 in a
@@ -1968,6 +1969,18 @@ export type MarketDashboard = {
   element_matrix?: {
     groups?: ElementGroup[];
     scale?: ElementScale | null;
+    window: string;
+    quadrants: [string, string, string, string];
+  };
+  /** Whole specs — scene + size + material + colour + look + surface treatment —
+   *  each one read off real listing titles. One chart, because a spec spans the
+   *  attributes and so has no attribute row to sit in. */
+  element_combos?: {
+    points: ElementPoint[];
+    bounds?: ElementRowScale | null;
+    scale?: ElementScale | null;
+    /** Specs measured, before the plot cap. */
+    total?: number;
     window: string;
     quadrants: [string, string, string, string];
   };
