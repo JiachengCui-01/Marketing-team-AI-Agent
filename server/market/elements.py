@@ -77,7 +77,10 @@ KIND_ORDER = (CRAFT, MATERIAL, COLOR, SIZE, FORM, FEATURE, STYLE, ROOM, OTHER)
 # 3: the rules moved from the tool schema into the brief. Version 2 shipped with
 # both kinds available and still filed 白色 and 黑色 under `style`, so those rows
 # are a wrong answer rather than an old one and have to be asked again.
-NAMING_VERSION = 3
+# 4: `other` had become the default rather than the last resort — 123 of ~150
+# terms, with rooms, materials and structural nouns inside it. Every one of
+# those rows is in the wrong column, so the whole vocabulary is re-asked.
+NAMING_VERSION = 4
 
 # Syntax, not domain: a bigram must not be glued across one of these, or
 # "cabinet with storage" becomes the term "with storage".
@@ -126,7 +129,12 @@ MIN_SEARCHES = 1_200.0
 # is worse than no colour row. Naming is cached per term and batched, so the
 # longer list costs a few model calls the first time a term appears and nothing
 # after that.
-MAX_TERMS = 160
+#
+# 160 was binding in production: one attribute row reported 123 elements of a
+# mined list that had nowhere else to go, which means the cap — not the market —
+# was deciding what the tail looked like. The per-attribute caps are the ones
+# that should shape the chart; this one only bounds the read.
+MAX_TERMS = 260
 # Stored rows the mining may take in. Ceilings on a SELECT over data already
 # collected and already paid for, set high enough not to bind rather than tuned
 # — the evidence bars above are what decide what counts. They live here rather
@@ -436,22 +444,46 @@ def split(rows: Iterable[dict], *, limit: int = 6) -> tuple[list[dict], list[dic
 # more carefully than an enum's `description`. Each line names the *decision* the
 # kind stands for, because "is fluting a style?" has no answer while "is fluting
 # a tooling decision or a mood?" does.
-_KIND_RULES = """HOW TO CLASSIFY (exactly one kind per term, the narrowest that fits):
-  material — what the thing is made of: solid wood, rattan, boucle, marble, mdf
+_KIND_RULES = """HOW TO CLASSIFY (exactly one kind per term).
+
+`other` is a last resort, not a default. In the first production run it swallowed
+123 of about 150 terms — including `bathroom`, `garage`, `bedroom` (those are
+`room`), `shaped` and `corner` (`form`), `velvet` (`material`) and `drawers`
+(`form`) — which left every other kind with three or four terms and made the
+whole classification useless. Before answering `other`, go back through the list
+above it and satisfy yourself that none of them fits. Almost always one does.
+
+  material — what the thing is made of: solid wood, rattan, boucle, marble, mdf,
+             velvet, linen, leather, glass, metal, bamboo
   craft    — what was done to the surface, or how it was built: a tooling and
              lead-time decision. fluted, reeded, burl / burl grain, cane weave,
              carved, tufted, hammered, distressed, live edge, woven
   color    — a colour or a finish tone: black, white, walnut, oak (as a tone),
-             sage, cream. Any colour word is `color`, never `style`.
-  size     — a dimension or capacity decision: oversized, 70 inch, 3 drawer,
-             king, full size, extra wide
-  form     — the overall shape: arched, round, l shaped, low profile
-  feature  — what it does: lift top, charging station, adjustable shelf
+             sage, cream, grey, espresso. Any colour word is `color`, and
+             never `style`.
+  size     — a dimension or a count: oversized, 70 inch, 3 drawer, king, full
+             size, extra wide, compact, narrow. A bare number with a unit is a
+             size; the *thing* being counted is not (`3 drawer` is size,
+             `drawers` is form).
+  form     — the shape or the structure of the piece, including what parts it is
+             built out of: arched, round, l shaped, corner, sectional, shaped,
+             low profile, drawers, doors, shelves, legs, tiered, nested,
+             floating, wall mounted, freestanding. This is the kind most often
+             lost to `other` — a structural noun describing the object's form is
+             `form`, not `other`.
+  feature  — what it does, a mechanism or an added function: lift top, charging
+             station, adjustable shelf, reclining, swivel, extendable, storage,
+             cover, cushion
   style    — a named look and nothing else: japandi, mid century, farmhouse,
-             boho. Not a catch-all — if the term is a colour, a surface
-             treatment or a material, it is one of those instead.
-  room     — where it goes: living room, entryway
-  other    — a real design attribute that fits none of the above
+             boho, industrial, scandinavian. Not a catch-all — if the term is a
+             colour, a surface treatment or a material, it is one of those.
+  room     — where the piece goes or what it is used with, the setting: living
+             room, bedroom, bathroom, garage, entryway, kitchen, patio, office,
+             nursery, outdoor, tv, desk, dining. A room name or a use-setting is
+             `room`, never `other`.
+  other    — a genuine design attribute that none of the nine above can hold.
+             Expect this to be rare. If you cannot name which decision the term
+             belongs to, prefer `drop`.
 Drop a term that is not a design attribute at all: a shipping promise, a
 warranty, a marketing adjective, a bare number, a category noun."""
 

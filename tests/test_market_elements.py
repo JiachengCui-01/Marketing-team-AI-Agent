@@ -292,7 +292,7 @@ class NamingVersionGuardTests(unittest.TestCase):
     """
 
     # Bump NAMING_VERSION and then paste the digest this test prints.
-    EXPECTED = "c99564fc9761f14a"
+    EXPECTED = "4cba0b099102438e"
 
     def digest(self) -> str:
         material = "\n".join([

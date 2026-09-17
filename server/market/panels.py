@@ -319,11 +319,18 @@ def build_current(marketplace: str, language: str, *,
 
 # How many elements one attribute row may plot. The old cap was set for a
 # three-across grid where a row was 330px wide; full width, with a hover card
-# naming any dot whose label collided, twenty stays readable.
-MAX_MATRIX_POINTS_PER_KIND = 20
+# naming any dot whose label collided, and now with the row scaled to its own
+# elements rather than to the department's widest, twenty-eight stays readable.
+MAX_MATRIX_POINTS_PER_KIND = 28
 # The rails hold the elements with one measured half. Capped tighter than the
 # field because a rail mark carries one number rather than two.
-MAX_MATRIX_RAIL_PER_KIND = 10
+MAX_MATRIX_RAIL_PER_KIND = 16
+# Floors for a row's own axis range, in percentage points. Without them a row
+# whose elements all sit within a point of each other would be zoomed until the
+# gaps between them looked meaningful, and a row of low-share elements would
+# push the department median line off the frame.
+MIN_X_SPAN = 5.0
+MIN_Y_SPAN = 25.0
 
 
 def _element_matrix(rows: Sequence[dict], zh: bool) -> dict:
@@ -416,6 +423,8 @@ def _element_groups(points: Sequence[dict]) -> list[dict]:
     by_kind: dict[str, list[dict]] = {}
     for point in points:
         by_kind.setdefault(point["kind"], []).append(point)
+    x_mid = scoring._median(
+        [p["shelf_pct"] for p in points if p["shelf_pct"] is not None]) or 0.0
 
     out: list[dict] = []
     for kind in elements.KIND_ORDER:
@@ -429,36 +438,53 @@ def _element_groups(points: Sequence[dict]) -> list[dict]:
             "kind": kind,
             "kind_label": members[0]["kind_label"],
             "points": kept,
+            "scale": _row_bounds(kept, x_mid),
             "total": len(members),
             "dropped": len(members) - len(kept),
         })
     return out
 
 
-def _element_scale(points: Sequence[dict]) -> dict | None:
-    """The axis bounds every attribute row is drawn against.
+def _row_bounds(points: Sequence[dict], x_mid: float) -> dict:
+    """Axis bounds for one attribute row, from that row's own elements.
 
-    Computed once over every element so the rows are comparable. Rail elements
-    are inside the bounds, because they are drawn against these axes and one
-    past the end of the scale would sit on the frame.
+    These were shared across every row, on the argument that a dot in the same
+    position should mean the same number everywhere. The argument was wrong, and
+    the chart's own footnote says why: comparing across rows is meaningless,
+    because a colour is not an alternative to a size. What sharing actually
+    bought was a range set by the most extreme element in the whole department —
+    growth from -278% to +224% — against which every ordinary row collapsed into
+    a band a few pixels tall, and an x range set by the widest-selling element,
+    against which a row of low-share elements piled into the left corner.
 
-    The median is the exception: only elements with a shelf reading vote on it.
-    A median taken over readings we could not take is not a median of anything.
+    Two things stay global, because scaling them per row would make them lie:
+    the dot area (it encodes search volume) and the median line (it is a claim
+    about the department, not about this row).
+
+    The floors are what stop a row of near-identical elements from being zoomed
+    until noise looks like signal, and they keep the median line inside the
+    frame even in a row whose elements all sit well below it.
     """
-    if not points:
-        return None
     shelves = [p["shelf_pct"] for p in points if p["shelf_pct"] is not None]
     growths = [p["growth_pct"] for p in points if p["growth_pct"] is not None]
     return {
-        "x_max": round(max([5.0] + shelves) * 1.1, 2),
-        # The module's own median, not a second definition of one: `_median`
-        # averages the middle pair on an even count, and the dashed line has to
-        # mean what every other median on this dashboard means.
-        "x_mid": scoring._median(shelves) or 0.0,
-        "y_min": round(min([-10.0] + growths) * 1.1, 2),
-        "y_max": round(max([10.0] + growths) * 1.1, 2),
-        "max_searches": max(1, max(p["searches"] for p in points)),
+        "x_max": round(max([MIN_X_SPAN, x_mid * 1.3] + shelves) * 1.1, 2),
+        "x_mid": x_mid,
+        "y_min": round(min([-MIN_Y_SPAN] + growths) * 1.1, 2),
+        "y_max": round(max([MIN_Y_SPAN] + growths) * 1.1, 2),
     }
+
+
+def _element_scale(points: Sequence[dict]) -> dict | None:
+    """What stays global once the axis bounds went per-row.
+
+    Only the dot area. It encodes monthly searches, so it has to be measured
+    against the same maximum in every row or a big element in a quiet row would
+    draw larger than a bigger one in a busy row.
+    """
+    if not points:
+        return None
+    return {"max_searches": max(1, max(p["searches"] for p in points))}
 
 
 def _follow(board: Sequence[dict], rising: Sequence[dict], zh: bool) -> list[dict]:

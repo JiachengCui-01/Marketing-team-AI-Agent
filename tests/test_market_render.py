@@ -886,7 +886,12 @@ class ElementRailTests(RenderTestCase):
         matrix = self.matrix()
         shelves = [p["shelf_pct"] for p in _plotted(matrix)
                    if p["shelf_pct"] is not None]
-        self.assertEqual(matrix["scale"]["x_mid"], scoring._median(shelves))
+        expected = scoring._median(shelves)
+        # The department's median, so every row draws the same line — the one
+        # reference that stays shared now that the bounds are per row.
+        for group in matrix["groups"]:
+            with self.subTest(group["kind"]):
+                self.assertEqual(group["scale"]["x_mid"], expected)
 
     def test_the_row_count_includes_what_sits_in_the_rails(self) -> None:
         """A row saying "1 个" over three visible marks is worse than no count."""
@@ -959,22 +964,49 @@ class ElementMatrixGroupTests(RenderTestCase):
         kinds = [g["kind"] for g in matrix["groups"]]
         self.assertEqual(kinds, [k for k in elements.KIND_ORDER if k in kinds])
 
-    def test_every_panel_is_drawn_against_one_shared_scale(self) -> None:
-        """Per-panel bounds would let two dots in the same position mean two
-        different numbers, which is the one thing a set of small charts owes."""
+    def test_each_row_is_scaled_to_its_own_elements(self) -> None:
+        """Shared bounds let the department's most extreme element set the range
+        for every row, and an ordinary row collapsed into a band a few pixels
+        tall. Comparing across rows is meaningless anyway — that is the premise
+        the whole split rests on — so each row gets its own frame."""
         self.seed()
         matrix = render.build_overview("US", PERIOD, "zh")["element_matrix"]
-        scale = matrix["scale"]
-        plotted = _plotted(matrix)
-        # Rail elements are drawn against these same axes, so their one reading
-        # has to be inside the bounds too — but the other one is `None`.
-        shelves = [p["shelf_pct"] for p in plotted if p["shelf_pct"] is not None]
-        growths = [p["growth_pct"] for p in plotted if p["growth_pct"] is not None]
-        self.assertGreaterEqual(scale["x_max"], max(shelves))
-        self.assertLessEqual(scale["y_min"], min(growths))
-        self.assertGreaterEqual(scale["y_max"], max(growths))
-        self.assertEqual(scale["max_searches"],
+        for group in matrix["groups"]:
+            with self.subTest(group["kind"]):
+                bounds = group["scale"]
+                shelves = [p["shelf_pct"] for p in group["points"]
+                           if p["shelf_pct"] is not None]
+                growths = [p["growth_pct"] for p in group["points"]
+                           if p["growth_pct"] is not None]
+                # Every element of the row, rails included, inside its frame.
+                if shelves:
+                    self.assertGreaterEqual(bounds["x_max"], max(shelves))
+                if growths:
+                    self.assertLessEqual(bounds["y_min"], min(growths))
+                    self.assertGreaterEqual(bounds["y_max"], max(growths))
+                # And the shared median line reachable on the x axis, or the
+                # row would draw a reference it cannot show.
+                self.assertGreaterEqual(bounds["x_max"], bounds["x_mid"])
+
+    def test_the_dot_area_stays_measured_against_one_maximum(self) -> None:
+        """Search volume is the one quantity that must not be rescaled per row:
+        a big element in a quiet row would out-draw a bigger one in a busy row."""
+        self.seed()
+        matrix = render.build_overview("US", PERIOD, "zh")["element_matrix"]
+        self.assertEqual(matrix["scale"]["max_searches"],
                          max(p["searches"] for p in _plotted(matrix)))
+
+    def test_a_row_of_near_identical_elements_is_not_zoomed_into_noise(self) -> None:
+        """Without a floor, a row whose elements sit within a point of each other
+        would be magnified until those gaps looked like findings."""
+        self.seed()
+        matrix = render.build_overview("US", PERIOD, "zh")["element_matrix"]
+        for group in matrix["groups"]:
+            with self.subTest(group["kind"]):
+                bounds = group["scale"]
+                self.assertGreaterEqual(bounds["x_max"], panels.MIN_X_SPAN)
+                self.assertGreaterEqual(bounds["y_max"], panels.MIN_Y_SPAN)
+                self.assertLessEqual(bounds["y_min"], -panels.MIN_Y_SPAN)
 
     def test_a_panel_reports_what_it_could_not_draw(self) -> None:
         """A reader who can see six were measured and four drawn can tell a thin

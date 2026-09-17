@@ -355,19 +355,31 @@ export type ElementGroup = {
   kind_label: string;
   /** Field dots and rail marks together; `inField` tells them apart. */
   points: ElementPoint[];
+  /** This row's axis bounds. */
+  scale?: ElementRowScale;
   /** How many elements of this kind were measured, before the plot cap. */
   total: number;
   dropped: number;
 };
 
-/** Axis bounds shared by every attribute row, computed server-side over all
- *  plotted elements. Without it each row would silently rescale and two dots
- *  in the same position would mean two different numbers. */
-export type ElementScale = {
+/** One row's own axis bounds, computed server-side from that row's elements.
+ *
+ *  Per row rather than shared, because comparing a colour against a size is
+ *  meaningless — which is the whole reason the chart is split by attribute in
+ *  the first place. Shared bounds meant one outlying element set the range for
+ *  every row, and ordinary rows collapsed into a band. `x_mid` is the exception:
+ *  it is the department's median shelf share, a claim about the department
+ *  rather than about this row, so every row draws the same line. */
+export type ElementRowScale = {
   x_max: number;
   x_mid: number;
   y_min: number;
   y_max: number;
+};
+
+/** What genuinely has to be global: the dot area encodes monthly searches, so
+ *  it is measured against one maximum across every row. */
+export type ElementScale = {
   max_searches: number;
 };
 
@@ -403,6 +415,7 @@ export function ElementMatrix({
   points,
   xLabel,
   yLabel,
+  bounds,
   scale,
   medianLabel,
   tipLabels,
@@ -412,7 +425,9 @@ export function ElementMatrix({
   points: ElementPoint[];
   xLabel: string;
   yLabel: string;
-  /** Bounds to draw against, shared by every row of the set. */
+  /** This row's own axis bounds. */
+  bounds: ElementRowScale;
+  /** The one globally shared quantity: what the largest dot area means. */
   scale: ElementScale;
   /** Names the dashed vertical reference for what it is, e.g. 中位 / median. */
   medianLabel: string;
@@ -450,10 +465,9 @@ export function ElementMatrix({
   const padT = 22;
   const padB = 34;
 
-  // The reference lines and bounds are the department's, not this row's — that
-  // is what makes a stack of rows comparable, and why the server computes them
-  // once over every element rather than each row over its own.
-  const { x_max: xMax, x_mid: xMid, y_min: yMin, y_max: yMax } = scale;
+  // Bounds from this row's own elements; the dot area from the whole set, so a
+  // big element in a quiet row cannot out-draw a bigger one in a busy row.
+  const { x_max: xMax, x_mid: xMid, y_min: yMin, y_max: yMax } = bounds;
   const maxSearches = Math.max(1, scale.max_searches);
 
   // The rails are inside the padding, not extra chrome outside it: each takes a
@@ -472,6 +486,20 @@ export function ElementMatrix({
   // labels that get dropped on collision are the least important ones.
   const ordered = [...field].sort((a, b) => b.searches - a.searches);
   const placed: { x: number; y: number }[] = [];
+
+  // Seats are claimed here rather than during the draw, because the draw order
+  // is the opposite of the priority order: rail marks paint first so a field dot
+  // is never hidden under one, but a measured position deserves its name more
+  // than a rail mark does. Biggest first within the field, as before.
+  const labelled = new Set<string>();
+  for (const point of ordered) {
+    const cx = px(point.shelf_pct);
+    const cy = py(point.growth_pct);
+    if (placed.some((seat) => Math.abs(seat.x - cx) < 56
+                              && Math.abs(seat.y - cy) < 13)) continue;
+    placed.push({ x: cx, y: cy });
+    labelled.add(point.key);
+  }
 
   /** Anchor the card to the dot, not to the cursor.
    *
@@ -593,18 +621,31 @@ export function ElementMatrix({
           ...rails.shelf.map((point) => ({
             point, cx: px(point.shelf_pct as number),
             cy: height - padB - railH / 2 })),
-        ].map(({ point, cx, cy }) => (
-          <g key={point.key} className="bi-dot-group" tabIndex={0} role="button"
-             aria-label={describe(point, xLabel, yLabel, tipLabels)}
-             onMouseEnter={() => show(point, cx, cy)} onMouseLeave={hide}
-             onFocus={() => show(point, cx, cy)} onBlur={hide}>
-            {/* Open square, not a disc: a different shape for a different
-                claim, so nobody reads a rail mark as a measured position. */}
-            <rect x={cx - 9} y={cy - 7} width={18} height={14} fill="transparent" />
-            <rect className="bi-rail-mark" x={cx - 4} y={cy - 4}
-                  width={8} height={8} rx={1.5} />
-          </g>
-        ))}
+        ].map(({ point, cx, cy }) => {
+          // Named like any other element. Leaving the rails unlabelled made a
+          // real element look like a decoration: "there is something here" and
+          // no way to find out what without hunting for it with a mouse.
+          const clash = placed.some(
+            (seat) => Math.abs(seat.x - cx) < 52 && Math.abs(seat.y - cy) < 12);
+          if (!clash) placed.push({ x: cx, y: cy });
+          return (
+            <g key={point.key} className="bi-dot-group" tabIndex={0} role="button"
+               aria-label={describe(point, xLabel, yLabel, tipLabels)}
+               onMouseEnter={() => show(point, cx, cy)} onMouseLeave={hide}
+               onFocus={() => show(point, cx, cy)} onBlur={hide}>
+              {/* Open square, not a disc: a different shape for a different
+                  claim, so nobody reads a rail mark as a measured position. */}
+              <rect x={cx - 9} y={cy - 7} width={18} height={14} fill="transparent" />
+              <rect className="bi-rail-mark" x={cx - 4} y={cy - 4}
+                    width={8} height={8} rx={1.5} />
+              {!clash ? (
+                <text className="bi-point-label" x={cx} y={cy - 9} textAnchor="middle">
+                  {truncate(point.label, 10)}
+                </text>
+              ) : null}
+            </g>
+          );
+        })}
 
         {ordered.map((point) => {
           const r = 4 + Math.sqrt(point.searches / maxSearches) * 11;
@@ -613,9 +654,7 @@ export function ElementMatrix({
           const rising = point.growth_pct >= 0;
           // Drop a label rather than stack it: two names on top of each other is
           // worse than one name and a dot whose name the hover card gives back.
-          const clash = placed.some(
-            (seat) => Math.abs(seat.x - cx) < 56 && Math.abs(seat.y - cy) < 13);
-          if (!clash) placed.push({ x: cx, y: cy });
+          const clash = !labelled.has(point.key);
           const hot = hover?.point.key === point.key;
           return (
             <g key={point.key} className="bi-dot-group"
@@ -692,6 +731,19 @@ function TipRow({ label, value, tone }: {
       </span>
     </div>
   );
+}
+
+/** Bounds for a row the server sent without any — a dashboard rendered before
+ *  this release. Same floors, so the row is drawn rather than skipped. */
+function fallbackBounds(points: ElementPoint[]): ElementRowScale {
+  const shelves = points.map((p) => p.shelf_pct).filter((v): v is number => v !== null);
+  const growths = points.map((p) => p.growth_pct).filter((v): v is number => v !== null);
+  return {
+    x_max: Math.max(5, ...shelves) * 1.1,
+    x_mid: 0,
+    y_min: Math.min(-25, ...growths) * 1.1,
+    y_max: Math.max(25, ...growths) * 1.1,
+  };
 }
 
 /** A percentage, or the word for a reading that was never taken. */
@@ -796,6 +848,7 @@ export function ElementMatrixGroups({
                 the width everywhere it matters. */}
             <div className="min-w-0 flex-1 max-w-[1400px]">
               <ElementMatrix points={group.points} xLabel={xLabel} yLabel={yLabel}
+                             bounds={group.scale ?? fallbackBounds(group.points)}
                              scale={scale} medianLabel={medianLabel}
                              tipLabels={tipLabels} railLabels={railLabels} />
             </div>
