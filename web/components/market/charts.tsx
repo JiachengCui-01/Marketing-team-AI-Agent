@@ -440,12 +440,12 @@ export function ElementMatrix({
   // panel and the 9px type stays the size it was designed at.
   const width = 1000;
   const height = 200;
-  // Left pad carries the rotated axis name as well as the tick values, bottom
-  // pad the x name. Both axes are percentages of completely different things —
+  // Left pad carries the y tick values only; both axis names are on one line
+  // under the plot. Both axes are percentages of completely different things —
   // a share on x, a growth rate on y — so a row that prints only numbers makes
   // the reader guess which percent is which. They are named on every row for
   // that reason, not for decoration.
-  const padL = 64;
+  const padL = 42;
   const padR = 20;
   const padT = 22;
   const padB = 34;
@@ -569,12 +569,17 @@ export function ElementMatrix({
 
         {/* Axis names, on every row. The one-line note in the section heading was
             doing this job for a single chart and stopped working the moment there
-            were seven of them and the eye had left the heading. */}
-        <text className="bi-axis-title" x={14}
-              y={padT + (height - padT - fieldB) / 2} textAnchor="middle"
-              transform={`rotate(-90 14 ${padT + (height - padT - fieldB) / 2})`}>
-          {yLabel} ↑
-        </text>
+            were seven of them and the eye had left the heading.
+            Both names sit horizontally on one line under the plot — y on the
+            left with its arrow, x on the right with its own. The y name used to
+            be rotated up the left edge, which reads badly for Chinese: rotating
+            a run of CJK glyphs turns each one on its side rather than stacking
+            them, so the reader tilts their head to parse a two-word label. The
+            arrow is what ties the name to its axis, so the name does not have to
+            sit against it. Unrotating it also freed 22px of left padding, which
+            went straight into the plot. */}
+        <text className="bi-axis-title" x={2} y={height - padB + 26}
+              textAnchor="start">{yLabel} ↑</text>
         <text className="bi-axis-title" x={width - padR} y={height - padB + 26}
               textAnchor="end">{xLabel} →</text>
 
