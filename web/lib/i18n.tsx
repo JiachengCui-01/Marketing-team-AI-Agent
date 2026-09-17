@@ -889,6 +889,15 @@ export function localizeError(error: unknown, locale: Locale): string {
       : "Cannot reach the server. Make sure the backend is running, then retry.";
   }
 
+  // Never return an empty string: the callers render `{error ? … : null}`, so an
+  // empty message is indistinguishable from "nothing went wrong" and the user is
+  // left clicking a button that appears inert.
+  if (!raw.trim()) {
+    return locale === "zh"
+      ? "操作失败，且服务器没有说明原因。请稍后重试。"
+      : "The request failed and the server gave no reason. Please retry.";
+  }
+
   if (locale === "zh") return raw;
 
   const exact: Record<string, string> = {

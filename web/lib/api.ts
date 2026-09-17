@@ -64,13 +64,31 @@ function apiCandidates(path: string): string[] {
   return Array.from(new Set(urls));
 }
 
+/** A message for a failed response, and never an empty one.
+ *
+ * `res.statusText` is always `""` over HTTP/2, which both deployments serve, so
+ * every failure whose body was not JSON-with-a-detail used to come back as an
+ * empty string — and an empty string renders as nothing at all. That turned a
+ * gateway 502 while the API container restarted into "clicking login does
+ * nothing", which is the worst possible way to report it: the reader cannot
+ * tell a broken button from a broken server.
+ *
+ * The status code is the floor. It is not friendly, but it is never silent.
+ */
 async function parseJsonError(res: Response): Promise<string> {
   try {
     const body = await res.json();
-    return String(body.detail || body.message || res.statusText);
+    const detail = String(body.detail || body.message || "").trim();
+    if (detail) return detail;
   } catch {
-    return res.statusText;
+    // Not JSON — an HTML error page from the platform, or an empty body.
   }
+  // 502/503/504 from the platform mean the service is not up yet, which is a
+  // wait-and-retry, not a wrong password. Worth saying so.
+  if (res.status === 502 || res.status === 503 || res.status === 504) {
+    return `服务暂时不可用（HTTP ${res.status}），可能正在重启，请稍后重试。`;
+  }
+  return `请求失败（HTTP ${res.status}）。`;
 }
 
 export type UserProfile = {
