@@ -1,4 +1,4 @@
-import type { ElementGroup, ElementPoint, ElementRowScale, ElementScale }
+import type { ElementChartBounds, ElementPoint, ElementScale }
   from "@/components/market/charts";
 
 // In production the frontend should prefer the same-origin `/api` rewrite unless
@@ -1966,18 +1966,12 @@ export type MarketDashboard = {
    *  spelling of them here. Spelling them twice is how this type came to be
    *  missing the rail fields entirely while still compiling — the one mismatch
    *  it exists to catch. */
-  element_matrix?: {
-    groups?: ElementGroup[];
-    scale?: ElementScale | null;
-    window: string;
-    quadrants: [string, string, string, string];
-  };
   /** Whole specs — scene + size + material + colour + look + surface treatment —
    *  each one read off real listing titles. One chart, because a spec spans the
    *  attributes and so has no attribute row to sit in. */
   element_combos?: {
     points: ElementPoint[];
-    bounds?: ElementRowScale | null;
+    bounds?: ElementChartBounds | null;
     scale?: ElementScale | null;
     /** Specs measured, before the plot cap. */
     total?: number;

@@ -21,16 +21,6 @@ BUFFETS = "1055398:1063306:3733781:3733831"
 PERIOD = "202608"
 
 
-def _plotted(matrix: dict) -> list[dict]:
-    """Every element the matrix ships, flattened back out of its attribute rows.
-
-    The payload carries no ungrouped copy: the rows are the only place the
-    points live, because a second flat list of the same objects was bytes in the
-    response and the database that nothing read.
-    """
-    return [point for group in matrix["groups"] for point in group["points"]]
-
-
 def tool_use(name: str, payload: dict):
     """A forced tool_use response shaped like ``llm_client`` returns."""
     block = mock.Mock(type="tool_use", input=payload)
@@ -700,68 +690,6 @@ class ElementNamingTests(RenderTestCase):
         self.assertTrue(record["dashboard"]["elements"])
 
 
-class ElementMatrixTests(RenderTestCase):
-    """Demand trend against shelf presence — both halves measured, neither guessed."""
-
-    def seed(self) -> None:
-        store.upsert_products([
-            {"marketplace": "US", "asin": f"BF{i}", "brand": "Demo", "title": title}
-            for i, title in enumerate([
-                "Fluted Oak Sideboard Buffet", "Fluted Door Console Table",
-                "Fluted Arch Cabinet", "Tufted Velvet Bench"])])
-        store.upsert_product_metrics([
-            {"marketplace": "US", "asin": f"BF{i}", "period": PERIOD,
-             "node_id_path": BUFFETS, "price": 399.0, "revenue": revenue,
-             "source_tool": "product_research"}
-            for i, revenue in enumerate([600_000.0, 300_000.0, 200_000.0, 100_000.0])])
-        store.upsert_keyword_metrics([
-            {"marketplace": "US", "keyword": "fluted sideboard cabinet", "period": PERIOD,
-             "node_id_path": BUFFETS, "searches": 11_000.0, "searches_mom_pct": 24.0,
-             "source_tool": "keyword_research"},
-            {"marketplace": "US", "keyword": "fluted door console", "period": PERIOD,
-             "node_id_path": BUFFETS, "searches": 6_000.0, "searches_mom_pct": 18.0,
-             "source_tool": "keyword_research"},
-        ])
-
-    def test_both_axes_are_measured_from_stored_vendor_rows(self) -> None:
-        self.seed()
-        matrix = render.build_overview("US", PERIOD, "zh")["element_matrix"]
-        point = next(p for p in _plotted(matrix) if p["key"] == "fluted")
-        self.assertGreater(point["shelf_pct"], 0)
-        self.assertAlmostEqual(point["growth_pct"], 21.9, places=1)
-        self.assertEqual(point["asins"], 3)
-
-    def test_the_window_is_named_so_a_month_is_not_read_as_a_year(self) -> None:
-        self.seed()
-        matrix = render.build_overview("US", PERIOD, "zh")["element_matrix"]
-        self.assertEqual(matrix["window"], elements.MOM)
-
-    def test_an_element_with_no_shelf_reading_is_not_plotted(self) -> None:
-        """Search growth with nothing on the shelf is a collection gap, and on a
-        scatter it is indistinguishable from a real opening."""
-        self.seed()
-        store.upsert_keyword_metrics([
-            {"marketplace": "US", "keyword": "japandi sideboard", "period": PERIOD,
-             "node_id_path": BUFFETS, "searches": 9_000.0, "searches_mom_pct": 40.0,
-             "source_tool": "keyword_research"},
-            {"marketplace": "US", "keyword": "japandi console", "period": PERIOD,
-             "node_id_path": BUFFETS, "searches": 5_000.0, "searches_mom_pct": 35.0,
-             "source_tool": "keyword_research"},
-        ])
-        payload = render.build_overview("US", PERIOD, "zh")
-        field = {p["key"] for p in _plotted(payload["element_matrix"])
-                 if p["shelf_pct"] is not None}
-        self.assertNotIn("japandi", field)
-        # It is still on the demand side, so the follow list can still name it.
-        self.assertIn("japandi", {r["key"] for r in payload["elements"]})
-
-    def test_the_quadrants_are_named_for_the_decision(self) -> None:
-        self.seed()
-        matrix = render.build_overview("US", PERIOD, "zh")["element_matrix"]
-        self.assertEqual(len(matrix["quadrants"]), 4)
-        self.assertIn("货架未跟上", matrix["quadrants"][0])
-
-
 class EdgePhraseTests(RenderTestCase):
     """The per-ASIN traffic keywords were collected every month and never mined.
 
@@ -816,208 +744,127 @@ class EdgePhraseTests(RenderTestCase):
         self.assertEqual(matches[0]["searches_mom_pct"], 24.0)
 
 
-class ElementRailTests(RenderTestCase):
-    """An element measured on one axis goes in a rail, not in the bin.
+class ComboMatrixTests(RenderTestCase):
+    """The spec chart, built from stored rows only.
 
-    The old rule plotted both halves or nothing. It was right that drawing an
-    unmeasured reading as zero invents a fact — but dropping the element hides
-    one, and there are far more titles than search phrases, so what it mostly hid
-    was "we sell this and have never measured whether anyone asks for it".
+    These assertions were written against the per-attribute matrix that this
+    chart replaced. The grouping went away; the invariants did not — an
+    unmeasured axis is still `None` rather than zero, the rails still hold the
+    half-measured specs, and the bounds still have floors.
     """
 
-    def seed(self) -> None:
-        # Both halves: three head listings and two rated phrases.
-        store.upsert_products([
-            {"marketplace": "US", "asin": f"BR{i}", "brand": "Demo", "title": title}
-            for i, title in enumerate([
-                "Fluted Oak Sideboard", "Fluted Walnut Console", "Fluted Arch Cabinet",
-                # Shelf only: on three listings, no phrase carries it.
-                "Reeded Oak Sideboard", "Reeded Walnut Console", "Reeded Arch Cabinet"])])
-        store.upsert_product_metrics([
-            {"marketplace": "US", "asin": f"BR{i}", "period": PERIOD,
-             "node_id_path": BUFFETS, "price": 399.0, "revenue": 100_000.0,
-             "source_tool": "product_research"} for i in range(6)])
-        store.upsert_keyword_metrics([
-            {"marketplace": "US", "keyword": f"fluted {noun}", "period": PERIOD,
-             "node_id_path": BUFFETS, "searches": 9_000.0, "searches_mom_pct": 24.0,
-             "source_tool": "keyword_research"}
-            for noun in ("sideboard", "console")]
-            # Demand only: rated phrases, but the word is on no listing at all.
-            + [{"marketplace": "US", "keyword": f"japandi {noun}", "period": PERIOD,
-                "node_id_path": BUFFETS, "searches": 9_000.0, "searches_mom_pct": 40.0,
-                "source_tool": "keyword_research"}
-               for noun in ("sideboard", "console")])
-        store.save_element_naming("US", [
-            {"term": term, "kind": kind, "label_zh": term, "label_en": term,
-             "drop": False, "naming_version": elements.NAMING_VERSION}
-            for term, kind in (("fluted", elements.CRAFT), ("reeded", elements.CRAFT),
-                               ("japandi", elements.STYLE))])
+    # Each attribute word appears in more than one pairing on purpose. When two
+    # words only ever occur together, `elements._dedupe` collapses them into the
+    # bigram — which carries no kind of its own and so cannot enter a spec. That
+    # is correct behaviour for the element read and a trap for this fixture.
+    TITLES = ["Fluted Oak Sideboard", "Fluted Oak Console", "Fluted Oak Cabinet",
+              "Fluted Oak Buffet", "Fluted Oak Credenza",
+              "Fluted Walnut Hutch", "Fluted Walnut Dresser",
+              "Reeded Oak Chest", "Reeded Oak Vanity",
+              # A second spec, on the shelf and with no phrase of its own.
+              "Reeded Walnut Sideboard", "Reeded Walnut Console",
+              "Reeded Walnut Cabinet", "Reeded Walnut Buffet"]
 
-    def matrix(self) -> dict:
-        return render.build_overview("US", PERIOD, "zh")["element_matrix"]
-
-    def test_a_shelf_reading_with_no_rated_demand_is_kept_not_dropped(self) -> None:
+    def setUp(self) -> None:
+        super().setUp()
         self.seed()
-        matrix = self.matrix()
-        reeded = next(p for p in _plotted(matrix) if p["key"] == "reeded")
-        self.assertIsNotNone(reeded["shelf_pct"])
-        self.assertIsNone(reeded["growth_pct"], "a rail element, not a field one")
-
-    def test_the_unmeasured_half_is_null_and_not_zero(self) -> None:
-        """Zero is a reading. This one was never taken, and a scatter cannot tell
-        the two apart unless the data does."""
-        self.seed()
-        entry = next(p for p in _plotted(self.matrix()) if p["key"] == "reeded")
-        self.assertIsNone(entry["growth_pct"])
-        self.assertIsNotNone(entry["shelf_pct"])
-
-    def test_demand_with_too_thin_a_shelf_goes_to_the_other_rail(self) -> None:
-        self.seed()
-        groups = {g["kind"]: g for g in self.matrix()["groups"]}
-        entry = next(p for p in groups[elements.STYLE]["points"]
-                     if p["key"] == "japandi")
-        self.assertIsNone(entry["shelf_pct"])
-        self.assertEqual(entry["growth_pct"], 40.0)
-
-    def test_the_median_is_taken_over_the_field_alone(self) -> None:
-        """The dashed line means "more shelf presence than half the elements we
-        track". Elements whose shelf reading is missing cannot vote on it."""
-        self.seed()
-        matrix = self.matrix()
-        shelves = [p["shelf_pct"] for p in _plotted(matrix)
-                   if p["shelf_pct"] is not None]
-        expected = scoring._median(shelves)
-        # The department's median, so every row draws the same line — the one
-        # reference that stays shared now that the bounds are per row.
-        for group in matrix["groups"]:
-            with self.subTest(group["kind"]):
-                self.assertEqual(group["scale"]["x_mid"], expected)
-
-    def test_the_row_count_includes_what_sits_in_the_rails(self) -> None:
-        """A row saying "1 个" over three visible marks is worse than no count."""
-        self.seed()
-        craft = next(g for g in self.matrix()["groups"] if g["kind"] == elements.CRAFT)
-        self.assertEqual(craft["total"], len(craft["points"]))
-        self.assertGreaterEqual(craft["total"], 2)
-        # Both a field element and a rail element, in the one list.
-        kinds = {p["growth_pct"] is not None for p in craft["points"]}
-        self.assertEqual(kinds, {True, False})
-
-
-class ElementMatrixGroupTests(RenderTestCase):
-    """One panel per attribute. A colour is not an alternative to a size, and a
-    single scatter carrying both invited exactly that comparison."""
-
-    TITLES = [
-        "Fluted Oak Sideboard", "Fluted Walnut Console", "Fluted Arch Cabinet",
-        "Burl Oak Sideboard", "Burl Walnut Credenza", "Burl Arch Cabinet",
-        "Black Oak Sideboard", "Black Walnut Console", "Black Arch Cabinet",
-        "70 Inch Oak Sideboard", "70 Inch Walnut Console", "70 Inch Arch Cabinet",
-    ]
-    NAMING = {
-        "fluted": "craft", "burl": "craft",
-        "black": "color", "70 inch": "size", "oak": "material",
-    }
 
     def seed(self) -> None:
         store.upsert_products([
-            {"marketplace": "US", "asin": f"BG{i}", "brand": "Demo", "title": title}
+            {"marketplace": "US", "asin": f"BC{i}", "brand": "Demo", "title": title}
             for i, title in enumerate(self.TITLES)])
         store.upsert_product_metrics([
-            {"marketplace": "US", "asin": f"BG{i}", "period": PERIOD,
+            {"marketplace": "US", "asin": f"BC{i}", "period": PERIOD,
              "node_id_path": BUFFETS, "price": 399.0, "revenue": 100_000.0,
              "source_tool": "product_research"}
             for i in range(len(self.TITLES))])
+        # Phrases carrying the whole `fluted + oak` spec, and none for the other.
         store.upsert_keyword_metrics([
-            {"marketplace": "US", "keyword": f"{term} {noun}", "period": PERIOD,
-             "node_id_path": BUFFETS, "searches": 9_000.0,
-             "searches_mom_pct": growth, "source_tool": "keyword_research"}
-            for term, growth in (("fluted", 24.0), ("burl", 31.0), ("black", -12.0),
-                                 ("70 inch", 8.0), ("oak", 15.0))
+            {"marketplace": "US", "keyword": f"fluted oak {noun}", "period": PERIOD,
+             "node_id_path": BUFFETS, "searches": 9_000.0, "searches_mom_pct": 24.0,
+             "source_tool": "keyword_research"}
             for noun in ("sideboard", "console")])
         store.save_element_naming("US", [
-            {"term": term, "kind": kind, "label_zh": term, "label_en": term,
-             "drop": False, "naming_version": elements.NAMING_VERSION}
-            for term, kind in self.NAMING.items()])
+            {"term": term, "kind": kind, "label": term, "label_zh": term,
+             "label_en": term, "drop": False,
+             "naming_version": elements.NAMING_VERSION}
+            for term, kind in (("fluted", elements.CRAFT), ("reeded", elements.CRAFT),
+                               ("oak", elements.MATERIAL),
+                               ("walnut", elements.MATERIAL))])
 
-    def groups(self) -> dict[str, list[str]]:
-        matrix = render.build_overview("US", PERIOD, "zh")["element_matrix"]
-        return {g["kind"]: [p["key"] for p in g["points"]] for g in matrix["groups"]}
+    def matrix(self) -> dict:
+        return render.build_overview("US", PERIOD, "zh")["element_combos"]
 
-    def test_craft_is_its_own_column(self) -> None:
-        """The column this chart was missing: fluting and burl are tooling and
-        lead-time decisions, not a style mood and not a material."""
-        self.seed()
-        groups = self.groups()
-        self.assertEqual(sorted(groups.get(elements.CRAFT, [])), ["burl", "fluted"])
+    def spec(self, key: str) -> dict:
+        return next(p for p in self.matrix()["points"] if p["key"] == key)
 
-    def test_colour_and_size_do_not_share_a_panel_with_craft(self) -> None:
-        self.seed()
-        groups = self.groups()
-        self.assertEqual(groups.get(elements.COLOR), ["black"])
-        self.assertEqual(groups.get(elements.SIZE), ["70 inch"])
-        self.assertNotIn("black", groups.get(elements.CRAFT, []))
+    def test_both_axes_are_measured_from_stored_vendor_rows(self) -> None:
+        point = self.spec("fluted+oak")
+        self.assertGreater(point["shelf_pct"], 0)
+        self.assertAlmostEqual(point["growth_pct"], 24.0, places=1)
+        self.assertEqual(point["asins"], 5)
 
-    def test_the_columns_come_back_in_reading_order(self) -> None:
-        self.seed()
-        matrix = render.build_overview("US", PERIOD, "zh")["element_matrix"]
-        kinds = [g["kind"] for g in matrix["groups"]]
-        self.assertEqual(kinds, [k for k in elements.KIND_ORDER if k in kinds])
+    def test_the_window_is_named_so_a_month_is_not_read_as_a_year(self) -> None:
+        self.assertEqual(self.matrix()["window"], elements.MOM)
 
-    def test_each_row_is_scaled_to_its_own_elements(self) -> None:
-        """Shared bounds let the department's most extreme element set the range
-        for every row, and an ordinary row collapsed into a band a few pixels
-        tall. Comparing across rows is meaningless anyway — that is the premise
-        the whole split rests on — so each row gets its own frame."""
-        self.seed()
-        matrix = render.build_overview("US", PERIOD, "zh")["element_matrix"]
-        for group in matrix["groups"]:
-            with self.subTest(group["kind"]):
-                bounds = group["scale"]
-                shelves = [p["shelf_pct"] for p in group["points"]
-                           if p["shelf_pct"] is not None]
-                growths = [p["growth_pct"] for p in group["points"]
-                           if p["growth_pct"] is not None]
-                # Every element of the row, rails included, inside its frame.
-                if shelves:
-                    self.assertGreaterEqual(bounds["x_max"], max(shelves))
-                if growths:
-                    self.assertLessEqual(bounds["y_min"], min(growths))
-                    self.assertGreaterEqual(bounds["y_max"], max(growths))
-                # And the shared median line reachable on the x axis, or the
-                # row would draw a reference it cannot show.
-                self.assertGreaterEqual(bounds["x_max"], bounds["x_mid"])
+    def test_the_quadrants_are_named_for_the_decision(self) -> None:
+        quadrants = self.matrix()["quadrants"]
+        self.assertEqual(len(quadrants), 4)
+        self.assertIn("货架未跟上", quadrants[0])
 
-    def test_the_dot_area_stays_measured_against_one_maximum(self) -> None:
-        """Search volume is the one quantity that must not be rescaled per row:
-        a big element in a quiet row would out-draw a bigger one in a busy row."""
-        self.seed()
-        matrix = render.build_overview("US", PERIOD, "zh")["element_matrix"]
+    def test_a_spec_with_no_rated_demand_is_railed_not_dropped(self) -> None:
+        """There are far more titles than phrases, so what dropping it hid was
+        "we sell this and have never measured whether anyone asks for it"."""
+        point = self.spec("reeded+walnut")
+        self.assertIsNotNone(point["shelf_pct"])
+        self.assertIsNone(point["growth_pct"], "unmeasured, which is not zero")
+
+    def test_the_spec_is_broken_out_attribute_by_attribute(self) -> None:
+        """A glued label reads as one long word; the hover card needs the parts."""
+        parts = {p["kind"]: p["label"] for p in self.spec("fluted+oak")["spec"]}
+        self.assertEqual(parts, {elements.CRAFT: "fluted",
+                                 elements.MATERIAL: "oak"})
+
+    def test_the_median_is_taken_over_specs_with_a_shelf_reading(self) -> None:
+        matrix = self.matrix()
+        shelves = [p["shelf_pct"] for p in matrix["points"]
+                   if p["shelf_pct"] is not None]
+        self.assertEqual(matrix["bounds"]["x_mid"], scoring._median(shelves))
+
+    def test_the_dot_area_is_measured_against_the_largest_on_show(self) -> None:
+        matrix = self.matrix()
         self.assertEqual(matrix["scale"]["max_searches"],
-                         max(p["searches"] for p in _plotted(matrix)))
+                         max(p["searches"] for p in matrix["points"]))
 
-    def test_a_row_of_near_identical_elements_is_not_zoomed_into_noise(self) -> None:
-        """Without a floor, a row whose elements sit within a point of each other
-        would be magnified until those gaps looked like findings."""
-        self.seed()
-        matrix = render.build_overview("US", PERIOD, "zh")["element_matrix"]
-        for group in matrix["groups"]:
-            with self.subTest(group["kind"]):
-                bounds = group["scale"]
-                self.assertGreaterEqual(bounds["x_max"], panels.MIN_X_SPAN)
-                self.assertGreaterEqual(bounds["y_max"], panels.MIN_Y_SPAN)
-                self.assertLessEqual(bounds["y_min"], -panels.MIN_Y_SPAN)
+    def test_the_bounds_have_floors_so_noise_is_not_magnified(self) -> None:
+        """Without them a chart whose specs sit within a point of each other is
+        zoomed until those gaps look like findings."""
+        bounds = self.matrix()["bounds"]
+        self.assertGreaterEqual(bounds["x_max"], panels.MIN_X_SPAN)
+        self.assertGreaterEqual(bounds["y_max"], panels.MIN_Y_SPAN)
+        self.assertLessEqual(bounds["y_min"], -panels.MIN_Y_SPAN)
+        # And the median line reachable, or the chart draws a reference it
+        # cannot show.
+        self.assertGreaterEqual(bounds["x_max"], bounds["x_mid"])
 
-    def test_a_panel_reports_what_it_could_not_draw(self) -> None:
-        """A reader who can see six were measured and four drawn can tell a thin
-        attribute from a truncated one."""
-        self.seed()
-        with mock.patch.object(panels, "MAX_MATRIX_POINTS_PER_KIND", 1):
-            matrix = render.build_overview("US", PERIOD, "zh")["element_matrix"]
-        craft = next(g for g in matrix["groups"] if g["kind"] == elements.CRAFT)
-        self.assertEqual(len(craft["points"]), 1)
-        self.assertEqual(craft["total"], 2)
-        self.assertEqual(craft["dropped"], 1)
+    def test_every_spec_is_inside_the_frame(self) -> None:
+        matrix = self.matrix()
+        bounds = matrix["bounds"]
+        for point in matrix["points"]:
+            with self.subTest(point["key"]):
+                if point["shelf_pct"] is not None:
+                    self.assertLessEqual(point["shelf_pct"], bounds["x_max"])
+                if point["growth_pct"] is not None:
+                    self.assertGreaterEqual(point["growth_pct"], bounds["y_min"])
+                    self.assertLessEqual(point["growth_pct"], bounds["y_max"])
+
+    def test_the_tail_is_counted_even_when_it_is_not_drawn(self) -> None:
+        """A chart saying nothing about what it left out is a chart that claims
+        the market is the size of the chart."""
+        with mock.patch.object(panels, "MAX_COMBO_POINTS", 1):
+            matrix = self.matrix()
+        self.assertEqual(len(matrix["points"]), 1)
+        self.assertGreater(matrix["total"], 1)
 
 
 class GrowthWindowTests(RenderTestCase):

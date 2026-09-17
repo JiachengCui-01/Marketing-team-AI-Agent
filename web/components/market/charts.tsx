@@ -354,27 +354,12 @@ export function inField(point: ElementPoint): point is ElementFieldPoint {
   return point.shelf_pct !== null && point.growth_pct !== null;
 }
 
-export type ElementGroup = {
-  kind: string;
-  kind_label: string;
-  /** Field dots and rail marks together; `inField` tells them apart. */
-  points: ElementPoint[];
-  /** This row's axis bounds. */
-  scale?: ElementRowScale;
-  /** How many elements of this kind were measured, before the plot cap. */
-  total: number;
-  dropped: number;
-};
-
-/** One row's own axis bounds, computed server-side from that row's elements.
+/** The chart's axis bounds, computed server-side from the points on show.
  *
- *  Per row rather than shared, because comparing a colour against a size is
- *  meaningless — which is the whole reason the chart is split by attribute in
- *  the first place. Shared bounds meant one outlying element set the range for
- *  every row, and ordinary rows collapsed into a band. `x_mid` is the exception:
- *  it is the department's median shelf share, a claim about the department
- *  rather than about this row, so every row draws the same line. */
-export type ElementRowScale = {
+ *  `x_mid` is the department's median shelf share — a claim about the department
+ *  rather than about the points drawn, which is why the server computes it over
+ *  every measured element rather than over the ones that fit on the chart. */
+export type ElementChartBounds = {
   x_max: number;
   x_mid: number;
   y_min: number;
@@ -431,7 +416,7 @@ export function ElementMatrix({
   xLabel: string;
   yLabel: string;
   /** This row's own axis bounds. */
-  bounds: ElementRowScale;
+  bounds: ElementChartBounds;
   /** The one globally shared quantity: what the largest dot area means. */
   scale: ElementScale;
   /** Names the dashed vertical reference for what it is, e.g. 中位 / median. */
@@ -758,19 +743,6 @@ function TipRow({ label, value, tone }: {
   );
 }
 
-/** Bounds for a row the server sent without any — a dashboard rendered before
- *  this release. Same floors, so the row is drawn rather than skipped. */
-function fallbackBounds(points: ElementPoint[]): ElementRowScale {
-  const shelves = points.map((p) => p.shelf_pct).filter((v): v is number => v !== null);
-  const growths = points.map((p) => p.growth_pct).filter((v): v is number => v !== null);
-  return {
-    x_max: Math.max(5, ...shelves) * 1.1,
-    x_mid: 0,
-    y_min: Math.min(-25, ...growths) * 1.1,
-    y_max: Math.max(25, ...growths) * 1.1,
-  };
-}
-
 /** A percentage, or the word for a reading that was never taken. */
 function pct(value: number | null, unmeasured: string, signed = true): string {
   if (value == null || !Number.isFinite(value)) return unmeasured;
@@ -818,7 +790,7 @@ export function ElementComboChart({
   moreLabel,
 }: {
   points: ElementPoint[];
-  bounds?: ElementRowScale | null;
+  bounds?: ElementChartBounds | null;
   scale?: ElementScale | null;
   quadrants: [string, string, string, string];
   xLabel: string;

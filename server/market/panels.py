@@ -318,67 +318,16 @@ def build_current(marketplace: str, language: str, *,
 
 # ----------------------------------------------------------------- overview ----
 
-# How many elements one attribute row may plot. The old cap was set for a
-# three-across grid where a row was 330px wide; full width, with a hover card
-# naming any dot whose label collided, and now with the row scaled to its own
-# elements rather than to the department's widest, twenty-eight stays readable.
-MAX_MATRIX_POINTS_PER_KIND = 28
-# The rails hold the elements with one measured half. Capped tighter than the
-# field because a rail mark carries one number rather than two.
-MAX_MATRIX_RAIL_PER_KIND = 16
-# Floors for a row's own axis range, in percentage points. Without them a row
-# whose elements all sit within a point of each other would be zoomed until the
-# gaps between them looked meaningful, and a row of low-share elements would
-# push the department median line off the frame.
+# Floors for the chart's axis range, in percentage points. Without them a chart
+# whose specs all sit within a point of each other would be zoomed until the gaps
+# between them looked meaningful, and a chart of low-share specs would push the
+# median line off the frame.
 MIN_X_SPAN = 5.0
 MIN_Y_SPAN = 25.0
 # How many specs one chart may plot. A spec is a narrow claim, so the tail is
 # long and mostly one-listing noise; the count of what was measured is reported
 # beside the chart so the tail is visible without being drawn.
 MAX_COMBO_POINTS = 45
-
-
-def _element_matrix(rows: Sequence[dict], zh: bool) -> dict:
-    """Demand trend against shelf presence, split by the attribute being decided.
-
-    x is the share of head revenue whose listing mentions the element — what is
-    already proven to sell. y is how fast the phrases carrying it are growing —
-    where demand is going. The interesting cell is top-left: people are asking
-    and the shelf has not answered.
-
-    One scatter per attribute rather than one scatter for everything. A single
-    panel put a size, a material, a colour and a surface treatment on the same
-    two axes, which invites a comparison that means nothing: "solid wood outsells
-    black" is not a sentence anybody can act on, while "of the four finishes we
-    track, black is the only one cooling" is. The split is the whole value —
-    within a column every dot is an alternative to every other dot, so the
-    ranking is a choice the designer actually has to make.
-
-    Scales stay shared across the columns (``scale`` below) so a dot in one panel
-    still means the same thing as a dot in the next, and the median shelf line is
-    the department's, not the column's.
-
-    Only elements with both halves get a position in the field. The other two
-    kinds are not thrown away, they go in a rail against the one axis they do
-    have: search growth with no shelf reading sits in the left rail at its
-    growth, shelf presence with no rated demand sits in the bottom rail at its
-    share. The original rule — both halves or nothing — was right about the
-    danger and wrong about the remedy. Drawing a missing reading as zero invents
-    a fact; dropping the element hides one, and there are far more titles than
-    phrases, so what it mostly hid was "we sell this and have never measured
-    whether anyone asks for it".
-    """
-    points = [_element_point(row) for row in rows
-              if row.get("shelf_rated") or _demand_rated(row)]
-    points.sort(key=lambda p: p["searches"], reverse=True)
-    windows = {p["window"] for p in points if p["window"]}
-    return {
-        "groups": _element_groups(points),
-        "scale": _element_scale(points),
-        # One window or the reader is comparing a month against a year.
-        "window": windows.pop() if len(windows) == 1 else "mixed",
-        "quadrants": _element_quadrants(zh),
-    }
 
 
 def _combo_matrix(combos: Sequence[dict], zh: bool) -> dict:
@@ -408,22 +357,22 @@ def _combo_matrix(combos: Sequence[dict], zh: bool) -> dict:
     ]
     if not points:
         return {"points": [], "bounds": None, "scale": None, "window": "",
-                "quadrants": _element_quadrants(zh)}
+                "quadrants": _quadrant_names(zh)}
     points.sort(key=lambda p: p["searches"], reverse=True)
     windows = {p["window"] for p in points if p["window"]}
     x_mid = scoring._median(
         [p["shelf_pct"] for p in points if p["shelf_pct"] is not None]) or 0.0
     return {
         "points": points[:MAX_COMBO_POINTS],
-        "bounds": _row_bounds(points[:MAX_COMBO_POINTS], x_mid),
-        "scale": _element_scale(points[:MAX_COMBO_POINTS]),
+        "bounds": _chart_bounds(points[:MAX_COMBO_POINTS], x_mid),
+        "scale": _dot_scale(points[:MAX_COMBO_POINTS]),
         "total": len(combos),
         "window": windows.pop() if len(windows) == 1 else "mixed",
-        "quadrants": _element_quadrants(zh),
+        "quadrants": _quadrant_names(zh),
     }
 
 
-def _element_quadrants(zh: bool) -> tuple[str, str, str, str]:
+def _quadrant_names(zh: bool) -> tuple[str, str, str, str]:
     return (("需求在涨·货架未跟上", "需求在涨·已验证",
              "需求转弱·货架仍重", "需求转弱·货架也轻")
             if zh else
@@ -436,85 +385,12 @@ def _demand_rated(row: Mapping[str, Any]) -> bool:
     return bool(row.get("rated")) and row.get("growth_pct") is not None
 
 
-def _element_point(row: Mapping[str, Any]) -> dict:
-    """One element as the chart plots it, with an axis nulled where unmeasured.
+def _chart_bounds(points: Sequence[dict], x_mid: float) -> dict:
+    """Axis bounds, from the points actually being drawn.
 
-    ``None`` is the load-bearing part: it is the difference between "zero" and
-    "we never took this reading", and it is the only marker either side needs.
-    The alternative — three lists named for which half they hold — puts that
-    invariant in a variable name, where neither end can check it, so both ends
-    end up re-deriving it from the nulls anyway.
-    """
-    return {"key": row["key"], "label": row["label"], "kind": row["kind"],
-            "kind_label": row["kind_label"],
-            "shelf_pct": row["revenue_share_pct"] if row.get("shelf_rated") else None,
-            "growth_pct": row["growth_pct"] if _demand_rated(row) else None,
-            "searches": row["searches"], "asins": row["asins"],
-            "avg_price": row["avg_price"], "window": row.get("window") or ""}
-
-
-def _in_field(point: Mapping[str, Any]) -> bool:
-    """Both halves measured, so the element has a position rather than a rail."""
-    return point["shelf_pct"] is not None and point["growth_pct"] is not None
-
-
-def _element_groups(points: Sequence[dict]) -> list[dict]:
-    """One entry per attribute, in ``elements.KIND_ORDER``, empty ones dropped.
-
-    The caps are why this partition is server-side at all: an element with both
-    halves gets a position in the field, one with a single half gets a rail mark
-    that carries one number, and the second is capped tighter than the first. The
-    partition is local — the payload carries one list per attribute, and the
-    chart decides field-or-rail from the same nulls.
-
-    ``dropped`` is reported rather than silently swallowed: a reader who knows
-    six colours were measured and two plotted can tell a thin row from a
-    truncated one, which is exactly the distinction a bare chart destroys.
-    """
-    by_kind: dict[str, list[dict]] = {}
-    for point in points:
-        by_kind.setdefault(point["kind"], []).append(point)
-    x_mid = scoring._median(
-        [p["shelf_pct"] for p in points if p["shelf_pct"] is not None]) or 0.0
-
-    out: list[dict] = []
-    for kind in elements.KIND_ORDER:
-        members = by_kind.get(kind) or []
-        if not members:
-            continue
-        field = [p for p in members if _in_field(p)]
-        rails = [p for p in members if not _in_field(p)]
-        kept = field[:MAX_MATRIX_POINTS_PER_KIND] + rails[:MAX_MATRIX_RAIL_PER_KIND]
-        out.append({
-            "kind": kind,
-            "kind_label": members[0]["kind_label"],
-            "points": kept,
-            "scale": _row_bounds(kept, x_mid),
-            "total": len(members),
-            "dropped": len(members) - len(kept),
-        })
-    return out
-
-
-def _row_bounds(points: Sequence[dict], x_mid: float) -> dict:
-    """Axis bounds for one attribute row, from that row's own elements.
-
-    These were shared across every row, on the argument that a dot in the same
-    position should mean the same number everywhere. The argument was wrong, and
-    the chart's own footnote says why: comparing across rows is meaningless,
-    because a colour is not an alternative to a size. What sharing actually
-    bought was a range set by the most extreme element in the whole department —
-    growth from -278% to +224% — against which every ordinary row collapsed into
-    a band a few pixels tall, and an x range set by the widest-selling element,
-    against which a row of low-share elements piled into the left corner.
-
-    Two things stay global, because scaling them per row would make them lie:
-    the dot area (it encodes search volume) and the median line (it is a claim
-    about the department, not about this row).
-
-    The floors are what stop a row of near-identical elements from being zoomed
+    The floors are what stop a chart of near-identical specs from being zoomed
     until noise looks like signal, and they keep the median line inside the
-    frame even in a row whose elements all sit well below it.
+    frame even when every spec sits well below it.
     """
     shelves = [p["shelf_pct"] for p in points if p["shelf_pct"] is not None]
     growths = [p["growth_pct"] for p in points if p["growth_pct"] is not None]
@@ -526,13 +402,8 @@ def _row_bounds(points: Sequence[dict], x_mid: float) -> dict:
     }
 
 
-def _element_scale(points: Sequence[dict]) -> dict | None:
-    """What stays global once the axis bounds went per-row.
-
-    Only the dot area. It encodes monthly searches, so it has to be measured
-    against the same maximum in every row or a big element in a quiet row would
-    draw larger than a bigger one in a busy row.
-    """
+def _dot_scale(points: Sequence[dict]) -> dict | None:
+    """What the largest dot area means: the maximum monthly searches on show."""
     if not points:
         return None
     return {"max_searches": max(1, max(p["searches"] for p in points))}
@@ -1026,7 +897,6 @@ def build_overview(marketplace: str, period: str, language: str,
         # see what "price fit" means this month instead of taking it on faith.
         "price_fit": scoring.price_curve_rows(aov_curve),
         "elements": element_rows,
-        "element_matrix": _element_matrix(element_rows, zh),
         # The spec chart reads the same mined vocabulary back off the listings,
         # so it needs the named terms rather than the per-term aggregates — and
         # the same inputs the mining used, not a second read of them.
