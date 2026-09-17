@@ -58,6 +58,23 @@ PRODUCT_PAGES = int(os.environ.get("MARKETING_AGENT_MARKET_PRODUCT_PAGES", "24")
 # Stop once one more page would add less than this share of what we already hold.
 PRODUCT_TAIL_PCT = float(os.environ.get("MARKETING_AGENT_MARKET_PRODUCT_TAIL", "0.5"))
 KEYWORD_SEED_BATCH = 10
+# Rows per keyword call. Fifty was the demand side's real ceiling: twelve nodes
+# at fifty phrases each is a six-hundred-phrase vocabulary for a whole
+# department, and an element whose phrases live below that cut could not appear
+# on the chart however real it was. Billing is per call, not per row, so a
+# larger page is the same spend — if the vendor caps `size` below this, it
+# returns what it allows and nothing breaks.
+KEYWORD_PAGE_SIZE = int(os.environ.get("MARKETING_AGENT_MARKET_KEYWORD_SIZE", "200"))
+# How many pages of mined related keywords to pull per node.
+#
+# `keyword_research` answers "how is this phrase doing"; the miner answers "what
+# else do people type", which is the question the element read is actually made
+# of. One seed returns thousands, so this is a spend dial rather than a coverage
+# one: each page is one billable call.
+KEYWORD_MINER_PAGES = int(os.environ.get("MARKETING_AGENT_MARKET_MINER_PAGES", "2"))
+# A floor well under the element module's own evidence bar: this one is here to
+# keep the long tail from being mostly typos, not to decide what counts.
+KEYWORD_MINER_MIN_SEARCHES = 300
 
 # Every structural distribution and concentration the vendor offers, for every
 # tracked node, every month.
@@ -512,8 +529,8 @@ def _keyword_aba(*, marketplace: str, period: str, subject_id: str,
                  bucket: str) -> JobResult:
     reply = gateway.call(
         "aba_research_monthly",
-        _request(marketplace=marketplace, date=period, size=50, minSearches=2000,
-                 order={"field": "searches", "desc": True}),
+        _request(marketplace=marketplace, date=period, size=KEYWORD_PAGE_SIZE,
+                 minSearches=2000, order={"field": "searches", "desc": True}),
         bucket=bucket, purpose="ABA movers", marketplace=marketplace)
     if not _ok(reply):
         return JobResult(status="pending", calls=int(reply.billable), detail=reply.detail)
@@ -532,8 +549,8 @@ def _keyword_demand(*, marketplace: str, period: str, subject_id: str,
     seed = label.replace(" & ", " ").strip()
     reply = gateway.call(
         "keyword_research",
-        _request(marketplace=marketplace, keywords=seed, month=period, size=50,
-                 withYearlyGrowth=True),
+        _request(marketplace=marketplace, keywords=seed, month=period,
+                 size=KEYWORD_PAGE_SIZE, withYearlyGrowth=True),
         bucket=bucket, purpose="keyword demand", marketplace=marketplace)
     if not _ok(reply):
         return JobResult(status="pending", calls=int(reply.billable), detail=reply.detail)
@@ -543,6 +560,57 @@ def _keyword_demand(*, marketplace: str, period: str, subject_id: str,
     store.upsert_keyword_metrics(rows)
     store.record_evidence(index.all_rows())
     return JobResult(status="done", calls=int(reply.billable), detail=f"{len(rows)} keywords")
+
+
+def _keyword_mine(*, marketplace: str, period: str, subject_id: str,
+                  bucket: str) -> JobResult:
+    """What else people type — the vocabulary the element read is made of.
+
+    ``keyword_research`` answers "how is this phrase doing" for phrases we
+    already thought of, and it is seeded with the node's own label, so the fifty
+    rows it returns are mostly variations of that label. That is why the mined
+    elements skewed to category nouns and a handful of large modifiers: the
+    demand side never saw the words for anything else.
+
+    The miner is the other question, and the vendor endpoint for it has been
+    wired up in this repo the whole time — the field set, the extractor and its
+    tests all handle ``keyword_miner`` — but no job ever enqueued it.
+
+    Note what this does *not* buy: the miner returns no growth columns, so a
+    phrase first seen here has a search volume and no trend until the month
+    after, when the stored comparison has something to compare against. New
+    vocabulary arrives one month before it can be plotted.
+    """
+    label = taxonomy.short_label(taxonomy.label_for(subject_id, marketplace)).lower()
+    seed = label.replace(" & ", " ").strip()
+    index = EvidenceIndex(marketplace=marketplace, period=period)
+    calls = 0
+    rows: list[dict] = []
+    for page in range(1, max(1, KEYWORD_MINER_PAGES) + 1):
+        reply = gateway.call(
+            "keyword_miner",
+            # `historyDate` and `minSearch`, not `month` and `minSearches`: this
+            # endpoint spells both differently from its neighbours, and a param
+            # the vendor does not recognise is a billed call that answers nothing.
+            _request(marketplace=marketplace, keyword=seed, historyDate=period,
+                     size=KEYWORD_PAGE_SIZE, page=page,
+                     minSearch=KEYWORD_MINER_MIN_SEARCHES,
+                     order={"field": "searches", "desc": True}),
+            bucket=bucket, purpose=f"mined keywords p{page}", marketplace=marketplace)
+        calls += int(reply.billable)
+        if not _ok(reply):
+            if page == 1:
+                return JobResult(status="pending", calls=calls, detail=reply.detail)
+            break
+        page_rows = extract.extract_keywords(
+            reply, period=period, node_id_path=subject_id, marketplace=marketplace,
+            index=index if page == 1 else None)
+        if not page_rows:
+            break
+        store.upsert_keyword_metrics(page_rows)
+        rows.extend(page_rows)
+    store.record_evidence(index.all_rows())
+    return JobResult(status="done", calls=calls, detail=f"{len(rows)} mined keywords")
 
 
 def _flagship_traffic(*, marketplace: str, period: str, subject_id: str,
@@ -672,6 +740,7 @@ CATALOG: tuple[JobSpec, ...] = (
     JobSpec("product_newcomers", "node", 45, 1, "month", _product_newcomers),
     JobSpec("keyword_aba", "department", 50, 1, "month", _keyword_aba, scope="department"),
     JobSpec("keyword_demand", "node", 55, 1, "month", _keyword_demand),
+    JobSpec("keyword_mine", "node", 56, KEYWORD_MINER_PAGES, "month", _keyword_mine),
     *(JobSpec(f"category_dist_{kind}", "node", 60, 1, "month",
               _distribution_job(tool, kind))
       for tool, kind in _STRUCTURE_DISTRIBUTIONS),

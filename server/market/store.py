@@ -751,6 +751,35 @@ def keyword_edges(marketplace: str, asin: str, period: str, *, limit: int = 30) 
         ))
 
 
+def keyword_edge_phrases(marketplace: str, period: str, *,
+                         limit: int = 2_000) -> list[dict]:
+    """The per-ASIN traffic phrases, as department-wide keyword rows.
+
+    These are collected every month by ``flagship_keywords`` and written to the
+    edge table, which the element read has never looked at — so a vocabulary we
+    had already paid for sat unused while the chart complained of being thin.
+
+    ``MAX(searches)`` rather than ``SUM``: an edge's ``searches`` is the phrase's
+    own monthly volume, repeated on every ASIN that ranks for it, so summing
+    would multiply the demand by the number of listings carrying it and put the
+    biggest bubble on whatever the most ASINs happen to share.
+
+    Shaped like ``market_keyword_metrics`` rows, minus the growth columns the
+    edge table does not carry — a phrase seen only here gets its trend from the
+    stored month-over-month comparison, the same as any other.
+    """
+    db._ensure()
+    with db.connect() as conn:
+        return _rows(conn.execute(
+            "SELECT keyword, MAX(searches) AS searches, ? AS period, "
+            "       'traffic_keyword' AS source_tool "
+            "FROM market_keyword_asin_edges "
+            "WHERE marketplace = ? AND period = ? AND keyword <> '' "
+            "GROUP BY keyword ORDER BY searches IS NULL, searches DESC LIMIT ?",
+            (period, marketplace, period, limit),
+        ))
+
+
 # ----------------------------------------------------------------- reviews ----
 
 def element_naming(marketplace: str = "US") -> dict[str, dict]:

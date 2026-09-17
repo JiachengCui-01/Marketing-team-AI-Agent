@@ -1632,6 +1632,52 @@ select.field:focus {
   .bi-dot-core-risk {
     fill: rgb(var(--danger));
   }
+  /* The whole dot is one hit target, and it takes keyboard focus so the hover
+     card is reachable without a mouse. */
+  .bi-dot-group {
+    cursor: pointer;
+    outline: none;
+  }
+  .bi-dot-group:focus-visible .bi-dot-disc,
+  .bi-dot-hot {
+    stroke-width: 2;
+    fill-opacity: 0.42;
+  }
+  /* The hover card. An HTML box rather than SVG <title>: the native tooltip
+     waits a second, cannot be styled, and only fires on the exact shape it is
+     attached to — useless for a 3px core inside a 15px target. */
+  .bi-dot-tip {
+    @apply pointer-events-none absolute z-20 w-max max-w-[15rem] rounded-lg border
+           border-border px-2.5 py-2 shadow-lg;
+    background: rgb(var(--bg-elevated));
+  }
+  .bi-dot-tip-head {
+    @apply mb-1 flex items-baseline gap-1.5;
+  }
+  .bi-dot-tip-name {
+    @apply text-xs font-medium text-fg;
+  }
+  .bi-dot-tip-kind {
+    @apply rounded px-1 py-px text-[10px];
+    background: rgb(var(--feature-selection) / 0.1);
+    color: rgb(var(--feature-selection));
+  }
+  .bi-dot-tip-row {
+    @apply flex items-baseline justify-between gap-4 text-[10px] leading-relaxed;
+  }
+  .bi-dot-tip-key {
+    color: rgb(var(--fg-subtle));
+  }
+  .bi-dot-tip-val {
+    @apply tabular-nums;
+    color: rgb(var(--fg-muted));
+  }
+  .bi-dot-tip-up {
+    color: rgb(var(--success));
+  }
+  .bi-dot-tip-down {
+    color: rgb(var(--danger));
+  }
   /* The two corners a decision comes out of, tinted so the reader does not have
      to hold "left of the dashed line and above zero" in their head. */
   .bi-quadrant-open {
@@ -1639,6 +1685,30 @@ select.field:focus {
   }
   .bi-quadrant-risk {
     fill: rgb(var(--danger) / 0.04);
+  }
+  /* The rails: a strip for elements measured on one axis only. Deliberately
+     quieter than the field — a reading we could not take must not compete with
+     one we did — and separated by a dotted edge so the strip reads as a
+     different kind of space rather than as more chart. */
+  .bi-rail-edge {
+    stroke: rgb(var(--border));
+    stroke-width: 1;
+    stroke-dasharray: 2 4;
+  }
+  .bi-rail-name {
+    fill: rgb(var(--fg-subtle) / 0.8);
+    font-size: 8.5px;
+  }
+  /* A square, not a disc: a different shape for a different claim, so a rail
+     mark is never read as a measured position. Hollow for the same reason. */
+  .bi-rail-mark {
+    fill: rgb(var(--bg-elevated));
+    stroke: rgb(var(--fg-subtle) / 0.7);
+    stroke-width: 1.5;
+  }
+  .bi-dot-group:hover .bi-rail-mark,
+  .bi-dot-group:focus-visible .bi-rail-mark {
+    stroke: rgb(var(--feature-selection));
   }
   .bi-legend-swatch {
     @apply inline-block h-2 w-2 shrink-0 rounded-[2px];
@@ -1688,6 +1758,16 @@ select.field:focus {
   .bi-quadrant-label {
     fill: rgb(var(--fg-subtle));
     font-size: 9px;
+  }
+  /* The axis's name, as opposed to one of its tick values: a shade darker than
+     the numbers it explains, because it is the thing a lost reader looks for. */
+  .bi-axis-title {
+    fill: rgb(var(--fg-muted));
+    /* A step above the tick values rather than level with them: what the axis
+       measures is the thing a reader hunts for first, and at tick size it was
+       getting lost among the numbers it is supposed to explain. */
+    font-size: 11px;
+    font-weight: 500;
   }
   .bi-delta-track {
     @apply relative h-2 flex-1 rounded-full;

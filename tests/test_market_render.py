@@ -612,6 +612,48 @@ class ElementNamingTests(RenderTestCase):
         self.assertEqual(store.element_naming("US")["fluted"]["naming_version"],
                          elements.NAMING_VERSION)
 
+    def test_a_long_term_list_is_asked_in_batches(self) -> None:
+        """One call for 160 terms would ask for more output than the model can
+        emit, and a truncated tool call parses as nothing at all — the whole
+        month would come back unnamed rather than partly named."""
+        client = self.client()
+        terms = [{"term": f"term{i}", "asins": 4, "revenue_share_pct": 1.0,
+                  "searches": 5_000} for i in range(elements.NAMING_BATCH * 2 + 1)]
+
+        render.name_elements(client, "US", PERIOD, "zh", terms=terms)
+
+        asked = [p for p in client.prompts if "MINED DESIGN TERMS" in p]
+        self.assertEqual(len(asked), 3)
+        # Every term reaches the model exactly once, and every one is recorded,
+        # so none of them comes back "fresh" on the next render.
+        for batch in asked:
+            self.assertLessEqual(batch.count("term"), 400)
+        cached = store.element_naming("US")
+        self.assertEqual({t["term"] for t in terms} - set(cached), set())
+
+    def test_one_failed_batch_does_not_discard_the_others(self) -> None:
+        """Saving only at the end would make a blip halfway through cost every
+        term that had already been classified."""
+        client = self.client()
+        calls = {"n": 0}
+        real = client.messages.create
+
+        def flaky(**kwargs):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise RuntimeError("boom")
+            return real(**kwargs)
+
+        client.messages.create = flaky
+        terms = [{"term": f"word{i}", "asins": 4, "revenue_share_pct": 1.0,
+                  "searches": 5_000} for i in range(elements.NAMING_BATCH * 2)]
+
+        render.name_elements(client, "US", PERIOD, "zh", terms=terms)
+
+        cached = store.element_naming("US")
+        self.assertEqual(len(cached), elements.NAMING_BATCH,
+                         "the surviving batch should still be cached")
+
     def test_a_term_the_model_skipped_is_still_recorded(self) -> None:
         """An unanswered term would otherwise look fresh forever."""
         self.seed()
@@ -707,6 +749,142 @@ class ElementMatrixTests(RenderTestCase):
         matrix = render.build_overview("US", PERIOD, "zh")["element_matrix"]
         self.assertEqual(len(matrix["quadrants"]), 4)
         self.assertIn("货架未跟上", matrix["quadrants"][0])
+
+
+class EdgePhraseTests(RenderTestCase):
+    """The per-ASIN traffic keywords were collected every month and never mined.
+
+    ``flagship_keywords`` writes them to the edge table; the element read looked
+    only at ``market_keyword_metrics``. The phrases were bought and then ignored.
+    """
+
+    def test_a_phrase_only_the_edge_table_holds_still_reaches_the_mining(self) -> None:
+        store.upsert_products([
+            {"marketplace": "US", "asin": f"BE{i}", "brand": "Demo",
+             "title": t} for i, t in enumerate(
+                 ["Boucle Accent Chair", "Boucle Swivel Chair", "Boucle Lounge Chair"])])
+        store.upsert_product_metrics([
+            {"marketplace": "US", "asin": f"BE{i}", "period": PERIOD,
+             "node_id_path": BUFFETS, "price": 299.0, "revenue": 90_000.0,
+             "source_tool": "product_research"} for i in range(3)])
+        store.upsert_keyword_edges([
+            {"marketplace": "US", "keyword": "boucle accent chair", "asin": f"BE{i}",
+             "period": PERIOD, "searches": 14_000.0} for i in range(3)])
+
+        mined = {row["term"] for row in panels.mined_terms("US", PERIOD)}
+
+        self.assertIn("boucle", mined)
+
+    def test_one_phrase_on_many_asins_is_one_phrase_worth_of_demand(self) -> None:
+        """An edge's `searches` is the phrase's own volume, repeated per ASIN.
+        Summing would multiply demand by however many listings rank for it."""
+        store.upsert_keyword_edges([
+            {"marketplace": "US", "keyword": "fluted sideboard", "asin": f"BX{i}",
+             "period": PERIOD, "searches": 9_000.0} for i in range(3)])
+
+        rows = store.keyword_edge_phrases("US", PERIOD)
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["searches"], 9_000.0)
+
+    def test_the_metrics_row_wins_because_only_it_carries_growth(self) -> None:
+        """Growth is the axis that decides whether an element can be plotted, so
+        a duplicate must not shadow the row that has it."""
+        store.upsert_keyword_metrics([
+            {"marketplace": "US", "keyword": "fluted sideboard", "period": PERIOD,
+             "node_id_path": BUFFETS, "searches": 11_000.0, "searches_mom_pct": 24.0,
+             "source_tool": "keyword_research"}])
+        store.upsert_keyword_edges([
+            {"marketplace": "US", "keyword": "fluted sideboard", "asin": "BY1",
+             "period": PERIOD, "searches": 9_000.0}])
+
+        rows = panels._demand_rows("US", PERIOD)
+
+        matches = [r for r in rows if r["keyword"] == "fluted sideboard"]
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["searches_mom_pct"], 24.0)
+
+
+class ElementRailTests(RenderTestCase):
+    """An element measured on one axis goes in a rail, not in the bin.
+
+    The old rule plotted both halves or nothing. It was right that drawing an
+    unmeasured reading as zero invents a fact — but dropping the element hides
+    one, and there are far more titles than search phrases, so what it mostly hid
+    was "we sell this and have never measured whether anyone asks for it".
+    """
+
+    def seed(self) -> None:
+        # Both halves: three head listings and two rated phrases.
+        store.upsert_products([
+            {"marketplace": "US", "asin": f"BR{i}", "brand": "Demo", "title": title}
+            for i, title in enumerate([
+                "Fluted Oak Sideboard", "Fluted Walnut Console", "Fluted Arch Cabinet",
+                # Shelf only: on three listings, no phrase carries it.
+                "Reeded Oak Sideboard", "Reeded Walnut Console", "Reeded Arch Cabinet"])])
+        store.upsert_product_metrics([
+            {"marketplace": "US", "asin": f"BR{i}", "period": PERIOD,
+             "node_id_path": BUFFETS, "price": 399.0, "revenue": 100_000.0,
+             "source_tool": "product_research"} for i in range(6)])
+        store.upsert_keyword_metrics([
+            {"marketplace": "US", "keyword": f"fluted {noun}", "period": PERIOD,
+             "node_id_path": BUFFETS, "searches": 9_000.0, "searches_mom_pct": 24.0,
+             "source_tool": "keyword_research"}
+            for noun in ("sideboard", "console")]
+            # Demand only: rated phrases, but the word is on no listing at all.
+            + [{"marketplace": "US", "keyword": f"japandi {noun}", "period": PERIOD,
+                "node_id_path": BUFFETS, "searches": 9_000.0, "searches_mom_pct": 40.0,
+                "source_tool": "keyword_research"}
+               for noun in ("sideboard", "console")])
+        store.save_element_naming("US", [
+            {"term": term, "kind": kind, "label_zh": term, "label_en": term,
+             "drop": False, "naming_version": elements.NAMING_VERSION}
+            for term, kind in (("fluted", elements.CRAFT), ("reeded", elements.CRAFT),
+                               ("japandi", elements.STYLE))])
+
+    def matrix(self) -> dict:
+        return render.build_overview("US", PERIOD, "zh")["element_matrix"]
+
+    def test_a_shelf_reading_with_no_rated_demand_is_kept_not_dropped(self) -> None:
+        self.seed()
+        matrix = self.matrix()
+        rail = {p["key"] for p in matrix["groups"][0]["shelf_only"]}
+        self.assertIn("reeded", rail)
+        self.assertNotIn("reeded", {p["key"] for p in matrix["points"]})
+
+    def test_the_unmeasured_half_is_null_and_not_zero(self) -> None:
+        """Zero is a reading. This one was never taken, and a scatter cannot tell
+        the two apart unless the data does."""
+        self.seed()
+        entry = next(p for p in self.matrix()["groups"][0]["shelf_only"]
+                     if p["key"] == "reeded")
+        self.assertIsNone(entry["growth_pct"])
+        self.assertIsNotNone(entry["shelf_pct"])
+
+    def test_demand_with_too_thin_a_shelf_goes_to_the_other_rail(self) -> None:
+        self.seed()
+        groups = {g["kind"]: g for g in self.matrix()["groups"]}
+        entry = next(p for p in groups[elements.STYLE]["demand_only"]
+                     if p["key"] == "japandi")
+        self.assertIsNone(entry["shelf_pct"])
+        self.assertEqual(entry["growth_pct"], 40.0)
+
+    def test_the_median_is_taken_over_the_field_alone(self) -> None:
+        """The dashed line means "more shelf presence than half the elements we
+        track". Elements whose shelf reading is missing cannot vote on it."""
+        self.seed()
+        matrix = self.matrix()
+        field = sorted(p["shelf_pct"] for p in matrix["points"])
+        self.assertEqual(matrix["scale"]["x_mid"], field[len(field) // 2])
+
+    def test_the_row_count_includes_what_sits_in_the_rails(self) -> None:
+        """A row saying "1 个" over three visible marks is worse than no count."""
+        self.seed()
+        craft = next(g for g in self.matrix()["groups"] if g["kind"] == elements.CRAFT)
+        self.assertEqual(craft["total"],
+                         len(craft["points"]) + len(craft["shelf_only"])
+                         + len(craft["demand_only"]))
+        self.assertGreaterEqual(craft["total"], 2)
 
 
 class ElementMatrixGroupTests(RenderTestCase):

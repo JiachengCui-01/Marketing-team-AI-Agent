@@ -1,6 +1,6 @@
 "use client";
 
-import { useId } from "react";
+import { useId, useRef, useState, type CSSProperties } from "react";
 
 /** Hand-rolled SVG chart primitives.
  *
@@ -335,6 +335,10 @@ export type ElementGroup = {
   kind: string;
   kind_label: string;
   points: ElementPoint[];
+  /** Shelf reading, no rated demand: an x and no y. Drawn in the bottom rail. */
+  shelf_only?: ElementRailPoint[];
+  /** Rated demand, too few head listings: a y and no x. Drawn in the left rail. */
+  demand_only?: ElementRailPoint[];
   /** How many elements of this kind were measured, before the plot cap. */
   total: number;
   dropped: number;
@@ -349,6 +353,25 @@ export type ElementScale = {
   y_min: number;
   y_max: number;
   max_searches: number;
+};
+
+/** A rail element: measured on one axis, unmeasured on the other. `null` is the
+ *  whole point of the type — it is the difference between "zero" and "we never
+ *  took this reading", which is what the old both-halves-or-nothing rule was
+ *  protecting and what dropping the element threw away. */
+export type ElementRailPoint = Omit<ElementPoint, "shelf_pct" | "growth_pct"> & {
+  shelf_pct: number | null;
+  growth_pct: number | null;
+};
+
+/** Row names for the hover card. The two axis names come in separately because
+ *  they are the same two strings the axes themselves are labelled with. */
+export type ElementTipLabels = {
+  searches: string;
+  asins: string;
+  price: string;
+  /** Stands in for a number that was never measured, e.g. 未测到 / not measured. */
+  unmeasured: string;
 };
 
 /** One attribute, full width: the elements that are alternatives to each other.
@@ -377,6 +400,11 @@ export function ElementMatrix({
   windowNote,
   sizeNote,
   scale,
+  medianLabel,
+  tipLabels,
+  shelfOnly,
+  demandOnly,
+  railLabels,
 }: {
   points: ElementPoint[];
   /** Clockwise from top-left: rising+thin, rising+proven, cooling+heavy, cooling+thin. */
@@ -389,19 +417,47 @@ export function ElementMatrix({
   /** Bounds to draw against. Omitted, the row scales to its own points — right
    *  for a lone chart, wrong for one row of a set. */
   scale?: ElementScale;
+  /** Names the dashed vertical reference for what it is, e.g. 中位 / median. */
+  medianLabel: string;
+  /** Row names for the hover card's lower half. */
+  tipLabels: ElementTipLabels;
+  /** Elements with a shelf reading and no rated demand — an x, no y. */
+  shelfOnly?: ElementRailPoint[];
+  /** Elements with rated demand and too few head listings — a y, no x. */
+  demandOnly?: ElementRailPoint[];
+  /** Names the two rails, e.g. 需求无读数 / 货架无读数. */
+  railLabels: { noDemand: string; noShelf: string };
 }) {
-  if (!points.length) return null;
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [hover, setHover] =
+    useState<{ point: ElementRailPoint; style: CSSProperties } | null>(null);
+  // After the hooks, never before them: an early return above a useState is the
+  // one way to break a component that otherwise renders fine.
+  // Narrowed rather than asserted: each rail is drawn against the one axis it
+  // has, so a mark missing that axis too has nowhere to go and is not drawn.
+  const rails = {
+    shelf: (shelfOnly ?? []).filter(
+      (p): p is ElementRailPoint & { shelf_pct: number } => p.shelf_pct !== null),
+    demand: (demandOnly ?? []).filter(
+      (p): p is ElementRailPoint & { growth_pct: number } => p.growth_pct !== null),
+  };
+  if (!points.length && !rails.shelf.length && !rails.demand.length) return null;
   // Wide and short. The aspect ratio is the row's height control: the drawing
   // scales to the column it is in, so 5:1 is what keeps a full-width row about
   // 190px tall instead of 280 — seven rows of which is a scroll, not a chart.
   // The absolute numbers are chosen so that scaling lands near 1:1 on a desktop
   // panel and the 9px type stays the size it was designed at.
   const width = 1000;
-  const height = 190;
-  const padL = 46;
+  const height = 200;
+  // Left pad carries the rotated axis name as well as the tick values, bottom
+  // pad the x name. Both axes are percentages of completely different things —
+  // a share on x, a growth rate on y — so a row that prints only numbers makes
+  // the reader guess which percent is which. They are named on every row for
+  // that reason, not for decoration.
+  const padL = 64;
   const padR = 20;
-  const padT = 20;
-  const padB = 28;
+  const padT = 22;
+  const padB = 34;
 
   const shelves = points.map((p) => p.shelf_pct);
   const growths = points.map((p) => p.growth_pct);
@@ -418,92 +474,266 @@ export function ElementMatrix({
     ? Math.max(1, scale.max_searches)
     : Math.max(1, ...points.map((p) => p.searches));
 
-  const px = (v: number) => padL + (v / xMax) * (width - padL - padR);
+  // The rails are inside the padding, not extra chrome outside it: each takes a
+  // strip off the field and keeps its own axis, so a rail mark lines up with the
+  // field marks it shares that axis with.
+  const railW = rails.demand.length ? 26 : 0;
+  const railH = rails.shelf.length ? 22 : 0;
+  const fieldL = padL + railW;
+  const fieldB = padB + railH;
+
+  const px = (v: number) => fieldL + (v / xMax) * (width - fieldL - padR);
   const py = (v: number) =>
-    height - padB - ((v - yMin) / (yMax - yMin || 1)) * (height - padT - padB);
+    height - fieldB - ((v - yMin) / (yMax - yMin || 1)) * (height - padT - fieldB);
 
   // Biggest first, so a small dot is never hidden under a large one, and so the
   // labels that get dropped on collision are the least important ones.
   const ordered = [...points].sort((a, b) => b.searches - a.searches);
   const placed: { x: number; y: number }[] = [];
 
+  /** Anchor the card to the dot, not to the cursor.
+   *
+   * The drawing is a scaled viewBox, so a user-space coordinate becomes a pixel
+   * one by the same ratio the browser used to fit it — read off the element
+   * rather than assumed, because the row's width changes with the window.
+   */
+  function show(point: ElementRailPoint, cx: number, cy: number) {
+    const box = svgRef.current?.getBoundingClientRect();
+    const k = box ? box.width / width : 1;
+    const top = cy * k;
+    // Below the dot when the dot sits high in the row: a card anchored above it
+    // would hang over the row before this one.
+    const below = top < 76;
+    setHover({
+      point,
+      style: {
+        // Clamped, or a dot at either end pushes half the card out of the row.
+        left: Math.round(Math.min(Math.max(cx * k, 96),
+                                  Math.max(96, (box?.width ?? width) - 96))),
+        top: Math.round(below ? top + 16 : top - 14),
+        transform: `translate(-50%, ${below ? "0" : "-100%"})`,
+      },
+    });
+  }
+
+  const hide = () => setHover(null);
+
   return (
-    // No fixed pixel height: with a viewBox and a full-width box the drawing
-    // scales to the column it sits in, which is what makes the row big on a wide
-    // screen instead of a 900px island floating in the middle of one.
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full"
-         role="img"
-         aria-label={points.map((p) =>
-           `${p.label}: ${xLabel} ${p.shelf_pct.toFixed(1)}%, `
-           + `${yLabel} ${p.growth_pct.toFixed(1)}%`).join("; ")}>
-      {/* The two corners that carry a decision, tinted instead of captioned. A
-          tint survives being repeated down a column of rows; four captions a
-          row do not. */}
-      <rect className="bi-quadrant-open" x={padL} y={padT}
-            width={Math.max(0, px(xMid) - padL)} height={Math.max(0, py(0) - padT)} />
-      <rect className="bi-quadrant-risk" x={px(xMid)} y={py(0)}
-            width={Math.max(0, width - padR - px(xMid))}
-            height={Math.max(0, height - padB - py(0))} />
+    <div className="relative">
+      {/* No fixed pixel height: with a viewBox and a full-width box the drawing
+          scales to the column it sits in, which is what makes the row big on a
+          wide screen instead of a 900px island floating in the middle of one. */}
+      <svg ref={svgRef} viewBox={`0 0 ${width} ${height}`} className="w-full"
+           role="img"
+           aria-label={points.map((p) =>
+             `${p.label}: ${xLabel} ${p.shelf_pct.toFixed(1)}%, `
+             + `${yLabel} ${p.growth_pct.toFixed(1)}%`).join("; ")}>
+        {/* The two corners that carry a decision, tinted instead of captioned. A
+            tint survives being repeated down a column of rows; four captions a
+            row do not. */}
+        <rect className="bi-quadrant-open" x={fieldL} y={padT}
+              width={Math.max(0, px(xMid) - fieldL)} height={Math.max(0, py(0) - padT)} />
+        <rect className="bi-quadrant-risk" x={px(xMid)} y={py(0)}
+              width={Math.max(0, width - padR - px(xMid))}
+              height={Math.max(0, height - fieldB - py(0))} />
 
-      {/* Zero growth is a fact about the market; the median is a fact about our
-          own tracking list, so it is the dashed one. */}
-      <line className="bi-axis-solid" x1={padL} x2={width - padR} y1={py(0)} y2={py(0)} />
-      <line className="bi-axis-dashed" x1={px(xMid)} x2={px(xMid)}
-            y1={padT} y2={height - padB} />
+        {/* Zero growth is a fact about the market; the median is a fact about our
+            own tracking list, so it is the dashed one. */}
+        <line className="bi-axis-solid" x1={fieldL} x2={width - padR}
+              y1={py(0)} y2={py(0)} />
+        <line className="bi-axis-dashed" x1={px(xMid)} x2={px(xMid)}
+              y1={padT} y2={height - fieldB} />
 
-      <text className="bi-axis-tick" x={padL - 6} y={py(0) + 3} textAnchor="end">0%</text>
-      <text className="bi-axis-tick" x={padL - 6} y={padT + 4} textAnchor="end">
-        {yMax.toFixed(0)}%
-      </text>
-      <text className="bi-axis-tick" x={padL - 6} y={height - padB} textAnchor="end">
-        {yMin.toFixed(0)}%
-      </text>
-      <text className="bi-axis-tick" x={px(xMid)} y={height - padB + 13} textAnchor="middle">
-        {xMid.toFixed(0)}%
-      </text>
-      <text className="bi-axis-tick" x={padL} y={height - padB + 13} textAnchor="start">0</text>
-      <text className="bi-axis-tick" x={width - padR} y={height - padB + 13} textAnchor="end">
-        {xMax.toFixed(0)}%
-      </text>
+        {/* The rails, and the boundary that says a mark inside one is missing a
+            reading rather than sitting at zero. Left rail: demand measured, too
+            few head listings to state a share. Bottom rail: on the shelf, no
+            rated search signal. */}
+        {rails.demand.length ? (
+          <>
+            <line className="bi-rail-edge" x1={fieldL - 6} x2={fieldL - 6}
+                  y1={padT} y2={height - fieldB} />
+            <text className="bi-rail-name" x={padL + railW / 2 - 3} y={padT - 8}
+                  textAnchor="middle">{railLabels.noShelf}</text>
+          </>
+        ) : null}
+        {rails.shelf.length ? (
+          <>
+            <line className="bi-rail-edge" x1={fieldL} x2={width - padR}
+                  y1={height - fieldB + 6} y2={height - fieldB + 6} />
+            <text className="bi-rail-name" x={width - padR}
+                  y={height - padB - railH / 2 + 3} textAnchor="end">
+              {railLabels.noDemand}
+            </text>
+          </>
+        ) : null}
 
-      {ordered.map((point) => {
-        const r = 4 + Math.sqrt(point.searches / maxSearches) * 11;
-        const cx = px(point.shelf_pct);
-        const cy = py(point.growth_pct);
-        const rising = point.growth_pct >= 0;
-        // Drop a label rather than stack it: two names on top of each other is
-        // worse than one name and a dot you can hover.
-        const clash = placed.some(
-          (seat) => Math.abs(seat.x - cx) < 56 && Math.abs(seat.y - cy) < 13);
-        if (!clash) placed.push({ x: cx, y: cy });
-        return (
-          <g key={point.key}>
-            {/* The hit target is bigger than the mark; an 8px dot is not a button. */}
-            <circle cx={cx} cy={cy} r={Math.max(15, r + 8)} fill="transparent" />
-            {/* Disc for the volume, core for the position. Overlapping discs stay
-                countable because their cores do not merge. */}
-            <circle className={rising ? "bi-dot-disc" : "bi-dot-disc bi-dot-disc-risk"}
-                    cx={cx} cy={cy} r={r} />
-            <circle className={rising ? "bi-dot-core" : "bi-dot-core bi-dot-core-risk"}
-                    cx={cx} cy={cy} r={Math.min(3, r / 3)}>
-              <title>
-                {`${point.label}（${point.kind_label}） · ${yLabel} `
-                  + `${point.growth_pct >= 0 ? "+" : ""}${point.growth_pct.toFixed(1)}% · `
-                  + `${xLabel} ${point.shelf_pct.toFixed(1)}% · ${point.asins} ASIN · `
-                  + `${point.searches.toLocaleString()} `
-                  + (point.avg_price != null ? `· ${fmtMoney(point.avg_price)}` : "")}
-              </title>
-            </circle>
-            {!clash ? (
-              <text className="bi-point-label" x={cx} y={cy - r - 5} textAnchor="middle">
-                {truncate(point.label, 12)}
-              </text>
-            ) : null}
-          </g>
-        );
-      })}
-    </svg>
+        {/* Signed, so "135%" cannot be read as a level rather than a change. */}
+        <text className="bi-axis-tick" x={padL - 6} y={py(0) + 3} textAnchor="end">0%</text>
+        <text className="bi-axis-tick" x={padL - 6} y={padT + 4} textAnchor="end">
+          +{yMax.toFixed(0)}%
+        </text>
+        <text className="bi-axis-tick" x={padL - 6} y={height - fieldB} textAnchor="end">
+          {yMin.toFixed(0)}%
+        </text>
+        {/* The dashed line's value is meaningless without the word: nothing tells
+            a reader that 13% is the median of the elements we track. */}
+        <text className="bi-axis-tick" x={px(xMid)} y={height - padB + 13} textAnchor="middle">
+          {medianLabel} {xMid.toFixed(0)}%
+        </text>
+        <text className="bi-axis-tick" x={fieldL} y={height - padB + 13}
+              textAnchor="start">0</text>
+        <text className="bi-axis-tick" x={width - padR} y={height - padB + 13} textAnchor="end">
+          {xMax.toFixed(0)}%
+        </text>
+
+        {/* Axis names, on every row. The one-line note in the section heading was
+            doing this job for a single chart and stopped working the moment there
+            were seven of them and the eye had left the heading. */}
+        <text className="bi-axis-title" x={14}
+              y={padT + (height - padT - fieldB) / 2} textAnchor="middle"
+              transform={`rotate(-90 14 ${padT + (height - padT - fieldB) / 2})`}>
+          {yLabel} ↑
+        </text>
+        <text className="bi-axis-title" x={width - padR} y={height - padB + 26}
+              textAnchor="end">{xLabel} →</text>
+
+        {/* Rail marks first, so a field dot is never hidden under one. They are
+            open squares rather than discs: a different shape for a different
+            claim, so nobody reads a rail mark as a measured position. */}
+        {rails.demand.map((point) => {
+          const cy = py(point.growth_pct);
+          return (
+            <g key={`d-${point.key}`} className="bi-dot-group" tabIndex={0} role="button"
+               aria-label={describe(point, xLabel, yLabel, tipLabels)}
+               onMouseEnter={() => show(point, padL + railW / 2, cy)}
+               onMouseLeave={hide} onFocus={() => show(point, padL + railW / 2, cy)}
+               onBlur={hide}>
+              <rect x={padL + railW / 2 - 9} y={cy - 7} width={18} height={14}
+                    fill="transparent" />
+              <rect className="bi-rail-mark" x={padL + railW / 2 - 4} y={cy - 4}
+                    width={8} height={8} rx={1.5} />
+            </g>
+          );
+        })}
+        {rails.shelf.map((point) => {
+          const cx = px(point.shelf_pct);
+          const railY = height - padB - railH / 2;
+          return (
+            <g key={`s-${point.key}`} className="bi-dot-group" tabIndex={0} role="button"
+               aria-label={describe(point, xLabel, yLabel, tipLabels)}
+               onMouseEnter={() => show(point, cx, railY)}
+               onMouseLeave={hide} onFocus={() => show(point, cx, railY)}
+               onBlur={hide}>
+              <rect x={cx - 9} y={railY - 7} width={18} height={14} fill="transparent" />
+              <rect className="bi-rail-mark" x={cx - 4} y={railY - 4}
+                    width={8} height={8} rx={1.5} />
+            </g>
+          );
+        })}
+
+        {ordered.map((point) => {
+          const r = 4 + Math.sqrt(point.searches / maxSearches) * 11;
+          const cx = px(point.shelf_pct);
+          const cy = py(point.growth_pct);
+          const rising = point.growth_pct >= 0;
+          // Drop a label rather than stack it: two names on top of each other is
+          // worse than one name and a dot whose name the hover card gives back.
+          const clash = placed.some(
+            (seat) => Math.abs(seat.x - cx) < 56 && Math.abs(seat.y - cy) < 13);
+          if (!clash) placed.push({ x: cx, y: cy });
+          const hot = hover?.point.key === point.key;
+          return (
+            <g key={point.key} className="bi-dot-group"
+               tabIndex={0} role="button"
+               aria-label={describe(point, xLabel, yLabel, tipLabels)}
+               onMouseEnter={() => show(point, cx, cy)}
+               onMouseLeave={hide}
+               onFocus={() => show(point, cx, cy)}
+               onBlur={hide}>
+              {/* The hit target is bigger than the mark; an 8px dot is not a
+                  button, and this is now the thing that opens the hover card. */}
+              <circle cx={cx} cy={cy} r={Math.max(15, r + 8)} fill="transparent" />
+              {/* Disc for the volume, core for the position. Overlapping discs stay
+                  countable because their cores do not merge. */}
+              <circle className={`${rising ? "bi-dot-disc" : "bi-dot-disc bi-dot-disc-risk"}`
+                                 + (hot ? " bi-dot-hot" : "")}
+                      cx={cx} cy={cy} r={r} />
+              <circle className={rising ? "bi-dot-core" : "bi-dot-core bi-dot-core-risk"}
+                      cx={cx} cy={cy} r={Math.min(3, r / 3)} />
+              {!clash ? (
+                <text className="bi-point-label" x={cx} y={cy - r - 5} textAnchor="middle">
+                  {truncate(point.label, 12)}
+                </text>
+              ) : null}
+            </g>
+          );
+        })}
+      </svg>
+
+      {/* An HTML card rather than SVG <title>. The native tooltip waits about a
+          second, cannot be styled, and — the reason it had to go — was attached
+          to the 3px core while the hit target is 15px, so on most dots it never
+          appeared at all. Half the dots carry no printed label because their
+          names would collide, and this is where those names live. */}
+      {hover ? (
+        <div className="bi-dot-tip" style={hover.style}>
+          <div className="bi-dot-tip-head">
+            <span className="bi-dot-tip-name">{hover.point.label}</span>
+            <span className="bi-dot-tip-kind">{hover.point.kind_label}</span>
+          </div>
+          {/* An unmeasured half says so, in the row where its number would have
+              been. Leaving the row out would read as "nothing to say about
+              growth"; a dash reads as "we did not measure it", which is the
+              fact. */}
+          <TipRow label={yLabel} value={pct(hover.point.growth_pct, tipLabels.unmeasured)}
+                  tone={hover.point.growth_pct == null ? undefined
+                        : hover.point.growth_pct >= 0 ? "up" : "down"} />
+          <TipRow label={xLabel}
+                  value={pct(hover.point.shelf_pct, tipLabels.unmeasured, false)} />
+          <TipRow label={tipLabels.searches}
+                  value={hover.point.searches.toLocaleString()} />
+          <TipRow label={tipLabels.asins} value={`${hover.point.asins}`} />
+          {hover.point.avg_price != null ? (
+            <TipRow label={tipLabels.price} value={fmtMoney(hover.point.avg_price)} />
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
+}
+
+function TipRow({ label, value, tone }: {
+  label: string;
+  value: string;
+  tone?: "up" | "down";
+}) {
+  return (
+    <div className="bi-dot-tip-row">
+      <span className="bi-dot-tip-key">{label}</span>
+      <span className={"bi-dot-tip-val"
+                       + (tone === "up" ? " bi-dot-tip-up"
+                          : tone === "down" ? " bi-dot-tip-down" : "")}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+/** A percentage, or the word for a reading that was never taken. */
+function pct(value: number | null, unmeasured: string, signed = true): string {
+  if (value == null) return unmeasured;
+  return `${signed && value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
+}
+
+/** The card's contents as one string, for the screen reader that cannot hover. */
+function describe(point: ElementRailPoint, xLabel: string, yLabel: string,
+                  tipLabels: ElementTipLabels): string {
+  return `${point.label}（${point.kind_label}） · `
+    + `${yLabel} ${pct(point.growth_pct, tipLabels.unmeasured)} · `
+    + `${xLabel} ${pct(point.shelf_pct, tipLabels.unmeasured, false)} · `
+    + `${tipLabels.searches} ${point.searches.toLocaleString()} · `
+    + `${tipLabels.asins} ${point.asins}`
+    + (point.avg_price != null ? ` · ${fmtMoney(point.avg_price)}` : "");
 }
 
 /** The same chart once per attribute — sizes beside sizes, finishes beside
@@ -529,6 +759,12 @@ export function ElementMatrixGroups({
   splitNote,
   countLabel,
   moreLabel,
+  medianLabel,
+  axesNote,
+  tipLabels,
+  hoverNote,
+  railLabels,
+  railNote,
 }: {
   groups: ElementGroup[];
   scale?: ElementScale;
@@ -543,6 +779,18 @@ export function ElementMatrixGroups({
   countLabel: string;
   /** Suffix for the elements a row measured but could not plot. */
   moreLabel: string;
+  /** Names the dashed vertical reference, e.g. 中位 / median. */
+  medianLabel: string;
+  /** Says out loud that the two axes are percentages of different things. */
+  axesNote: string;
+  /** Row names for the hover card. */
+  tipLabels: ElementTipLabels;
+  /** Tells the reader the hover card exists — an affordance nobody discovers
+   *  by being told nothing. */
+  hoverNote: string;
+  /** Names the two rails and explains what a square mark means. */
+  railLabels: { noDemand: string; noShelf: string };
+  railNote: string;
 }) {
   if (!groups.length) return null;
   return (
@@ -565,10 +813,17 @@ export function ElementMatrixGroups({
                 </span>
               ) : null}
             </div>
-            <div className="min-w-0 flex-1">
+            {/* Capped, because the drawing scales with its box: on a 2560px
+                monitor an uncapped row would be 480px tall with 26px axis type.
+                The cap is well above a normal window, so the row still fills
+                the width everywhere it matters. */}
+            <div className="min-w-0 flex-1 max-w-[1400px]">
               <ElementMatrix points={group.points} quadrants={quadrants} xLabel={xLabel}
                              yLabel={yLabel} windowNote={windowNote} sizeNote={sizeNote}
-                             scale={scale} />
+                             scale={scale} medianLabel={medianLabel}
+                             tipLabels={tipLabels} railLabels={railLabels}
+                             shelfOnly={group.shelf_only}
+                             demandOnly={group.demand_only} />
             </div>
           </div>
         ))}
@@ -589,10 +844,13 @@ export function ElementMatrixGroups({
       </div>
       <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]
                       text-fg-subtle">
-        <span>{splitNote}</span>
+        <span>{axesNote}</span>
         <span>{windowNote}</span>
         <span>{sizeNote}</span>
       </div>
+      <div className="mt-0.5 text-[10px] text-fg-subtle">{hoverNote}</div>
+      <div className="mt-0.5 text-[10px] text-fg-subtle">{railNote}</div>
+      <div className="mt-0.5 text-[10px] text-fg-subtle">{splitNote}</div>
     </div>
   );
 }

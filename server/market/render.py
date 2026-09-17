@@ -590,14 +590,28 @@ def name_elements(client, marketplace: str, period: str, language: str,
              < elements.NAMING_VERSION]
     if not fresh or client is None:
         return 0
+    # One call per batch, saved as it goes. A single call for the whole list
+    # would be asking for more output than the model can emit, and a truncated
+    # tool call is not a partial answer — it parses as nothing, and the month
+    # would come back entirely unnamed. Saving per batch also means a failure
+    # half way through keeps what the earlier batches already established.
+    saved = 0
+    for start in range(0, len(fresh), elements.NAMING_BATCH):
+        saved += _name_batch(client, marketplace, language,
+                             fresh[start:start + elements.NAMING_BATCH])
+    return saved
+
+
+def _name_batch(client, marketplace: str, language: str,
+                batch: Sequence[dict]) -> int:
     payload, source = _run_tool(
-        client, tool=TOOL_ELEMENTS, user=elements.naming_brief(fresh),
+        client, tool=TOOL_ELEMENTS, user=elements.naming_brief(batch),
         language=language, max_tokens=8000)
     if source != "llm":
         # A failed call must not be cached as an answer, or a transient outage
-        # would leave every term of that month permanently unnamed.
+        # would leave every term of that batch permanently unnamed.
         return 0
-    allowed = {row["term"] for row in fresh}
+    allowed = {row["term"] for row in batch}
     named = {str(item.get("term") or "").strip().lower(): item
              for item in payload.get("terms", [])
              if str(item.get("term") or "").strip().lower() in allowed}

@@ -112,15 +112,26 @@ MIN_DOCS_FOR_DF = 20
 # Below this a term is one listing's copywriting, not a market signal.
 MIN_TITLE_ASINS = 3
 MIN_KEYWORDS = 2
-MIN_SEARCHES = 3_000.0
+# The demand bar. 3,000 a month was set when every element competed for one of
+# forty slots on a single scatter, so the bar was doing two jobs: proving a term
+# is real, and rationing a list. Only the first is its job. Split across nine
+# attributes, 3,000 was deleting whole categories of genuine decision — a front
+# profile that 1,500 people a month search for is a brief, not noise — and the
+# dot area already encodes volume, so a thin signal arrives looking thin.
+MIN_SEARCHES = 1_200.0
 # How many mined terms are worth putting in front of the model to name.
 # Forty was set when every element shared one scatter, where forty dots is
-# already past readable. Split across nine attribute columns it left most of
-# them with two or three points — a colour column that knows about white and
-# black only is worse than no colour column. Naming is cached per term, so the
-# larger list costs one model call the first time a term appears and nothing
+# already past readable. Split across nine attribute rows it left most of them
+# with two or three points — a colour row that knows about white and black only
+# is worse than no colour row. Naming is cached per term and batched, so the
+# longer list costs a few model calls the first time a term appears and nothing
 # after that.
-MAX_TERMS = 90
+MAX_TERMS = 160
+# Terms per naming call. The model's answer is ~40 tokens a term and DeepSeek
+# caps output at 8k, so one call for the whole list would be truncated — and a
+# truncated tool call is not a partial answer, it is no answer at all, which
+# would leave a whole month unnamed. Batched, a failure costs one chunk.
+NAMING_BATCH = 50
 
 RISING_PCT = 10.0
 FALLING_PCT = -10.0

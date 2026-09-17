@@ -260,6 +260,66 @@ class EnrolmentTests(SweepTestCase):
         self.assertNotIn("x:1", kept)
 
 
+class KeywordMinerTests(SweepTestCase):
+    """The demand vocabulary, which was the real ceiling on the element read.
+
+    Twelve nodes at fifty phrases each is a six-hundred-phrase vocabulary for a
+    whole department, and `keyword_research` is seeded with the node's own label,
+    so those fifty are mostly restatements of it.
+    """
+
+    def _job(self, kind: str, subject_id: str = BUFFETS, period: str = PERIOD) -> dict:
+        store.enqueue_job(marketplace="US", job_kind=kind,
+                          subject_kind=jobs.BY_KIND[kind].subject_kind,
+                          subject_id=subject_id, period=period,
+                          est_calls=jobs.BY_KIND[kind].est_calls)
+        return next(j for j in store.due_jobs("US", limit=500) if j["job_kind"] == kind)
+
+    def _seen(self) -> list[dict]:
+        """Every request the job sent, so the parameter names can be asserted."""
+        seen: list[dict] = []
+
+        def vendor(tool: str, arguments: dict) -> str:
+            seen.append({"tool": tool, **(arguments.get("request") or {})})
+            return fixture_vendor(tool, arguments)
+
+        with mock.patch.object(gateway.sellersprite, "call_tool", side_effect=vendor):
+            jobs.run_job(self._job("keyword_mine"))
+        return seen
+
+    def test_the_miner_is_actually_enqueued(self) -> None:
+        """It was plumbed end to end — field set, extractor, tests — and then
+        never called by anything."""
+        self.assertIn("keyword_mine", jobs.BY_KIND)
+        self.assertIn("keyword_mine", {s.kind for s in jobs.CATALOG})
+
+    def test_the_request_uses_this_endpoint_s_own_parameter_names(self) -> None:
+        """`historyDate` and `minSearch`, not `month` and `minSearches`. A param
+        the vendor does not recognise is a billed call that answers nothing, so
+        this is checked rather than assumed."""
+        first = self._seen()[0]
+        self.assertEqual(first["tool"], "keyword_miner")
+        self.assertEqual(first["historyDate"], PERIOD)
+        self.assertEqual(first["keyword"], "buffets sideboards")
+        self.assertIn("minSearch", first)
+        self.assertNotIn("month", first)
+        self.assertNotIn("minSearches", first)
+
+    def test_mined_phrases_reach_the_table_the_element_read_mines(self) -> None:
+        """They have to land in market_keyword_metrics, not somewhere adjacent:
+        the per-ASIN traffic keywords are already collected into the edge table
+        and have never been part of the element vocabulary because of it."""
+        self._seen()
+        stored = store.top_keywords("US", BUFFETS, PERIOD, limit=500)
+        self.assertTrue(stored)
+
+    def test_a_bigger_page_is_asked_for_than_the_old_fifty(self) -> None:
+        """Billing is per call, not per row, so the page size was free headroom
+        the demand side was not taking."""
+        self.assertGreaterEqual(jobs.KEYWORD_PAGE_SIZE, 200)
+        self.assertEqual(self._seen()[0]["size"], jobs.KEYWORD_PAGE_SIZE)
+
+
 class ListingDepthTests(SweepTestCase):
     """The pull stops when a page stops moving the number, not after three pages.
 

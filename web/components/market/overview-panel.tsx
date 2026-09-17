@@ -187,10 +187,7 @@ export function MarketOverviewPanel({
             </Section>
 
             <Section title={t.gmElements} hint={t.gmElementsHint}
-                     data={dashboard?.element_matrix?.groups ?? null}
-                     right={<span className="text-[10px] text-fg-subtle">
-                       {t.gmElementGrowth} ↑ · {t.gmElementShelf} →
-                     </span>}>
+                     data={dashboard?.element_matrix?.groups ?? null}>
               <ElementMatrixGroups
                 groups={dashboard?.element_matrix?.groups ?? []}
                 scale={dashboard?.element_matrix?.scale ?? undefined}
@@ -206,6 +203,16 @@ export function MarketOverviewPanel({
                 splitNote={t.gmElementSplit}
                 countLabel={t.gmElementCount}
                 moreLabel={t.gmElementMore}
+                medianLabel={t.gmElementMedian}
+                axesNote={t.gmElementAxes}
+                hoverNote={t.gmElementHover}
+                tipLabels={{ searches: t.gmElementTipSearches,
+                             asins: t.gmElementTipAsins,
+                             price: t.gmElementTipPrice,
+                             unmeasured: t.gmElementTipUnmeasured }}
+                railLabels={{ noDemand: t.gmElementRailNoDemand,
+                              noShelf: t.gmElementRailNoShelf }}
+                railNote={t.gmElementRailNote}
               />
             </Section>
 
