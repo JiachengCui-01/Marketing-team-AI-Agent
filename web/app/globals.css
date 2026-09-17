@@ -1756,15 +1756,22 @@ select.field:focus {
   }
   .bi-delta-pos {
     @apply absolute top-0 h-full rounded-full;
-    background: rgb(var(--ok) / 0.8);
+    background: rgb(var(--success) / 0.8);
   }
   .bi-delta-neg {
     @apply absolute top-0 h-full rounded-full;
     background: rgb(var(--danger) / 0.75);
   }
+  /* The anchor a diverging bar is read against, so it has to be visible against
+     both the empty track and a saturated bar sitting on top of it. At border
+     colour it was neither, and a 0% row rendered as an empty pill with nothing
+     in it at all. Centred on the midpoint and standing slightly proud of the
+     track, so it reads as an axis rather than as a seam. */
   .bi-delta-zero {
-    @apply absolute top-0 h-full w-px left-1/2;
-    background: rgb(var(--border));
+    @apply absolute left-1/2 w-px -translate-x-1/2 rounded-full;
+    top: -2px;
+    bottom: -2px;
+    background: rgb(var(--fg-subtle) / 0.6);
   }
   .bi-bullet {
     @apply relative h-2 w-full overflow-hidden rounded-full;
@@ -1772,14 +1779,26 @@ select.field:focus {
   }
   .bi-bullet-fill {
     @apply h-full rounded-full;
-    background: rgb(var(--ok) / 0.7);
+    background: rgb(var(--success) / 0.7);
   }
   .bi-bullet-bad {
     background: rgb(var(--danger) / 0.7);
   }
+  /* No benchmark means the comparison was never made. Painting that green said
+     "passes", which is the one thing the reading cannot support. */
+  .bi-bullet-unknown {
+    background: rgb(var(--fg-subtle) / 0.45);
+  }
+  /* The benchmark is the entire reason this chart is a bullet rather than a bar,
+     and at 1px in muted grey it disappeared exactly where it matters most —
+     behind the saturated fill of a value that has passed it. Two pixels, near
+     foreground colour, with a background-coloured ring so it separates from
+     whatever is behind it, and centred on its own value rather than starting
+     there. */
   .bi-bullet-mark {
-    @apply absolute top-0 h-full w-px;
-    background: rgb(var(--fg-muted));
+    @apply absolute top-0 h-full w-0.5 -translate-x-1/2 rounded-full;
+    background: rgb(var(--fg) / 0.7);
+    box-shadow: 0 0 0 1px rgb(var(--bg-elevated));
   }
   .bi-evidence-chip {
     @apply ml-1 inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0 text-[10px] leading-[15px] align-middle;
@@ -1800,25 +1819,30 @@ select.field:focus {
     border-bottom: 1px dashed rgb(var(--warn) / 0.6);
     display: inline-block;
   }
+  /* Four verdicts that have to be told apart at a glance in a list of rows. At
+     0.10 tint and a 0.34 border they were four pale blobs of near-identical
+     weight, which is the same as having no verdict on the row: the reader has
+     to stop and read the word. The type size is the repo's chip size and stays;
+     only the colour does more work. */
   .bi-verdict-enter {
-    color: rgb(var(--ok));
-    border-color: rgb(var(--ok) / 0.34);
-    background: rgb(var(--ok) / 0.1);
+    color: rgb(var(--success));
+    border-color: rgb(var(--success) / 0.5);
+    background: rgb(var(--success) / 0.16);
   }
   .bi-verdict-validate {
     color: rgb(var(--feature-selection));
-    border-color: rgb(var(--feature-selection) / 0.34);
-    background: rgb(var(--feature-selection) / 0.1);
+    border-color: rgb(var(--feature-selection) / 0.5);
+    background: rgb(var(--feature-selection) / 0.16);
   }
   .bi-verdict-watch {
     color: rgb(var(--warn));
-    border-color: rgb(var(--warn) / 0.34);
-    background: rgb(var(--warn) / 0.1);
+    border-color: rgb(var(--warn) / 0.5);
+    background: rgb(var(--warn) / 0.16);
   }
   .bi-verdict-avoid {
     color: rgb(var(--danger));
-    border-color: rgb(var(--danger) / 0.34);
-    background: rgb(var(--danger) / 0.1);
+    border-color: rgb(var(--danger) / 0.5);
+    background: rgb(var(--danger) / 0.16);
   }
   /* Treemap: area carries the share, opacity carries it again for anyone who
      reads size poorly, and a declining tile is outlined rather than recoloured
@@ -1902,14 +1926,14 @@ select.field:focus {
     border-left-color: rgb(var(--danger) / 0.3);
   }
   .bi-alert-opportunity-high {
-    border-left-color: rgb(var(--ok));
-    background: rgb(var(--ok) / 0.06);
+    border-left-color: rgb(var(--success));
+    background: rgb(var(--success) / 0.06);
   }
   .bi-alert-opportunity-medium {
-    border-left-color: rgb(var(--ok) / 0.6);
+    border-left-color: rgb(var(--success) / 0.6);
   }
   .bi-alert-opportunity-low {
-    border-left-color: rgb(var(--ok) / 0.3);
+    border-left-color: rgb(var(--success) / 0.3);
   }
   .bi-alert-metric {
     @apply text-[10px] tabular-nums;

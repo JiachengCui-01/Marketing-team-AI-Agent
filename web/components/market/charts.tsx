@@ -973,11 +973,17 @@ export function Bullet({
   goodBelow?: boolean;
 }) {
   const scale = Math.max(max, value, benchmark ?? 0) || 1;
-  const good = benchmark === null ? true : goodBelow ? value <= benchmark : value >= benchmark;
+  // Three states, not two. With no benchmark there is no comparison to pass or
+  // fail, and the old code called that `good` — so a category whose peers were
+  // never measured rendered in the same green as one that genuinely beats them.
+  const verdict = benchmark === null ? "unknown"
+    : (goodBelow ? value <= benchmark : value >= benchmark) ? "good" : "bad";
   return (
     <div className="bi-bullet" role="img"
          aria-label={`${value.toFixed(2)} against benchmark ${benchmark?.toFixed(2) ?? "—"}`}>
-      <div className={good ? "bi-bullet-fill" : "bi-bullet-fill bi-bullet-bad"}
+      <div className={`bi-bullet-fill${
+             verdict === "bad" ? " bi-bullet-bad"
+             : verdict === "unknown" ? " bi-bullet-unknown" : ""}`}
            style={{ width: `${Math.min(100, (value / scale) * 100)}%` }} />
       {benchmark !== null ? (
         <div className="bi-bullet-mark" style={{ left: `${Math.min(100, (benchmark / scale) * 100)}%` }} />
