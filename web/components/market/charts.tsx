@@ -318,34 +318,50 @@ export function ShareBar({
   );
 }
 
+/** One element on the chart.
+ *
+ * Both axes are nullable, and that is the type's whole job: `null` is the
+ * difference between "zero" and "we never took this reading". An element with
+ * both readings gets a position in the field; one with a single reading gets a
+ * rail mark against the axis it has. Making the nullable form the general one —
+ * rather than a separate rail type narrowed off it — is what lets one predicate
+ * decide which, on both sides of the wire.
+ */
 export type ElementPoint = {
   key: string;
   label: string;
   kind: string;
   kind_label: string;
   /** Share of head revenue whose listing title mentions this element. */
-  shelf_pct: number;
-  growth_pct: number;
+  shelf_pct: number | null;
+  growth_pct: number | null;
   searches: number;
   asins: number;
   avg_price: number | null;
 };
 
+/** An element measured on both axes, so it has a position to be drawn at. */
+export type ElementFieldPoint = ElementPoint & {
+  shelf_pct: number;
+  growth_pct: number;
+};
+
+export function inField(point: ElementPoint): point is ElementFieldPoint {
+  return point.shelf_pct !== null && point.growth_pct !== null;
+}
+
 export type ElementGroup = {
   kind: string;
   kind_label: string;
+  /** Field dots and rail marks together; `inField` tells them apart. */
   points: ElementPoint[];
-  /** Shelf reading, no rated demand: an x and no y. Drawn in the bottom rail. */
-  shelf_only?: ElementRailPoint[];
-  /** Rated demand, too few head listings: a y and no x. Drawn in the left rail. */
-  demand_only?: ElementRailPoint[];
   /** How many elements of this kind were measured, before the plot cap. */
   total: number;
   dropped: number;
 };
 
-/** Axis bounds shared by every attribute panel, computed server-side over all
- *  plotted elements. Without it each panel would silently rescale and two dots
+/** Axis bounds shared by every attribute row, computed server-side over all
+ *  plotted elements. Without it each row would silently rescale and two dots
  *  in the same position would mean two different numbers. */
 export type ElementScale = {
   x_max: number;
@@ -353,15 +369,6 @@ export type ElementScale = {
   y_min: number;
   y_max: number;
   max_searches: number;
-};
-
-/** A rail element: measured on one axis, unmeasured on the other. `null` is the
- *  whole point of the type — it is the difference between "zero" and "we never
- *  took this reading", which is what the old both-halves-or-nothing rule was
- *  protecting and what dropping the element threw away. */
-export type ElementRailPoint = Omit<ElementPoint, "shelf_pct" | "growth_pct"> & {
-  shelf_pct: number | null;
-  growth_pct: number | null;
 };
 
 /** Row names for the hover card. The two axis names come in separately because
@@ -394,54 +401,38 @@ export type ElementTipLabels = {
  */
 export function ElementMatrix({
   points,
-  quadrants,
   xLabel,
   yLabel,
-  windowNote,
-  sizeNote,
   scale,
   medianLabel,
   tipLabels,
-  shelfOnly,
-  demandOnly,
   railLabels,
 }: {
+  /** Field dots and rail marks in one list; `inField` decides which is which. */
   points: ElementPoint[];
-  /** Clockwise from top-left: rising+thin, rising+proven, cooling+heavy, cooling+thin. */
-  quadrants: [string, string, string, string];
   xLabel: string;
   yLabel: string;
-  /** Names the window y was measured over — a month and a year are not the same claim. */
-  windowNote: string;
-  sizeNote: string;
-  /** Bounds to draw against. Omitted, the row scales to its own points — right
-   *  for a lone chart, wrong for one row of a set. */
-  scale?: ElementScale;
+  /** Bounds to draw against, shared by every row of the set. */
+  scale: ElementScale;
   /** Names the dashed vertical reference for what it is, e.g. 中位 / median. */
   medianLabel: string;
   /** Row names for the hover card's lower half. */
   tipLabels: ElementTipLabels;
-  /** Elements with a shelf reading and no rated demand — an x, no y. */
-  shelfOnly?: ElementRailPoint[];
-  /** Elements with rated demand and too few head listings — a y, no x. */
-  demandOnly?: ElementRailPoint[];
-  /** Names the two rails, e.g. 需求无读数 / 货架无读数. */
+  /** Names the two rails, e.g. 需求未测到 / 货架未测到. */
   railLabels: { noDemand: string; noShelf: string };
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [hover, setHover] =
-    useState<{ point: ElementRailPoint; style: CSSProperties } | null>(null);
-  // After the hooks, never before them: an early return above a useState is the
-  // one way to break a component that otherwise renders fine.
-  // Narrowed rather than asserted: each rail is drawn against the one axis it
-  // has, so a mark missing that axis too has nowhere to go and is not drawn.
+    useState<{ point: ElementPoint; style: CSSProperties } | null>(null);
+  // One list in, three groups out, by the same predicate the server used to
+  // decide the caps. A rail element missing its own axis too has nowhere to go
+  // and is not drawn.
+  const field = points.filter(inField);
   const rails = {
-    shelf: (shelfOnly ?? []).filter(
-      (p): p is ElementRailPoint & { shelf_pct: number } => p.shelf_pct !== null),
-    demand: (demandOnly ?? []).filter(
-      (p): p is ElementRailPoint & { growth_pct: number } => p.growth_pct !== null),
+    shelf: points.filter((p) => !inField(p) && p.shelf_pct !== null),
+    demand: points.filter((p) => !inField(p) && p.growth_pct !== null),
   };
-  if (!points.length && !rails.shelf.length && !rails.demand.length) return null;
+  if (!points.length) return null;
   // Wide and short. The aspect ratio is the row's height control: the drawing
   // scales to the column it is in, so 5:1 is what keeps a full-width row about
   // 190px tall instead of 280 — seven rows of which is a scroll, not a chart.
@@ -459,20 +450,11 @@ export function ElementMatrix({
   const padT = 22;
   const padB = 34;
 
-  const shelves = points.map((p) => p.shelf_pct);
-  const growths = points.map((p) => p.growth_pct);
-  const xMax = scale ? scale.x_max : Math.max(5, ...shelves) * 1.1;
-  const yMin = scale ? scale.y_min : Math.min(-10, ...growths) * 1.1;
-  const yMax = scale ? scale.y_max : Math.max(10, ...growths) * 1.1;
-  // The x reference is the median, not an arbitrary round number: "more shelf
-  // presence than half the elements we track" is a claim the data supports.
-  // Across a set of rows it is the department's median, so the line sits in the
-  // same place in every one of them and the rows can be read as a column.
-  const sorted = [...shelves].sort((a, b) => a - b);
-  const xMid = scale ? scale.x_mid : sorted[Math.floor(sorted.length / 2)];
-  const maxSearches = scale
-    ? Math.max(1, scale.max_searches)
-    : Math.max(1, ...points.map((p) => p.searches));
+  // The reference lines and bounds are the department's, not this row's — that
+  // is what makes a stack of rows comparable, and why the server computes them
+  // once over every element rather than each row over its own.
+  const { x_max: xMax, x_mid: xMid, y_min: yMin, y_max: yMax } = scale;
+  const maxSearches = Math.max(1, scale.max_searches);
 
   // The rails are inside the padding, not extra chrome outside it: each takes a
   // strip off the field and keeps its own axis, so a rail mark lines up with the
@@ -488,7 +470,7 @@ export function ElementMatrix({
 
   // Biggest first, so a small dot is never hidden under a large one, and so the
   // labels that get dropped on collision are the least important ones.
-  const ordered = [...points].sort((a, b) => b.searches - a.searches);
+  const ordered = [...field].sort((a, b) => b.searches - a.searches);
   const placed: { x: number; y: number }[] = [];
 
   /** Anchor the card to the dot, not to the cursor.
@@ -497,7 +479,7 @@ export function ElementMatrix({
    * one by the same ratio the browser used to fit it — read off the element
    * rather than assumed, because the row's width changes with the window.
    */
-  function show(point: ElementRailPoint, cx: number, cy: number) {
+  function show(point: ElementPoint, cx: number, cy: number) {
     const box = svgRef.current?.getBoundingClientRect();
     const k = box ? box.width / width : 1;
     const top = cy * k;
@@ -525,9 +507,8 @@ export function ElementMatrix({
           wide screen instead of a 900px island floating in the middle of one. */}
       <svg ref={svgRef} viewBox={`0 0 ${width} ${height}`} className="w-full"
            role="img"
-           aria-label={points.map((p) =>
-             `${p.label}: ${xLabel} ${p.shelf_pct.toFixed(1)}%, `
-             + `${yLabel} ${p.growth_pct.toFixed(1)}%`).join("; ")}>
+           aria-label={points.map((p) => describe(p, xLabel, yLabel, tipLabels))
+             .join("; ")}>
         {/* The two corners that carry a decision, tinted instead of captioned. A
             tint survives being repeated down a column of rows; four captions a
             row do not. */}
@@ -597,39 +578,28 @@ export function ElementMatrix({
         <text className="bi-axis-title" x={width - padR} y={height - padB + 26}
               textAnchor="end">{xLabel} →</text>
 
-        {/* Rail marks first, so a field dot is never hidden under one. They are
-            open squares rather than discs: a different shape for a different
-            claim, so nobody reads a rail mark as a measured position. */}
-        {rails.demand.map((point) => {
-          const cy = py(point.growth_pct);
-          return (
-            <g key={`d-${point.key}`} className="bi-dot-group" tabIndex={0} role="button"
-               aria-label={describe(point, xLabel, yLabel, tipLabels)}
-               onMouseEnter={() => show(point, padL + railW / 2, cy)}
-               onMouseLeave={hide} onFocus={() => show(point, padL + railW / 2, cy)}
-               onBlur={hide}>
-              <rect x={padL + railW / 2 - 9} y={cy - 7} width={18} height={14}
-                    fill="transparent" />
-              <rect className="bi-rail-mark" x={padL + railW / 2 - 4} y={cy - 4}
-                    width={8} height={8} rx={1.5} />
-            </g>
-          );
-        })}
-        {rails.shelf.map((point) => {
-          const cx = px(point.shelf_pct);
-          const railY = height - padB - railH / 2;
-          return (
-            <g key={`s-${point.key}`} className="bi-dot-group" tabIndex={0} role="button"
-               aria-label={describe(point, xLabel, yLabel, tipLabels)}
-               onMouseEnter={() => show(point, cx, railY)}
-               onMouseLeave={hide} onFocus={() => show(point, cx, railY)}
-               onBlur={hide}>
-              <rect x={cx - 9} y={railY - 7} width={18} height={14} fill="transparent" />
-              <rect className="bi-rail-mark" x={cx - 4} y={railY - 4}
-                    width={8} height={8} rx={1.5} />
-            </g>
-          );
-        })}
+        {/* Rail marks first, so a field dot is never hidden under one. Both
+            rails are the same mark pinned to the one axis its element has, so
+            they are one list of (point, x, y) rather than two near-identical
+            blocks that have to be kept in step. */}
+        {[
+          ...rails.demand.map((point) => ({
+            point, cx: padL + railW / 2, cy: py(point.growth_pct as number) })),
+          ...rails.shelf.map((point) => ({
+            point, cx: px(point.shelf_pct as number),
+            cy: height - padB - railH / 2 })),
+        ].map(({ point, cx, cy }) => (
+          <g key={point.key} className="bi-dot-group" tabIndex={0} role="button"
+             aria-label={describe(point, xLabel, yLabel, tipLabels)}
+             onMouseEnter={() => show(point, cx, cy)} onMouseLeave={hide}
+             onFocus={() => show(point, cx, cy)} onBlur={hide}>
+            {/* Open square, not a disc: a different shape for a different
+                claim, so nobody reads a rail mark as a measured position. */}
+            <rect x={cx - 9} y={cy - 7} width={18} height={14} fill="transparent" />
+            <rect className="bi-rail-mark" x={cx - 4} y={cy - 4}
+                  width={8} height={8} rx={1.5} />
+          </g>
+        ))}
 
         {ordered.map((point) => {
           const r = 4 + Math.sqrt(point.searches / maxSearches) * 11;
@@ -679,7 +649,7 @@ export function ElementMatrix({
         <div className="bi-dot-tip" style={hover.style}>
           <div className="bi-dot-tip-head">
             <span className="bi-dot-tip-name">{hover.point.label}</span>
-            <span className="bi-dot-tip-kind">{hover.point.kind_label}</span>
+            <span className="bi-chip bi-chip-observed">{hover.point.kind_label}</span>
           </div>
           {/* An unmeasured half says so, in the row where its number would have
               been. Leaving the row out would read as "nothing to say about
@@ -711,8 +681,8 @@ function TipRow({ label, value, tone }: {
     <div className="bi-dot-tip-row">
       <span className="bi-dot-tip-key">{label}</span>
       <span className={"bi-dot-tip-val"
-                       + (tone === "up" ? " bi-dot-tip-up"
-                          : tone === "down" ? " bi-dot-tip-down" : "")}>
+                       + (tone === "up" ? " text-success"
+                          : tone === "down" ? " text-danger" : "")}>
         {value}
       </span>
     </div>
@@ -721,12 +691,12 @@ function TipRow({ label, value, tone }: {
 
 /** A percentage, or the word for a reading that was never taken. */
 function pct(value: number | null, unmeasured: string, signed = true): string {
-  if (value == null) return unmeasured;
-  return `${signed && value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
+  if (value == null || !Number.isFinite(value)) return unmeasured;
+  return `${signed && value >= 0 ? "+" : ""}${fmtPct(value)}`;
 }
 
 /** The card's contents as one string, for the screen reader that cannot hover. */
-function describe(point: ElementRailPoint, xLabel: string, yLabel: string,
+function describe(point: ElementPoint, xLabel: string, yLabel: string,
                   tipLabels: ElementTipLabels): string {
   return `${point.label}（${point.kind_label}） · `
     + `${yLabel} ${pct(point.growth_pct, tipLabels.unmeasured)} · `
@@ -792,18 +762,20 @@ export function ElementMatrixGroups({
   railLabels: { noDemand: string; noShelf: string };
   railNote: string;
 }) {
-  if (!groups.length) return null;
+  if (!groups.length || !scale) return null;
   return (
     <div>
       <div className="space-y-2.5">
         {groups.map((group) => (
-          <div key={group.kind} className="bi-element-row">
+          <div key={group.kind}
+               className="bi-card flex flex-col gap-1 px-3 py-2.5
+                          sm:flex-row sm:items-center sm:gap-3">
             {/* The name to the left rather than above: it turns the set into a
                 list of decisions the eye can run down, and gives the drawing the
                 whole width instead of a caption's worth of it. */}
             <div className="flex shrink-0 flex-row items-baseline gap-2 sm:w-24
                             sm:flex-col sm:items-start sm:gap-0.5 sm:pt-1">
-              <span className="bi-element-kind">{group.kind_label}</span>
+              <span className="bi-chip bi-chip-observed">{group.kind_label}</span>
               <span className="text-[10px] tabular-nums text-fg-subtle">
                 {group.total} {countLabel}
               </span>
@@ -818,12 +790,9 @@ export function ElementMatrixGroups({
                 The cap is well above a normal window, so the row still fills
                 the width everywhere it matters. */}
             <div className="min-w-0 flex-1 max-w-[1400px]">
-              <ElementMatrix points={group.points} quadrants={quadrants} xLabel={xLabel}
-                             yLabel={yLabel} windowNote={windowNote} sizeNote={sizeNote}
+              <ElementMatrix points={group.points} xLabel={xLabel} yLabel={yLabel}
                              scale={scale} medianLabel={medianLabel}
-                             tipLabels={tipLabels} railLabels={railLabels}
-                             shelfOnly={group.shelf_only}
-                             demandOnly={group.demand_only} />
+                             tipLabels={tipLabels} railLabels={railLabels} />
             </div>
           </div>
         ))}
@@ -834,11 +803,11 @@ export function ElementMatrixGroups({
             two tinted corners carry their tint as the swatch, so the legend is
             also the key to the shading. */}
         <span className="flex items-center gap-1">
-          ↖<i className="bi-legend-swatch bi-legend-open" />{quadrants[0]}
+          ↖<i className="bi-swatch shrink-0 bi-legend-open" />{quadrants[0]}
         </span>
         <span>↗&nbsp;{quadrants[1]}</span>
         <span className="flex items-center gap-1">
-          ↘<i className="bi-legend-swatch bi-legend-risk" />{quadrants[2]}
+          ↘<i className="bi-swatch shrink-0 bi-legend-risk" />{quadrants[2]}
         </span>
         <span>↙&nbsp;{quadrants[3]}</span>
       </div>

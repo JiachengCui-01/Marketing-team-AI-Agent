@@ -1602,19 +1602,11 @@ select.field:focus {
     stroke: rgb(var(--bg-elevated));
   }
   /* ---- element matrix: one attribute per row ---- */
-  .bi-element-row {
-    @apply flex flex-col gap-1 rounded-xl border border-border px-3 py-2.5
-           transition-colors duration-200 sm:flex-row sm:items-center sm:gap-3;
-    background: rgb(var(--bg-elevated));
-  }
-  .bi-element-row:hover {
-    border-color: rgb(var(--feature-selection) / 0.32);
-  }
-  .bi-element-kind {
-    @apply inline-flex rounded-md px-1.5 py-0.5 text-[11px] font-medium leading-tight;
-    background: rgb(var(--feature-selection) / 0.1);
-    color: rgb(var(--feature-selection));
-  }
+  /* The row card and the attribute pill are `.bi-card` and
+     `.bi-chip bi-chip-observed` at the call site — the repo's own recipes for
+     "elevated card with accent hover" and "accent-tinted label pill". Writing
+     them again here is how the hover alpha drifted to 0.32 against the card's
+     0.34 the first time. */
   /* The disc carries the search volume, the core the position — two marks
      because one 20px blob cannot do both without hiding its own centre. */
   .bi-dot-disc {
@@ -1657,11 +1649,6 @@ select.field:focus {
   .bi-dot-tip-name {
     @apply text-xs font-medium text-fg;
   }
-  .bi-dot-tip-kind {
-    @apply rounded px-1 py-px text-[10px];
-    background: rgb(var(--feature-selection) / 0.1);
-    color: rgb(var(--feature-selection));
-  }
   .bi-dot-tip-row {
     @apply flex items-baseline justify-between gap-4 text-[10px] leading-relaxed;
   }
@@ -1672,12 +1659,7 @@ select.field:focus {
     @apply tabular-nums;
     color: rgb(var(--fg-muted));
   }
-  .bi-dot-tip-up {
-    color: rgb(var(--success));
-  }
-  .bi-dot-tip-down {
-    color: rgb(var(--danger));
-  }
+
   /* The two corners a decision comes out of, tinted so the reader does not have
      to hold "left of the dashed line and above zero" in their head. */
   .bi-quadrant-open {
@@ -1710,9 +1692,8 @@ select.field:focus {
   .bi-dot-group:focus-visible .bi-rail-mark {
     stroke: rgb(var(--feature-selection));
   }
-  .bi-legend-swatch {
-    @apply inline-block h-2 w-2 shrink-0 rounded-[2px];
-  }
+  /* Colour-only modifiers on `.bi-swatch`, the way `.bi-swatch-risk` is
+     authored — the geometry is already there. */
   .bi-legend-open {
     background: rgb(var(--success) / 0.35);
   }

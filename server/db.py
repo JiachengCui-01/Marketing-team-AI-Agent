@@ -641,6 +641,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_market_keyword_metrics_key
     ON market_keyword_metrics(marketplace, keyword, period, grain);
 CREATE INDEX IF NOT EXISTS idx_market_keyword_metrics_node
     ON market_keyword_metrics(node_id_path, period, searches);
+-- The department-wide read: `WHERE marketplace = ? AND period = ? AND grain =
+-- 'month' ORDER BY searches DESC`. Neither index above serves it — the unique
+-- key puts `period` third and the node index needs a `node_id_path` predicate —
+-- so the element mining was scanning every keyword row of every stored month
+-- and sorting the result in a temp b-tree. That was tolerable at ~900 rows a
+-- month; the miner and the larger page size take it to ~9,600 a month, which
+-- accumulates. Every column here is in the base table, so this is safe to
+-- create in the schema script rather than in a migration.
+CREATE INDEX IF NOT EXISTS idx_market_keyword_metrics_period
+    ON market_keyword_metrics(marketplace, period, grain, searches);
 
 CREATE TABLE IF NOT EXISTS market_keyword_asin_edges (
     id TEXT PRIMARY KEY,

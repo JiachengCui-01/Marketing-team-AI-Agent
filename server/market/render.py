@@ -438,9 +438,11 @@ def render_overview(
     # Name any newly mined term before the panel is built, so the chart and the
     # brief use the same labels. Costs one model call the first time a term
     # appears and nothing afterwards.
-    name_elements(client, marketplace, period, language,
-                  terms=panels.mined_terms(marketplace, period))
-    payload = build_overview(marketplace, period, language)
+    # Mined once and handed to both consumers: the naming call classifies the
+    # new terms, the panel builds the chart from the same list.
+    terms = panels.mined_terms(marketplace, period)
+    name_elements(client, marketplace, period, language, terms=terms)
+    payload = build_overview(marketplace, period, language, terms=terms)
     if not payload["board"]:
         record = _data_gap(marketplace, period, "overview", language, None,
                            "本期没有任何类目快照，请先运行一次采集。"

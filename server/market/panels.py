@@ -324,17 +324,6 @@ MAX_MATRIX_POINTS_PER_KIND = 20
 # The rails hold the elements with one measured half. Capped tighter than the
 # field because a rail mark carries one number rather than two.
 MAX_MATRIX_RAIL_PER_KIND = 10
-# Stored rows the element read may take in. Both are ceilings on a SELECT over
-# data already collected, set high enough not to bind in practice rather than
-# tuned — the mining's own evidence bars are what decide.
-ALL_PRODUCTS_LIMIT = 20_000
-KEYWORD_ROW_LIMIT = 8_000
-# A column with a single element is still drawn. The dot has no distribution
-# behind it, but the axes and the median line are the department's, so "black is
-# the only finish that cleared both bars, and it is cooling" survives — and an
-# attribute that quietly vanishes from the chart is the complaint this split was
-# meant to answer.
-MIN_MATRIX_POINTS_PER_KIND = 1
 
 
 def _element_matrix(rows: Sequence[dict], zh: bool) -> dict:
@@ -367,34 +356,13 @@ def _element_matrix(rows: Sequence[dict], zh: bool) -> dict:
     phrases, so what it mostly hid was "we sell this and have never measured
     whether anyone asks for it".
     """
-    def point(row: dict) -> dict:
-        return {"key": row["key"], "label": row["label"], "kind": row["kind"],
-                "kind_label": row["kind_label"],
-                "shelf_pct": row["revenue_share_pct"], "growth_pct": row["growth_pct"],
-                "searches": row["searches"], "asins": row["asins"],
-                "avg_price": row["avg_price"], "window": row.get("window") or ""}
-
-    def demand_rated(row: dict) -> bool:
-        return bool(row.get("rated")) and row.get("growth_pct") is not None
-
-    points: list[dict] = []
-    shelf_only: list[dict] = []
-    demand_only: list[dict] = []
-    for row in rows:
-        if demand_rated(row) and row.get("shelf_rated"):
-            points.append(point(row))
-        elif row.get("shelf_rated"):
-            # The shelf reading is real; the growth is unknown, which is not zero.
-            shelf_only.append({**point(row), "growth_pct": None})
-        elif demand_rated(row):
-            demand_only.append({**point(row), "shelf_pct": None})
-    for bucket in (points, shelf_only, demand_only):
-        bucket.sort(key=lambda p: p["searches"], reverse=True)
+    points = [_element_point(row) for row in rows
+              if row.get("shelf_rated") or _demand_rated(row)]
+    points.sort(key=lambda p: p["searches"], reverse=True)
     windows = {p["window"] for p in points if p["window"]}
     return {
-        "points": points,
-        "groups": _element_groups(points, shelf_only, demand_only),
-        "scale": _element_scale(points, shelf_only, demand_only),
+        "groups": _element_groups(points),
+        "scale": _element_scale(points),
         # One window or the reader is comparing a month against a year.
         "window": windows.pop() if len(windows) == 1 else "mixed",
         "quadrants": (("需求在涨·货架未跟上", "需求在涨·已验证",
@@ -405,68 +373,91 @@ def _element_matrix(rows: Sequence[dict], zh: bool) -> dict:
     }
 
 
-def _element_groups(points: Sequence[dict], shelf_only: Sequence[dict],
-                    demand_only: Sequence[dict]) -> list[dict]:
+def _demand_rated(row: Mapping[str, Any]) -> bool:
+    """Enough search evidence to state a trend for this element."""
+    return bool(row.get("rated")) and row.get("growth_pct") is not None
+
+
+def _element_point(row: Mapping[str, Any]) -> dict:
+    """One element as the chart plots it, with an axis nulled where unmeasured.
+
+    ``None`` is the load-bearing part: it is the difference between "zero" and
+    "we never took this reading", and it is the only marker either side needs.
+    The alternative — three lists named for which half they hold — puts that
+    invariant in a variable name, where neither end can check it, so both ends
+    end up re-deriving it from the nulls anyway.
+    """
+    return {"key": row["key"], "label": row["label"], "kind": row["kind"],
+            "kind_label": row["kind_label"],
+            "shelf_pct": row["revenue_share_pct"] if row.get("shelf_rated") else None,
+            "growth_pct": row["growth_pct"] if _demand_rated(row) else None,
+            "searches": row["searches"], "asins": row["asins"],
+            "avg_price": row["avg_price"], "window": row.get("window") or ""}
+
+
+def _in_field(point: Mapping[str, Any]) -> bool:
+    """Both halves measured, so the element has a position rather than a rail."""
+    return point["shelf_pct"] is not None and point["growth_pct"] is not None
+
+
+def _element_groups(points: Sequence[dict]) -> list[dict]:
     """One entry per attribute, in ``elements.KIND_ORDER``, empty ones dropped.
+
+    The caps are why this partition is server-side at all: an element with both
+    halves gets a position in the field, one with a single half gets a rail mark
+    that carries one number, and the second is capped tighter than the first. The
+    partition is local — the payload carries one list per attribute, and the
+    chart decides field-or-rail from the same nulls.
 
     ``dropped`` is reported rather than silently swallowed: a reader who knows
     six colours were measured and two plotted can tell a thin row from a
     truncated one, which is exactly the distinction a bare chart destroys.
     """
-    def of_kind(bucket: Sequence[dict], kind: str) -> list[dict]:
-        return [p for p in bucket if p["kind"] == kind]
+    by_kind: dict[str, list[dict]] = {}
+    for point in points:
+        by_kind.setdefault(point["kind"], []).append(point)
 
     out: list[dict] = []
     for kind in elements.KIND_ORDER:
-        members = of_kind(points, kind)
-        shelf = of_kind(shelf_only, kind)
-        demand = of_kind(demand_only, kind)
-        if len(members) + len(shelf) + len(demand) < MIN_MATRIX_POINTS_PER_KIND:
+        members = by_kind.get(kind) or []
+        if not members:
             continue
-        kept = members[:MAX_MATRIX_POINTS_PER_KIND]
-        # The rails are capped tighter than the field: a rail mark carries one
-        # number, so past a handful it is a list wearing a chart as a costume.
-        kept_shelf = shelf[:MAX_MATRIX_RAIL_PER_KIND]
-        kept_demand = demand[:MAX_MATRIX_RAIL_PER_KIND]
+        field = [p for p in members if _in_field(p)]
+        rails = [p for p in members if not _in_field(p)]
+        kept = field[:MAX_MATRIX_POINTS_PER_KIND] + rails[:MAX_MATRIX_RAIL_PER_KIND]
         out.append({
             "kind": kind,
-            "kind_label": (members or shelf or demand)[0]["kind_label"],
+            "kind_label": members[0]["kind_label"],
             "points": kept,
-            "shelf_only": kept_shelf,
-            "demand_only": kept_demand,
-            "total": len(members) + len(shelf) + len(demand),
-            "dropped": (len(members) - len(kept) + len(shelf) - len(kept_shelf)
-                        + len(demand) - len(kept_demand)),
+            "total": len(members),
+            "dropped": len(members) - len(kept),
         })
     return out
 
 
-def _element_scale(points: Sequence[dict], shelf_only: Sequence[dict] = (),
-                   demand_only: Sequence[dict] = ()) -> dict | None:
+def _element_scale(points: Sequence[dict]) -> dict | None:
     """The axis bounds every attribute row is drawn against.
 
-    Computed once over every element so the rows are comparable, and so the
-    vertical reference stays "more shelf presence than half the elements this
-    department has" rather than half of whatever landed in one row.
+    Computed once over every element so the rows are comparable. Rail elements
+    are inside the bounds, because they are drawn against these axes and one
+    past the end of the scale would sit on the frame.
 
-    The rails are inside the bounds, because they are drawn against these axes
-    and an element past the end of the scale would sit on the frame. Only the
-    field decides the median, though: a median taken over readings we could not
-    take is not a median of anything.
+    The median is the exception: only elements with a shelf reading vote on it.
+    A median taken over readings we could not take is not a median of anything.
     """
-    everything = list(points) + list(shelf_only) + list(demand_only)
-    if not everything:
+    if not points:
         return None
-    field = sorted(p["shelf_pct"] for p in points)
-    shelves = field + [p["shelf_pct"] for p in shelf_only if p["shelf_pct"] is not None]
-    growths = ([p["growth_pct"] for p in points]
-               + [p["growth_pct"] for p in demand_only if p["growth_pct"] is not None])
+    shelves = [p["shelf_pct"] for p in points if p["shelf_pct"] is not None]
+    growths = [p["growth_pct"] for p in points if p["growth_pct"] is not None]
     return {
         "x_max": round(max([5.0] + shelves) * 1.1, 2),
-        "x_mid": field[len(field) // 2] if field else 0.0,
+        # The module's own median, not a second definition of one: `_median`
+        # averages the middle pair on an even count, and the dashed line has to
+        # mean what every other median on this dashboard means.
+        "x_mid": scoring._median(shelves) or 0.0,
         "y_min": round(min([-10.0] + growths) * 1.1, 2),
         "y_max": round(max([10.0] + growths) * 1.1, 2),
-        "max_searches": max(1, max(p["searches"] for p in everything)),
+        "max_searches": max(1, max(p["searches"] for p in points)),
     }
 
 
@@ -739,7 +730,7 @@ def mined_terms(marketplace: str, period: str) -> list[dict]:
         # Every title held for the month. The old 2,500 was a third of what a
         # full month's listing pull collects, and the third it kept was the
         # revenue head — where the vocabulary is narrowest and most generic.
-        store.all_products(marketplace, period, limit=ALL_PRODUCTS_LIMIT),
+        store.all_products(marketplace, period, limit=elements.MAX_TITLE_ROWS),
         _demand_rows(marketplace, period),
         previous=_demand_rows(marketplace, before) if before else ())
 
@@ -755,15 +746,17 @@ def _demand_rows(marketplace: str, period: str) -> list[dict]:
     the growth columns the edge rows do not, and growth is the axis that decides
     whether an element can be plotted at all.
     """
-    rows = store.top_keywords(marketplace, None, period, limit=KEYWORD_ROW_LIMIT)
+    rows = store.top_keywords(marketplace, None, period,
+                              limit=elements.MAX_PHRASE_ROWS)
     seen = {str(r.get("keyword") or "").strip().lower() for r in rows}
     rows.extend(row for row in store.keyword_edge_phrases(
-        marketplace, period, limit=KEYWORD_ROW_LIMIT)
+        marketplace, period, limit=elements.MAX_PHRASE_ROWS)
         if str(row.get("keyword") or "").strip().lower() not in seen)
     return rows
 
 
-def build_overview(marketplace: str, period: str, language: str) -> dict:
+def build_overview(marketplace: str, period: str, language: str,
+                   *, terms: Sequence[dict] | None = None) -> dict:
     """Every deterministic section of the discovery board."""
     zh = _zh(language)
     snapshots = {s["node_id_path"]: s for s in store.list_node_snapshots(marketplace, period)}
@@ -784,8 +777,13 @@ def build_overview(marketplace: str, period: str, language: str) -> dict:
     # Mined from the market's own words, then named by the model and cached.
     # Both halves come from calls the sweep already makes: the titles arrive with
     # every product_research row, the phrases with every keyword call.
+    # `terms` is passed in by the render, which mined them a moment ago to feed
+    # the naming call. Mining is the most expensive read on this path — every
+    # stored title and phrase for two months, then the whole term pass — and
+    # doing it twice per render bought nothing but a second identical answer.
     element_rows = elements.apply_naming(
-        mined_terms(marketplace, period), store.element_naming(marketplace), zh)
+        mined_terms(marketplace, period) if terms is None else terms,
+        store.element_naming(marketplace), zh)
     rising_elements, falling_elements = elements.split(element_rows)
     board: list[dict] = []
     alerts: list[dict] = []

@@ -9,9 +9,10 @@ evidence bars rather than about the list.
 """
 from __future__ import annotations
 
+import hashlib
 import unittest
 
-from server.market import elements, gateway
+from server.market import elements, gateway, render
 
 
 def title(name: str, revenue: float, *, price: float | None = None,
@@ -272,6 +273,53 @@ class BriefTests(unittest.TestCase):
             self.assertIn(kind, text)
         self.assertIn("fluted", text)
         self.assertIn("never `style`", text)
+
+
+class NamingVersionGuardTests(unittest.TestCase):
+    """Editing the kind vocabulary without bumping the version fails here.
+
+    The version is what re-asks the model for terms classified under an older
+    list of kinds, and it is hand-maintained on purpose — a hash of the prompt
+    would re-spend on every comment reflow, and the "# 3: …" notes beside it are
+    documentation a hash cannot carry. What hand-maintenance lacks is a reminder,
+    and the last release proved it: version 2 shipped with `craft` and `color`
+    available and the rules still only in the tool schema, so every colour came
+    back filed under `style`.
+
+    This is that reminder. When the vocabulary below changes, the expected digest
+    changes with it and this test fails until someone decides — deliberately —
+    whether the edit was semantic enough to re-ask the model for every term.
+    """
+
+    # Bump NAMING_VERSION and then paste the digest this test prints.
+    EXPECTED = "c99564fc9761f14a"
+
+    def digest(self) -> str:
+        material = "\n".join([
+            repr(elements.KINDS), repr(elements.KIND_ORDER),
+            repr(sorted(elements.KIND_LABELS.items())), elements._KIND_RULES,
+        ])
+        return hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
+
+    def test_the_vocabulary_matches_the_version_it_was_stamped_with(self) -> None:
+        self.assertEqual(
+            self.digest(), self.EXPECTED,
+            f"The kind vocabulary changed. Decide whether cached classifications "
+            f"are now wrong: if they are, bump elements.NAMING_VERSION (currently "
+            f"{elements.NAMING_VERSION}) so they are re-asked. Either way, set "
+            f"EXPECTED to {self.digest()!r}.")
+
+    def test_every_kind_is_offered_to_the_model(self) -> None:
+        """A kind the tool schema does not list can never be assigned, and
+        `apply_naming` silently rewrites the unknown answer to `other`."""
+        schema = render.TOOL_ELEMENTS["input_schema"]["properties"]["terms"]
+        offered = schema["items"]["properties"]["kind"]["enum"]
+        self.assertEqual(sorted(offered), sorted(elements.KINDS))
+
+    def test_every_kind_is_explained_in_the_brief(self) -> None:
+        for kind in elements.KINDS:
+            with self.subTest(kind):
+                self.assertIn(kind, elements._KIND_RULES)
 
 
 class StepPeriodTests(unittest.TestCase):

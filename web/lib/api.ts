@@ -1,3 +1,5 @@
+import type { ElementGroup, ElementScale } from "@/components/market/charts";
+
 // In production the frontend should prefer the same-origin `/api` rewrite unless
 // NEXT_PUBLIC_API_BASE is explicitly configured. Falling back to 127.0.0.1 in a
 // browser points at the user's own machine and causes template/refine requests to
@@ -223,8 +225,12 @@ export async function logoutUser(): Promise<void> {
   setAuthToken(null);
 }
 
-export async function getMe(): Promise<UserProfile> {
-  const res = await fetch(`${API_BASE}/api/auth/me`, { headers: authHeaders() });
+/** The signed-in user. Pass `token` to check a token other than the stored one
+ *  — that is how a remembered account is validated before switching to it. */
+export async function getMe(token?: string): Promise<UserProfile> {
+  const res = await fetch(`${API_BASE}/api/auth/me`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : authHeaders(),
+  });
   if (!res.ok) throw new Error(await parseJsonError(res));
   const body = await res.json();
   return body.user;
@@ -1779,19 +1785,6 @@ export type MarketElement = {
   keywords: { keyword: string; searches: number; growth_pct: number | null }[];
 };
 
-/** One element as the matrix plots it: both halves present, neither inferred. */
-export type MarketElementPoint = {
-  key: string;
-  label: string;
-  kind: string;
-  kind_label: string;
-  shelf_pct: number;
-  growth_pct: number;
-  searches: number;
-  asins: number;
-  avg_price: number | null;
-  window: string;
-};
 
 export type MarketBoardRow = {
   node_key: string;
@@ -1947,23 +1940,16 @@ export type MarketDashboard = {
   price_fit?: { price: number; fit: number }[];
   elements?: MarketElement[];
   /** Demand trend against shelf presence — the chart a design review opens with.
-   *  `groups` is what the UI draws: one panel per attribute, because a colour and
-   *  a size are not alternatives to each other. `points` is the same elements
-   *  ungrouped, and `scale` the bounds every panel shares. */
+   *  One group per attribute, because a colour and a size are not alternatives
+   *  to each other, plus the bounds every row shares.
+   *
+   *  The group and scale shapes are the chart's own types rather than a second
+   *  spelling of them here. Spelling them twice is how this type came to be
+   *  missing the rail fields entirely while still compiling — the one mismatch
+   *  it exists to catch. */
   element_matrix?: {
-    points: MarketElementPoint[];
-    groups?: {
-      kind: string;
-      kind_label: string;
-      points: MarketElementPoint[];
-      /** Measured for this attribute, before the per-panel plot cap. */
-      total: number;
-      dropped: number;
-    }[];
-    scale?: {
-      x_max: number; x_mid: number; y_min: number; y_max: number;
-      max_searches: number;
-    } | null;
+    groups?: ElementGroup[];
+    scale?: ElementScale | null;
     window: string;
     quadrants: [string, string, string, string];
   };

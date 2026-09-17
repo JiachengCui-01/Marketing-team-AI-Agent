@@ -161,6 +161,8 @@ IM 消息（人↔人 / 群聊、未读数、已读回执、文件消息，基�
 - **草稿 → 确认（human-in-the-loop）**：所有写操作（任务/日程）**永不由模型直接持久化**，先以 `oa_draft` 事件渲染确认卡，用户点确认才命中对应 `POST` 端点；系统提示词禁止模型声称"已提交/已创建"。草稿在前端本地留存，刷新不丢。
 - **过程可追踪**：编排/专家生命周期以 SSE 事件（`started` / `orchestrator_step` / `delegating` / `specialist_done` / `assistant_delta` / `artifact_created` / `result`）实时呈现在 Agent Trace。
 - **认证与权限**：PBKDF2-SHA256（20 万轮、每用户盐、常量时间比较）、Bearer Token（14 天 TTL）；注册校验中国身份证校验位与邮箱/手机号；对外投影**脱敏**身份证、绝不返回密码哈希。所有受保护路由经 `require_user`，数据读取按 `user_id` 隔离；知识库文档带 `scope`（个人/组织）校验成员，IM 文件下载校验会话成员。
+- **本机「记住我」只存令牌，不存密码**：勾选记住我后，浏览器 `localStorage` 保存的是该账号的 Bearer Token（14 天 TTL、服务端可吊销、仅对本应用有效），切换账号时先用它请求 `/auth/me` 验证再切；令牌失效就按正常流程要求重新输入密码。早期版本在这里存的是**明文密码**——任何能在本站执行脚本的东西都能一次读走全部账号密码，而密码是跨站复用的，所以爆炸半径不止这一个应用。旧条目在第一次读取时被**删除而非迁移**（没有东西可以迁移成密码），读取本身就是擦除动作。
+- **密码找回是运维动作，不是自助流程**：本项目没有邮件/短信通道，因此没有「忘记密码」入口——发不出验证链接，做一个就只能是假的。恢复路径是 `scripts/reset_password.py`，由能访问数据库的人在部署机上运行（Render 的 Shell），密码在终端输入、不回显、不进历史，并在写入后用登录路由同一套 `verify_password` 读回复核。**必须**用 `runuser -u pwuser` 运行：镜像的 Shell 是 root 而应用以 `pwuser` 跑，以 root 写 SQLite 会留下 root 拥有的 `-wal`/`-shm`，把一次改密码变成一次故障。要做成真正的自助找回，需要先引入邮件发送方及其密钥——那是一个待做的产品决定。
 - **优雅降级**：专家不可用时返回 `## …Unavailable` 的 markdown 而非抛错；图像生成永不崩；KB 检索 embedding→reranker→词法逐级降级；**流式失败自动回退** `/complete` 再恢复会话记录，避免结果丢失。
 - **时区与时间**：日历存 epoch 瞬时、拒绝过去时间（120s 偏差容忍）、按用户时区调度新闻；OA 提示词注入当前本地时间以正确解析"明天/周五"。
 - **反越权 / 反幻觉**：编排器被硬性约束不写文案、不算指标、不编造外部事实，只能下派。
@@ -252,6 +254,7 @@ web/                          Next.js 14 前端
     market/                   全盘看板、品类深度、风险机会监控、证据抽屉、PRD、手写 SVG 图表
   lib/*                       api、sse、i18n、stores(sessions/im)、oa-drafts
 tests/                        pytest 套件（见 §9）
+scripts/reset_password.py     运维重置密码（无自助找回流程，见 §8）
 skills/                       业务 SOP 技能（竞品 Listing 对比、新品上架战役）
 data/sample_campaign.csv      分析示例输入（含退货列）
 render.yaml · vercel.json     部署配置

@@ -127,6 +127,12 @@ MIN_SEARCHES = 1_200.0
 # longer list costs a few model calls the first time a term appears and nothing
 # after that.
 MAX_TERMS = 160
+# Stored rows the mining may take in. Ceilings on a SELECT over data already
+# collected and already paid for, set high enough not to bind rather than tuned
+# — the evidence bars above are what decide what counts. They live here rather
+# than beside the chart's caps because they bound the *read*, not the layout.
+MAX_TITLE_ROWS = 20_000
+MAX_PHRASE_ROWS = 8_000
 # Terms per naming call. The model's answer is ~40 tokens a term and DeepSeek
 # caps output at 8k, so one call for the whole list would be truncated — and a
 # truncated tool call is not a partial answer, it is no answer at all, which
@@ -219,9 +225,19 @@ def mine(products: Sequence[Mapping[str, Any]],
         common |= {term for term, hits in counts.items()
                    if hits / len(docs) > MAX_DOC_FREQ}
 
+    # Memoised, because this is asked once per term *occurrence*: twenty thousand
+    # titles at ~18 terms each is on the order of 350k calls for a distinct term
+    # set a fraction that size, and "oak" gets the same answer on every listing
+    # that mentions it.
+    verdicts: dict[str, bool] = {}
+
     def excluded(term: str) -> bool:
-        parts = term.split(" ")
-        return any(part in common or part in brands for part in parts)
+        cached = verdicts.get(term)
+        if cached is None:
+            cached = any(part in common or part in brands
+                         for part in term.split(" "))
+            verdicts[term] = cached
+        return cached
 
     shelf: dict[str, dict] = {}
     for terms, revenue, price in rows:

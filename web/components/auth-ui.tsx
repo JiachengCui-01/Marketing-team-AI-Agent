@@ -25,6 +25,7 @@ import {
   clearMarketingMemory,
   deleteMe,
   getMarketingMemory,
+  getMe,
   getMarketingMemoryEvidence,
   loginUser,
   lookupAvatar,
@@ -47,11 +48,20 @@ const REMEMBERED_KEY = "marketing-agent-remembered-accounts";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_RE = /^1[3-9]\d{9}$/;
 
+/** A remembered account holds a session token, never a password.
+ *
+ * It used to hold the password in plain text, which meant any script that could
+ * run on this origin could read every account's password out of localStorage —
+ * and passwords get reused across sites, so the blast radius was not this app.
+ * A token is the same convenience with a fraction of the risk: it is scoped to
+ * this app, it expires on its own, and the server can revoke it. The session
+ * token is already kept in localStorage, so this stores nothing of a new kind.
+ */
 export type RememberedAccount = {
   account: string;
   username: string;
   avatar: string | null;
-  password: string;
+  token: string;
 };
 
 export function loadRememberedAccounts(): RememberedAccount[] {
@@ -59,7 +69,15 @@ export function loadRememberedAccounts(): RememberedAccount[] {
   try {
     const raw = window.localStorage.getItem(REMEMBERED_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    // Entries written by the version that stored passwords are dropped rather
+    // than migrated: there is nothing to migrate a password into, and leaving
+    // them would keep the plaintext on disk for as long as the reader tolerated
+    // it. Writing back immediately is the point — the read is what erases them.
+    const clean = parsed.filter(
+      (item) => item && typeof item.token === "string" && item.token);
+    if (clean.length !== parsed.length) saveRememberedAccounts(clean);
+    return clean;
   } catch {
     return [];
   }
@@ -209,31 +227,41 @@ function LoginPanel({
           account: res.user.account,
           username: res.user.username,
           avatar: res.user.avatar,
-          password,
+          token: res.token,
         });
       }
       onAuthenticated(res.token, res.user);
     } catch (err) {
-      const cached = findRememberedAccount(trimmedAccount);
-      if (cached?.password === password) {
-        removeRememberedAccount(trimmedAccount);
-        setRemembered(loadRememberedAccounts());
-        setPassword("");
-        const message = localizeError(err, locale);
-        setError(message.includes("账号不存在") || message.includes("Account does not exist") ? message : t.rememberedPasswordExpired);
-        return;
-      }
       setError(localizeError(err, locale));
     } finally {
       setBusy(false);
     }
   }
 
-  function pickRemembered(item: RememberedAccount) {
+  /** Sign in with the remembered token, and fall back to asking for a password.
+   *
+   * This used to fill the password box from storage, which is why the password
+   * had to be stored at all. The token does the same job: if it is still valid
+   * the user is in, and if it has expired the only honest thing is to ask.
+   */
+  async function pickRemembered(item: RememberedAccount) {
     setAccount(item.account);
-    setPassword(item.password);
     setAvatar(item.avatar);
     setAvatarOpen(false);
+    setError(null);
+    setBusy(true);
+    try {
+      const user = await getMe(item.token);
+      setAuthToken(item.token);
+      onAuthenticated(item.token, user);
+    } catch {
+      removeRememberedAccount(item.account);
+      setRemembered(loadRememberedAccounts());
+      setPassword("");
+      setError(t.rememberedSessionExpired);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -336,12 +364,12 @@ function RegisterPanel({
         ...contactFromAccount(form.account ?? ""),
       });
       setAuthToken(res.token);
-      if (form.account && form.password && findRememberedAccount(form.account)) {
+      if (form.account && findRememberedAccount(form.account)) {
         rememberAccount({
           account: res.user.account,
           username: res.user.username,
           avatar: res.user.avatar,
-          password: form.password,
+          token: res.token,
         });
       }
       onAuthenticated(res.token, res.user);
@@ -509,15 +537,16 @@ export function SwitchAccountPanel({
   async function pick(item: RememberedAccount) {
     setError(null);
     try {
-      const res = await loginUser(item.account, item.password);
-      setAuthToken(res.token);
-      onAuthenticated(res.token, res.user);
+      // Validate before switching, so a dead token cannot leave the app holding
+      // a session it does not have.
+      const user = await getMe(item.token);
+      setAuthToken(item.token);
+      onAuthenticated(item.token, user);
       onClose();
-    } catch (err) {
+    } catch {
       removeRememberedAccount(item.account);
       setItems(loadRememberedAccounts());
-      const message = localizeError(err, locale);
-      setError(message.includes("账号不存在") || message.includes("Account does not exist") ? message : t.rememberedPasswordExpired);
+      setError(t.rememberedSessionExpired);
     }
   }
 
@@ -1219,18 +1248,12 @@ function ProfileDialog({
     setBusy(true);
     try {
       const next = await updateMe(form);
-      if (form.password) {
-        updateRememberedAccount(user.account, {
-          username: next.username,
-          avatar: next.avatar,
-          password: form.password,
-        });
-      } else {
-        updateRememberedAccount(user.account, {
-          username: next.username,
-          avatar: next.avatar,
-        });
-      }
+      // A password change does not touch the remembered entry any more: it holds
+      // a token, and the token this session is already using stays valid.
+      updateRememberedAccount(user.account, {
+        username: next.username,
+        avatar: next.avatar,
+      });
       onSaved(next);
     } catch (err) {
       setError(localizeError(err, locale));

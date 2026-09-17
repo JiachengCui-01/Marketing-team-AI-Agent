@@ -21,6 +21,16 @@ BUFFETS = "1055398:1063306:3733781:3733831"
 PERIOD = "202608"
 
 
+def _plotted(matrix: dict) -> list[dict]:
+    """Every element the matrix ships, flattened back out of its attribute rows.
+
+    The payload carries no ungrouped copy: the rows are the only place the
+    points live, because a second flat list of the same objects was bytes in the
+    response and the database that nothing read.
+    """
+    return [point for group in matrix["groups"] for point in group["points"]]
+
+
 def tool_use(name: str, payload: dict):
     """A forced tool_use response shaped like ``llm_client`` returns."""
     block = mock.Mock(type="tool_use", input=payload)
@@ -716,7 +726,7 @@ class ElementMatrixTests(RenderTestCase):
     def test_both_axes_are_measured_from_stored_vendor_rows(self) -> None:
         self.seed()
         matrix = render.build_overview("US", PERIOD, "zh")["element_matrix"]
-        point = next(p for p in matrix["points"] if p["key"] == "fluted")
+        point = next(p for p in _plotted(matrix) if p["key"] == "fluted")
         self.assertGreater(point["shelf_pct"], 0)
         self.assertAlmostEqual(point["growth_pct"], 21.9, places=1)
         self.assertEqual(point["asins"], 3)
@@ -739,8 +749,9 @@ class ElementMatrixTests(RenderTestCase):
              "source_tool": "keyword_research"},
         ])
         payload = render.build_overview("US", PERIOD, "zh")
-        plotted = {p["key"] for p in payload["element_matrix"]["points"]}
-        self.assertNotIn("japandi", plotted)
+        field = {p["key"] for p in _plotted(payload["element_matrix"])
+                 if p["shelf_pct"] is not None}
+        self.assertNotIn("japandi", field)
         # It is still on the demand side, so the follow list can still name it.
         self.assertIn("japandi", {r["key"] for r in payload["elements"]})
 
@@ -848,23 +859,22 @@ class ElementRailTests(RenderTestCase):
     def test_a_shelf_reading_with_no_rated_demand_is_kept_not_dropped(self) -> None:
         self.seed()
         matrix = self.matrix()
-        rail = {p["key"] for p in matrix["groups"][0]["shelf_only"]}
-        self.assertIn("reeded", rail)
-        self.assertNotIn("reeded", {p["key"] for p in matrix["points"]})
+        reeded = next(p for p in _plotted(matrix) if p["key"] == "reeded")
+        self.assertIsNotNone(reeded["shelf_pct"])
+        self.assertIsNone(reeded["growth_pct"], "a rail element, not a field one")
 
     def test_the_unmeasured_half_is_null_and_not_zero(self) -> None:
         """Zero is a reading. This one was never taken, and a scatter cannot tell
         the two apart unless the data does."""
         self.seed()
-        entry = next(p for p in self.matrix()["groups"][0]["shelf_only"]
-                     if p["key"] == "reeded")
+        entry = next(p for p in _plotted(self.matrix()) if p["key"] == "reeded")
         self.assertIsNone(entry["growth_pct"])
         self.assertIsNotNone(entry["shelf_pct"])
 
     def test_demand_with_too_thin_a_shelf_goes_to_the_other_rail(self) -> None:
         self.seed()
         groups = {g["kind"]: g for g in self.matrix()["groups"]}
-        entry = next(p for p in groups[elements.STYLE]["demand_only"]
+        entry = next(p for p in groups[elements.STYLE]["points"]
                      if p["key"] == "japandi")
         self.assertIsNone(entry["shelf_pct"])
         self.assertEqual(entry["growth_pct"], 40.0)
@@ -874,17 +884,19 @@ class ElementRailTests(RenderTestCase):
         track". Elements whose shelf reading is missing cannot vote on it."""
         self.seed()
         matrix = self.matrix()
-        field = sorted(p["shelf_pct"] for p in matrix["points"])
-        self.assertEqual(matrix["scale"]["x_mid"], field[len(field) // 2])
+        shelves = [p["shelf_pct"] for p in _plotted(matrix)
+                   if p["shelf_pct"] is not None]
+        self.assertEqual(matrix["scale"]["x_mid"], scoring._median(shelves))
 
     def test_the_row_count_includes_what_sits_in_the_rails(self) -> None:
         """A row saying "1 个" over three visible marks is worse than no count."""
         self.seed()
         craft = next(g for g in self.matrix()["groups"] if g["kind"] == elements.CRAFT)
-        self.assertEqual(craft["total"],
-                         len(craft["points"]) + len(craft["shelf_only"])
-                         + len(craft["demand_only"]))
+        self.assertEqual(craft["total"], len(craft["points"]))
         self.assertGreaterEqual(craft["total"], 2)
+        # Both a field element and a rail element, in the one list.
+        kinds = {p["growth_pct"] is not None for p in craft["points"]}
+        self.assertEqual(kinds, {True, False})
 
 
 class ElementMatrixGroupTests(RenderTestCase):
@@ -953,12 +965,16 @@ class ElementMatrixGroupTests(RenderTestCase):
         self.seed()
         matrix = render.build_overview("US", PERIOD, "zh")["element_matrix"]
         scale = matrix["scale"]
-        plotted = [p for g in matrix["groups"] for p in g["points"]]
-        self.assertGreaterEqual(scale["x_max"], max(p["shelf_pct"] for p in plotted))
-        self.assertLessEqual(scale["y_min"], min(p["growth_pct"] for p in plotted))
-        self.assertGreaterEqual(scale["y_max"], max(p["growth_pct"] for p in plotted))
+        plotted = _plotted(matrix)
+        # Rail elements are drawn against these same axes, so their one reading
+        # has to be inside the bounds too — but the other one is `None`.
+        shelves = [p["shelf_pct"] for p in plotted if p["shelf_pct"] is not None]
+        growths = [p["growth_pct"] for p in plotted if p["growth_pct"] is not None]
+        self.assertGreaterEqual(scale["x_max"], max(shelves))
+        self.assertLessEqual(scale["y_min"], min(growths))
+        self.assertGreaterEqual(scale["y_max"], max(growths))
         self.assertEqual(scale["max_searches"],
-                         max(p["searches"] for p in matrix["points"]))
+                         max(p["searches"] for p in _plotted(matrix)))
 
     def test_a_panel_reports_what_it_could_not_draw(self) -> None:
         """A reader who can see six were measured and four drawn can tell a thin
