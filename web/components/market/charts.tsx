@@ -1291,7 +1291,19 @@ export function DistributionBars({
  * Used for the fulfilment mix and the traffic mix. The comparison that matters
  * is between rows at the same position along the bar, which aligned 100% bars
  * give and a set of pie charts does not.
+ *
+ * Each series is an identity — FBA is not "more" than FBM — so they take hues
+ * in a fixed order rather than steps of one hue. The steps were three opacities
+ * of the panel green, which left FBM and 亚马逊自营 close enough in lightness
+ * that the legend was the only way to tell which was which. Slot 1 stays that
+ * green, so the chart still belongs to this board.
  */
+// Spelled out, not built from an index: Tailwind scans source text for class
+// names and drops the ones in `@layer components` it never sees, so a template
+// literal would leave every segment painted the base green.
+const SEG_HUE = ["bi-share-seg-1", "bi-share-seg-2", "bi-share-seg-3"];
+const SWATCH_HUE = ["bi-swatch-series-1", "bi-swatch-series-2", "bi-swatch-series-3"];
+
 export function StackedRows({
   rows,
   series,
@@ -1307,7 +1319,7 @@ export function StackedRows({
       <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-fg-subtle">
         {series.map((s, i) => (
           <span key={s.key} className="flex items-center gap-1">
-            <i className="bi-swatch" style={{ opacity: 1 - i * 0.22 }} />
+            <i className={`bi-swatch ${SWATCH_HUE[i % SWATCH_HUE.length]}`} />
             {s.label}
           </span>
         ))}
@@ -1323,8 +1335,9 @@ export function StackedRows({
             <span className="bi-share-bar flex-1" role="img"
                   aria-label={parts.map((p) => `${p.label} ${p.value.toFixed(1)}%`).join(", ")}>
               {parts.map((part, i) => (
-                <span key={part.key} className="bi-share-seg"
-                      style={{ width: `${Math.max(0, part.value)}%`, opacity: 1 - i * 0.22 }}
+                <span key={part.key}
+                      className={`bi-share-seg ${SEG_HUE[i % SEG_HUE.length]}`}
+                      style={{ width: `${Math.max(0, part.value)}%` }}
                       title={`${part.label} ${part.value.toFixed(1)}%`} />
               ))}
               {used < 100 ? (

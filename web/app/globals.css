@@ -44,6 +44,16 @@
   --feature-analytics: 13 137 122;
   --feature-research: 176 88 8;
 
+  /* Chart series. Three fulfilment channels are three identities, not three
+     strengths of one — the old single hue at 100/78/56% opacity put FBM and
+     亚马逊自营 within a few percent of each other's lightness, which is not a
+     difference anyone reads off a 12px bar. Validated as a categorical trio
+     (lightness band, chroma floor, protan/deutan ΔE, contrast) against this
+     theme's own surface. */
+  --series-1: 27 122 46;            /* tracks --feature-selection */
+  --series-2: 21 101 192;           /* tracks --feature-news */
+  --series-3: 176 88 8;             /* tracks --feature-research */
+
   --glow: 56 132 214;
   --glow-2: 120 190 250;
   --accent-2: 6 148 214;
@@ -86,6 +96,12 @@
   --feature-analytics: 45 212 191;
   --feature-research: 251 191 36;
 
+  /* Dark needs its own steps, not the feature hues: those are tuned to carry an
+     icon on a dark ground and come out far too light for a filled bar. */
+  --series-1: 46 154 102;
+  --series-2: 74 135 232;
+  --series-3: 192 138 31;
+
   --glow: 138 152 255;
   --glow-2: 199 210 254;
   --accent-2: 120 220 235;
@@ -126,6 +142,10 @@
   --feature-analytics: 7 126 155;
   --feature-research: 168 96 4;
 
+  --series-1: 15 130 74;
+  --series-2: 37 99 235;
+  --series-3: 168 96 4;
+
   --glow: 168 85 247;
   --glow-2: 244 114 182;            /* magenta core — the theme's identity hue */
   --accent-2: 201 28 105;
@@ -164,6 +184,10 @@
   --feature-content: 8 102 214;     /* tracks --accent */
   --feature-analytics: 5 140 166;
   --feature-research: 181 109 7;
+
+  --series-1: 26 132 72;
+  --series-2: 6 130 200;
+  --series-3: 181 109 7;
 
   --glow: 56 170 240;
   --glow-2: 140 220 255;
@@ -1556,6 +1580,15 @@ select.field:focus {
   .bi-swatch-empty {
     background: rgb(var(--border));
   }
+  .bi-swatch-series-1 {
+    background: rgb(var(--series-1));
+  }
+  .bi-swatch-series-2 {
+    background: rgb(var(--series-2));
+  }
+  .bi-swatch-series-3 {
+    background: rgb(var(--series-3));
+  }
   .bi-swatch-risk {
     background: rgb(var(--danger) / 0.75);
   }
@@ -1586,9 +1619,26 @@ select.field:focus {
     @apply h-full;
     background: rgb(var(--feature-selection));
   }
+  /* Identity by hue, in a fixed order. */
+  .bi-share-seg-1 {
+    background: rgb(var(--series-1));
+  }
+  .bi-share-seg-2 {
+    background: rgb(var(--series-2));
+  }
+  .bi-share-seg-3 {
+    background: rgb(var(--series-3));
+  }
   .bi-share-rest {
     @apply h-full;
     background: rgb(var(--border));
+  }
+  /* A 2px slice of the surface between neighbours, so two fills meet at an edge
+     instead of blending into one long band. `box-sizing: border-box` means it
+     comes out of the segment's own width rather than pushing the bar wider. */
+  .bi-share-seg + .bi-share-seg,
+  .bi-share-seg + .bi-share-rest {
+    border-left: 2px solid rgb(var(--bg-elevated));
   }
   /* A 2px surface ring, so overlapping dots stay countable instead of merging
      into one blob. */
