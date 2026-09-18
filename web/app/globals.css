@@ -1674,6 +1674,15 @@ select.field:focus {
   .bi-dot-core-risk {
     fill: rgb(var(--danger));
   }
+  /* Neither corner: a measured spec that is not a decision. Ink, not colour —
+     a third hue here would say there is a third verdict. */
+  .bi-dot-disc-flat {
+    fill: rgb(var(--fg) / 0.08);
+    stroke: rgb(var(--fg-subtle) / 0.5);
+  }
+  .bi-dot-core-flat {
+    fill: rgb(var(--fg-subtle));
+  }
   /* The whole dot is one hit target, and it takes keyboard focus so the hover
      card is reachable without a mouse. */
   .bi-dot-group {

@@ -1975,7 +1975,6 @@ export type MarketDashboard = {
     scale?: ElementScale | null;
     /** Specs measured, before the plot cap. */
     total?: number;
-    window: string;
     quadrants: [string, string, string, string];
   };
   follow?: MarketDirection[];

@@ -334,8 +334,17 @@ export type ElementPoint = {
   kind_label: string;
   /** Share of head revenue whose listing title mentions this element. */
   shelf_pct: number | null;
-  growth_pct: number | null;
-  searches: number;
+  /** Stars against the board median — the y axis. Negative is the interesting
+   *  direction: the market is taking money for something it does badly. */
+  rating_gap: number | null;
+  /** The rating itself, so the gap can be read as a number and not only as a
+   *  position. */
+  rating: number | null;
+  /** Median review count across the spec's listings: what it costs to be
+   *  believed here. */
+  reviews: number | null;
+  /** Head revenue, which is what the dot area encodes. */
+  revenue: number;
   asins: number;
   avg_price: number | null;
   /** Set when the point is a spec rather than a single element: the combination
@@ -347,11 +356,14 @@ export type ElementPoint = {
 /** An element measured on both axes, so it has a position to be drawn at. */
 export type ElementFieldPoint = ElementPoint & {
   shelf_pct: number;
-  growth_pct: number;
+  rating_gap: number;
 };
 
 export function inField(point: ElementPoint): point is ElementFieldPoint {
-  return point.shelf_pct !== null && point.growth_pct !== null;
+  // Loose equality on purpose: a dashboard stored before this axis existed has
+  // no `rating_gap` key at all, and `undefined !== null` would send it to be
+  // drawn at NaN.
+  return point.shelf_pct != null && point.rating_gap != null;
 }
 
 /** The chart's axis bounds, computed server-side from the points on show.
@@ -364,18 +376,21 @@ export type ElementChartBounds = {
   x_mid: number;
   y_min: number;
   y_max: number;
+  /** The rating the zero line stands for: the board median, in stars. */
+  y_mid: number;
 };
 
-/** What genuinely has to be global: the dot area encodes monthly searches, so
- *  it is measured against one maximum across every row. */
+/** What genuinely has to be global: the dot area encodes head revenue, so it is
+ *  measured against one maximum across every row. */
 export type ElementScale = {
-  max_searches: number;
+  max_revenue: number;
 };
 
 /** Row names for the hover card. The two axis names come in separately because
  *  they are the same two strings the axes themselves are labelled with. */
 export type ElementTipLabels = {
-  searches: string;
+  rating: string;
+  reviews: string;
   asins: string;
   price: string;
   /** Stands in for a number that was never measured, e.g. 未测到 / not measured. */
@@ -423,8 +438,8 @@ export function ElementMatrix({
   medianLabel: string;
   /** Row names for the hover card's lower half. */
   tipLabels: ElementTipLabels;
-  /** Names the two rails, e.g. 需求未测到 / 货架未测到. */
-  railLabels: { noDemand: string; noShelf: string };
+  /** Names the two rails, e.g. 评分未测到 / 货架未测到. */
+  railLabels: { noRating: string; noShelf: string };
   /** `row` is one attribute in a stack of rows; `solo` is the single spec chart,
    *  which carries an order of magnitude more points and needs the height. */
   aspect?: "row" | "solo";
@@ -437,8 +452,8 @@ export function ElementMatrix({
   // and is not drawn.
   const field = points.filter(inField);
   const rails = {
-    shelf: points.filter((p) => !inField(p) && p.shelf_pct !== null),
-    demand: points.filter((p) => !inField(p) && p.growth_pct !== null),
+    shelf: points.filter((p) => !inField(p) && p.shelf_pct != null),
+    rating: points.filter((p) => !inField(p) && p.rating_gap != null),
   };
   if (!points.length) return null;
   // Wide and short. The aspect ratio is the row's height control: the drawing
@@ -449,10 +464,10 @@ export function ElementMatrix({
   const width = 1000;
   const height = aspect === "solo" ? 440 : 200;
   // Left pad carries the y tick values only; both axis names are on one line
-  // under the plot. Both axes are percentages of completely different things —
-  // a share on x, a growth rate on y — so a row that prints only numbers makes
-  // the reader guess which percent is which. They are named on every row for
-  // that reason, not for decoration.
+  // under the plot. The two axes are different units — a share of revenue on x,
+  // stars against the median on y — so a row that prints only numbers makes the
+  // reader guess which is which. They are named for that reason, not for
+  // decoration.
   const padL = 42;
   const padR = 20;
   const padT = 22;
@@ -461,12 +476,12 @@ export function ElementMatrix({
   // Bounds from this row's own elements; the dot area from the whole set, so a
   // big element in a quiet row cannot out-draw a bigger one in a busy row.
   const { x_max: xMax, x_mid: xMid, y_min: yMin, y_max: yMax } = bounds;
-  const maxSearches = Math.max(1, scale.max_searches);
+  const maxRevenue = Math.max(1, scale.max_revenue);
 
   // The rails are inside the padding, not extra chrome outside it: each takes a
   // strip off the field and keeps its own axis, so a rail mark lines up with the
   // field marks it shares that axis with.
-  const railW = rails.demand.length ? 26 : 0;
+  const railW = rails.rating.length ? 26 : 0;
   const railH = rails.shelf.length ? 22 : 0;
   const fieldL = padL + railW;
   const fieldB = padB + railH;
@@ -477,7 +492,7 @@ export function ElementMatrix({
 
   // Biggest first, so a small dot is never hidden under a large one, and so the
   // labels that get dropped on collision are the least important ones.
-  const ordered = [...field].sort((a, b) => b.searches - a.searches);
+  const ordered = [...field].sort((a, b) => b.revenue - a.revenue);
   const placed: { x: number; y: number }[] = [];
 
   // Seats are claimed here rather than during the draw, because the draw order
@@ -495,7 +510,7 @@ export function ElementMatrix({
   for (const point of ordered) {
     if (labelled.size >= labelCap) break;
     const cx = px(point.shelf_pct);
-    const cy = py(point.growth_pct);
+    const cy = py(point.rating_gap);
     if (placed.some((seat) => Math.abs(seat.x - cx) < 56
                               && Math.abs(seat.y - cy) < 13)) continue;
     placed.push({ x: cx, y: cy });
@@ -538,18 +553,22 @@ export function ElementMatrix({
            role="img"
            aria-label={points.map((p) => describe(p, xLabel, yLabel, tipLabels))
              .join("; ")}>
-        {/* The two corners that carry a decision, tinted instead of captioned. A
-            tint survives being repeated down a column of rows; four captions a
-            row do not. */}
-        <rect className="bi-quadrant-open" x={fieldL} y={padT}
-              width={Math.max(0, px(xMid) - fieldL)} height={Math.max(0, py(0) - padT)} />
-        <rect className="bi-quadrant-risk" x={px(xMid)} y={py(0)}
+        {/* The two corners that carry a decision, tinted instead of captioned.
+            Bottom right is the opening — head revenue is already there and the
+            listings taking it are rated below the board; top right is the same
+            money with the job already done well, which is the corner to leave
+            alone. */}
+        <rect className="bi-quadrant-open" x={px(xMid)} y={py(0)}
               width={Math.max(0, width - padR - px(xMid))}
               height={Math.max(0, height - fieldB - py(0))} />
+        <rect className="bi-quadrant-risk" x={px(xMid)} y={padT}
+              width={Math.max(0, width - padR - px(xMid))}
+              height={Math.max(0, py(0) - padT)} />
 
-        {/* Zero growth is a fact about the market; the median is a fact about our
-            own tracking list, so it is the dashed one. */}
-        <line className="bi-axis-solid" x1={fieldL} x2={width - padR}
+        {/* Both lines are medians of what we track, and both are dashed for it:
+            the horizontal one is the board's median rating, the vertical one its
+            median share of head revenue. */}
+        <line className="bi-axis-dashed" x1={fieldL} x2={width - padR}
               y1={py(0)} y2={py(0)} />
         <line className="bi-axis-dashed" x1={px(xMid)} x2={px(xMid)}
               y1={padT} y2={height - fieldB} />
@@ -558,7 +577,7 @@ export function ElementMatrix({
             reading rather than sitting at zero. Left rail: demand measured, too
             few head listings to state a share. Bottom rail: on the shelf, no
             rated search signal. */}
-        {rails.demand.length ? (
+        {rails.rating.length ? (
           <>
             <line className="bi-rail-edge" x1={fieldL - 6} x2={fieldL - 6}
                   y1={padT} y2={height - fieldB} />
@@ -572,18 +591,24 @@ export function ElementMatrix({
                   y1={height - fieldB + 6} y2={height - fieldB + 6} />
             <text className="bi-rail-name" x={width - padR}
                   y={height - padB - railH / 2 + 3} textAnchor="end">
-              {railLabels.noDemand}
+              {railLabels.noRating}
             </text>
           </>
         ) : null}
 
-        {/* Signed, so "135%" cannot be read as a level rather than a change. */}
-        <text className="bi-axis-tick" x={padL - 6} y={py(0) + 3} textAnchor="end">0%</text>
+        {/* Signed stars, and the zero line carries the rating it stands for: a
+            bare 0 would leave the reader to guess what "average" was. */}
+        <text className="bi-axis-tick" x={padL - 6} y={py(0) - 3} textAnchor="end">
+          {medianLabel}
+        </text>
+        <text className="bi-axis-tick" x={padL - 6} y={py(0) + 9} textAnchor="end">
+          {(bounds.y_mid ?? 0).toFixed(1)}★
+        </text>
         <text className="bi-axis-tick" x={padL - 6} y={padT + 4} textAnchor="end">
-          +{yMax.toFixed(0)}%
+          +{yMax.toFixed(1)}
         </text>
         <text className="bi-axis-tick" x={padL - 6} y={height - fieldB} textAnchor="end">
-          {yMin.toFixed(0)}%
+          {yMin.toFixed(1)}
         </text>
         {/* The dashed line's value is meaningless without the word: nothing tells
             a reader that 13% is the median of the elements we track. */}
@@ -617,8 +642,8 @@ export function ElementMatrix({
             they are one list of (point, x, y) rather than two near-identical
             blocks that have to be kept in step. */}
         {[
-          ...rails.demand.map((point) => ({
-            point, cx: padL + railW / 2, cy: py(point.growth_pct as number) })),
+          ...rails.rating.map((point) => ({
+            point, cx: padL + railW / 2, cy: py(point.rating_gap as number) })),
           ...rails.shelf.map((point) => ({
             point, cx: px(point.shelf_pct as number),
             cy: height - padB - railH / 2 })),
@@ -649,10 +674,16 @@ export function ElementMatrix({
         })}
 
         {ordered.map((point) => {
-          const r = 4 + Math.sqrt(point.searches / maxSearches) * 11;
+          const r = 4 + Math.sqrt(point.revenue / maxRevenue) * 11;
           const cx = px(point.shelf_pct);
-          const cy = py(point.growth_pct);
-          const rising = point.growth_pct >= 0;
+          const cy = py(point.rating_gap);
+          // Colour says which corner, not which sign: below the median rating is
+          // only an opening where there is money to take, and above it is only
+          // a warning for the same reason. A well-rated spec nobody buys is
+          // neither, and gets the plain mark.
+          const heavy = point.shelf_pct >= xMid;
+          const opening = heavy && point.rating_gap < 0;
+          const crowded = heavy && point.rating_gap >= 0;
           // Drop a label rather than stack it: two names on top of each other is
           // worse than one name and a dot whose name the hover card gives back.
           const clash = !labelled.has(point.key);
@@ -670,10 +701,12 @@ export function ElementMatrix({
               <circle cx={cx} cy={cy} r={Math.max(15, r + 8)} fill="transparent" />
               {/* Disc for the volume, core for the position. Overlapping discs stay
                   countable because their cores do not merge. */}
-              <circle className={`${rising ? "bi-dot-disc" : "bi-dot-disc bi-dot-disc-risk"}`
+              <circle className={`bi-dot-disc${opening ? "" : crowded
+                                   ? " bi-dot-disc-risk" : " bi-dot-disc-flat"}`
                                  + (hot ? " bi-dot-hot" : "")}
                       cx={cx} cy={cy} r={r} />
-              <circle className={rising ? "bi-dot-core" : "bi-dot-core bi-dot-core-risk"}
+              <circle className={`bi-dot-core${opening ? "" : crowded
+                                   ? " bi-dot-core-risk" : " bi-dot-core-flat"}`}
                       cx={cx} cy={cy} r={Math.min(3, r / 3)} />
               {!clash ? (
                 <text className="bi-point-label" x={cx} y={cy - r - 5} textAnchor="middle">
@@ -706,16 +739,19 @@ export function ElementMatrix({
             </div>
           ) : null}
           {/* An unmeasured half says so, in the row where its number would have
-              been. Leaving the row out would read as "nothing to say about
-              growth"; a dash reads as "we did not measure it", which is the
+              been. Leaving the row out would read as "nothing to say about the
+              rating"; a dash reads as "we did not measure it", which is the
               fact. */}
-          <TipRow label={yLabel} value={pct(hover.point.growth_pct, tipLabels.unmeasured)}
-                  tone={hover.point.growth_pct == null ? undefined
-                        : hover.point.growth_pct >= 0 ? "up" : "down"} />
+          <TipRow label={yLabel} value={stars(hover.point.rating_gap, tipLabels.unmeasured)} />
           <TipRow label={xLabel}
                   value={pct(hover.point.shelf_pct, tipLabels.unmeasured, false)} />
-          <TipRow label={tipLabels.searches}
-                  value={hover.point.searches.toLocaleString()} />
+          <TipRow label={tipLabels.rating}
+                  value={hover.point.rating == null ? tipLabels.unmeasured
+                         : `${hover.point.rating.toFixed(2)}★`} />
+          {hover.point.reviews != null ? (
+            <TipRow label={tipLabels.reviews}
+                    value={hover.point.reviews.toLocaleString()} />
+          ) : null}
           <TipRow label={tipLabels.asins} value={`${hover.point.asins}`} />
           {hover.point.avg_price != null ? (
             <TipRow label={tipLabels.price} value={fmtMoney(hover.point.avg_price)} />
@@ -743,6 +779,12 @@ function TipRow({ label, value, tone }: {
   );
 }
 
+/** A signed gap in stars, or the word for a reading that was never taken. */
+function stars(value: number | null, unmeasured: string): string {
+  if (value == null || !Number.isFinite(value)) return unmeasured;
+  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}★`;
+}
+
 /** A percentage, or the word for a reading that was never taken. */
 function pct(value: number | null, unmeasured: string, signed = true): string {
   if (value == null || !Number.isFinite(value)) return unmeasured;
@@ -753,9 +795,9 @@ function pct(value: number | null, unmeasured: string, signed = true): string {
 function describe(point: ElementPoint, xLabel: string, yLabel: string,
                   tipLabels: ElementTipLabels): string {
   return `${point.label}（${point.kind_label}） · `
-    + `${yLabel} ${pct(point.growth_pct, tipLabels.unmeasured)} · `
+    + `${yLabel} ${stars(point.rating_gap, tipLabels.unmeasured)} · `
     + `${xLabel} ${pct(point.shelf_pct, tipLabels.unmeasured, false)} · `
-    + `${tipLabels.searches} ${point.searches.toLocaleString()} · `
+    + `${tipLabels.rating} ${point.rating ?? tipLabels.unmeasured} · `
     + `${tipLabels.asins} ${point.asins}`
     + (point.avg_price != null ? ` · ${fmtMoney(point.avg_price)}` : "");
 }
@@ -765,9 +807,9 @@ function describe(point: ElementPoint, xLabel: string, yLabel: string,
  * The attribute rows answer "of the finishes we track, which one is cooling".
  * This answers the question a brief is actually written from: which whole
  * product — a scene, a size, a material, a colour, a look, a surface treatment —
- * is selling and which way its demand is moving. A spec spans the attributes by
- * construction, so there is no attribute to file it under and no row to put it
- * in; it is one chart or it is nothing.
+ * is taking the money, and whether the listings taking it are any good. A spec
+ * spans the attributes by construction, so there is no attribute to file it
+ * under and no row to put it in; it is one chart or it is nothing.
  *
  * Every point came off real listings. Enumerating the combinations of the mined
  * vocabulary would produce thousands of products nobody has made, and a chart of
@@ -797,7 +839,7 @@ export function ElementComboChart({
   yLabel: string;
   medianLabel: string;
   tipLabels: ElementTipLabels;
-  railLabels: { noDemand: string; noShelf: string };
+  railLabels: { noRating: string; noShelf: string };
   notes: string[];
   /** Specs measured, before the plot cap — so a truncated tail is visible. */
   total?: number;
@@ -823,12 +865,12 @@ export function ElementComboChart({
                      tipLabels={tipLabels} railLabels={railLabels} />
       <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]
                       text-fg-subtle">
+        <span>↖&nbsp;{quadrants[0]}</span>
         <span className="flex items-center gap-1">
-          ↖<i className="bi-swatch shrink-0 bi-legend-open" />{quadrants[0]}
+          ↗<i className="bi-swatch shrink-0 bi-legend-risk" />{quadrants[1]}
         </span>
-        <span>↗&nbsp;{quadrants[1]}</span>
         <span className="flex items-center gap-1">
-          ↘<i className="bi-swatch shrink-0 bi-legend-risk" />{quadrants[2]}
+          ↘<i className="bi-swatch shrink-0 bi-legend-open" />{quadrants[2]}
         </span>
         <span>↙&nbsp;{quadrants[3]}</span>
       </div>

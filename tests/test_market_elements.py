@@ -270,10 +270,46 @@ class CombinationTests(unittest.TestCase):
          "kind_label": "其他", "revenue_share_pct": 6.0},
     ]
 
-    def products(self, titles: list[str]) -> list[dict]:
-        return [{"asin": f"B{i}", "brand": "Demo", "title": title,
-                 "revenue": 1_000.0, "price": 300.0, "node_id_path": "n:1"}
-                for i, title in enumerate(titles)]
+    def products(self, titles: list[str], ratings: list[float] | None = None,
+                 revenues: list[float] | None = None) -> list[dict]:
+        rows = []
+        for i, title in enumerate(titles):
+            row = {"asin": f"B{i}", "brand": "Demo", "title": title,
+                   "revenue": revenues[i] if revenues else 1_000.0,
+                   "price": 300.0, "node_id_path": "n:1", "ratings": 100.0}
+            if ratings:
+                row["rating"] = ratings[i]
+            rows.append(row)
+        return rows
+
+    def test_the_rating_is_weighted_by_revenue(self) -> None:
+        """The rating a shopper meets is the one carried by the listings that
+        actually sell — an average over every listing lets a dead one vote."""
+        combos = elements.combinations(
+            self.products(["Fluted Oak Sideboard"] * 5,
+                          ratings=[5.0, 3.0, 3.0, 3.0, 3.0],
+                          revenues=[900_000.0, 100.0, 100.0, 100.0, 100.0]),
+            self.NAMED)
+        spec = next(c for c in combos if c["key"] == "fluted+oak")
+        self.assertGreater(spec["rating"], 4.9)
+        self.assertEqual(spec["rated_asins"], 5)
+
+    def test_a_spec_whose_listings_carry_no_rating_has_none(self) -> None:
+        """Not zero stars: an unrated spec is one the chart rails rather than
+        one the market hates."""
+        combos = elements.combinations(
+            self.products(["Fluted Oak Sideboard"] * 5), self.NAMED)
+        spec = next(c for c in combos if c["key"] == "fluted+oak")
+        self.assertIsNone(spec["rating"])
+        self.assertEqual(spec["rated_asins"], 0)
+
+    def test_the_review_count_is_the_median_not_the_sum(self) -> None:
+        """It stands for the bar a new listing has to clear, which is a typical
+        competitor rather than the whole shelf added up."""
+        combos = elements.combinations(
+            self.products(["Fluted Oak Sideboard"] * 5), self.NAMED)
+        self.assertEqual(
+            next(c for c in combos if c["key"] == "fluted+oak")["reviews"], 100)
 
     def test_a_spec_has_to_come_off_real_listings(self) -> None:
         """The cartesian product of the vocabulary would invent thousands of

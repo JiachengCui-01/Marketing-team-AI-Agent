@@ -15,7 +15,7 @@ what landed so a silently missing family is visible rather than merely absent.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, MutableMapping, Sequence
 
 from . import elements, gateway, jobs, monitor, scoring, store, taxonomy
 
@@ -318,12 +318,13 @@ def build_current(marketplace: str, language: str, *,
 
 # ----------------------------------------------------------------- overview ----
 
-# Floors for the chart's axis range, in percentage points. Without them a chart
-# whose specs all sit within a point of each other would be zoomed until the gaps
-# between them looked meaningful, and a chart of low-share specs would push the
-# median line off the frame.
+# Floors for the chart's axis range. Without them a chart whose specs all sit
+# within a point of each other would be zoomed until the gaps between them
+# looked meaningful, and a chart of low-share specs would push the median line
+# off the frame. x is in percentage points of head revenue; y is in stars, where
+# a quarter of a star is already a wide gap between two ratings.
 MIN_X_SPAN = 5.0
-MIN_Y_SPAN = 25.0
+MIN_Y_SPAN = 0.25
 # How many specs one chart may plot. A spec is a narrow claim, so the tail is
 # long and mostly one-listing noise; the count of what was measured is reported
 # beside the chart so the tail is visible without being drawn.
@@ -333,59 +334,86 @@ MAX_COMBO_POINTS = 45
 def _combo_matrix(combos: Sequence[dict], zh: bool) -> dict:
     """The spec chart: one point per combination the market has actually built.
 
-    Same two axes as the element read and the same three states — a spec with
-    both halves gets a position, one with only a shelf reading goes in the rail.
-    What changed is the unit. An element is an alternative ("of the finishes we
-    track, black is the only one cooling"); a spec is a product ("a black
-    solid-wood fluted sideboard holds 0.4% of head revenue and its phrases are
-    up 31%"). The second is the sentence a brief is written from.
+    x is what the spec holds of head revenue; y is how well the market does it —
+    the spec's revenue-weighted rating against the median of every spec on the
+    board. The corner that matters is bottom-right: real money, and the listings
+    taking it are not liked. That is a product brief.
+
+    y used to be search growth, and the chart came out blank. Demand is the
+    strict reading — one phrase has to carry every term of the spec — and almost
+    no phrase does, so sixty specs sat in the rail saying "not measured", which
+    is honest and useless. A rating is observed on every listing the spec was
+    read off, so the axis is answerable for the whole chart, and "who is doing
+    this badly" is at least as much a product question as "what is growing".
 
     One chart rather than a row per attribute, because a spec spans the
     attributes by construction — there is no attribute to file it under.
     """
+    rated = [c for c in combos if c.get("rating") is not None]
+    y_mid = scoring._median([c["rating"] for c in rated]) or 0.0
     points = [
         {"key": c["key"], "label": c["label"], "kind": "combo",
          "kind_label": (f"{c['attrs']} 项组合" if zh
                         else f"{c['attrs']}-attribute spec"),
          "spec": c["spec"],
          "shelf_pct": c["revenue_share_pct"] if c.get("shelf_rated") else None,
-         "growth_pct": c["growth_pct"] if _demand_rated(c) else None,
-         "searches": c["searches"], "asins": c["asins"],
-         "avg_price": c["avg_price"], "window": c.get("window") or ""}
+         # Signed against the board median, because a bare 4.3 means nothing
+         # until you know what the shelf around it scores.
+         "rating_gap": (round(c["rating"] - y_mid, 2)
+                        if c.get("rating") is not None else None),
+         "rating": c.get("rating"),
+         "reviews": c.get("reviews"),
+         "revenue": c.get("revenue") or 0.0,
+         "asins": c["asins"],
+         "avg_price": c["avg_price"]}
         for c in combos
-        if c.get("shelf_rated") or _demand_rated(c)
+        if c.get("shelf_rated") or c.get("rating") is not None
     ]
     if not points:
-        return {"points": [], "bounds": None, "scale": None, "window": "",
+        return {"points": [], "bounds": None, "scale": None,
                 "quadrants": _quadrant_names(zh)}
-    points.sort(key=lambda p: p["searches"], reverse=True)
-    windows = {p["window"] for p in points if p["window"]}
+    points.sort(key=lambda p: p["revenue"], reverse=True)
     x_mid = scoring._median(
         [p["shelf_pct"] for p in points if p["shelf_pct"] is not None]) or 0.0
     return {
         "points": points[:MAX_COMBO_POINTS],
-        "bounds": _chart_bounds(points[:MAX_COMBO_POINTS], x_mid),
+        "bounds": _chart_bounds(points[:MAX_COMBO_POINTS], x_mid, y_mid),
         "scale": _dot_scale(points[:MAX_COMBO_POINTS]),
         "total": len(combos),
-        "window": windows.pop() if len(windows) == 1 else "mixed",
         "quadrants": _quadrant_names(zh),
     }
 
 
+def drop_stale_combos(dashboard: MutableMapping[str, Any]) -> None:
+    """Blank a stored spec chart whose points predate the rating axis.
+
+    The board is rendered on demand and a saved one can sit for days, so a
+    deploy that changes a chart's axes meets its own old payloads. Those points
+    carry search growth and no rating, and the chart would draw every one of
+    them in the "rating not measured" rail — a claim about the market rather
+    than about the record. Blanked instead: the section hides itself until the
+    next render, which is free.
+    """
+    combos = dashboard.get("element_combos")
+    if not isinstance(combos, dict):
+        return
+    points = combos.get("points") or []
+    if points and all("rating_gap" not in p for p in points):
+        combos["points"] = []
+        combos["bounds"] = None
+        combos["scale"] = None
+
+
 def _quadrant_names(zh: bool) -> tuple[str, str, str, str]:
-    return (("需求在涨·货架未跟上", "需求在涨·已验证",
-             "需求转弱·货架仍重", "需求转弱·货架也轻")
+    """Clockwise from top-left, named for the decision the corner implies."""
+    return (("盘子小 · 口碑已做好", "钱多 · 口碑已做好（红海）",
+             "钱多 · 口碑差（切入点）", "盘子小 · 口碑差")
             if zh else
-            ("Rising, shelf has not answered", "Rising and proven",
-             "Cooling but shelf-heavy", "Cooling and thin"))
+            ("Thin shelf, well rated", "Shelf-heavy, well rated (crowded)",
+             "Shelf-heavy, poorly rated (the opening)", "Thin and poorly rated"))
 
 
-def _demand_rated(row: Mapping[str, Any]) -> bool:
-    """Enough search evidence to state a trend for this element."""
-    return bool(row.get("rated")) and row.get("growth_pct") is not None
-
-
-def _chart_bounds(points: Sequence[dict], x_mid: float) -> dict:
+def _chart_bounds(points: Sequence[dict], x_mid: float, y_mid: float) -> dict:
     """Axis bounds, from the points actually being drawn.
 
     The floors are what stop a chart of near-identical specs from being zoomed
@@ -393,20 +421,23 @@ def _chart_bounds(points: Sequence[dict], x_mid: float) -> dict:
     frame even when every spec sits well below it.
     """
     shelves = [p["shelf_pct"] for p in points if p["shelf_pct"] is not None]
-    growths = [p["growth_pct"] for p in points if p["growth_pct"] is not None]
+    gaps = [p["rating_gap"] for p in points if p["rating_gap"] is not None]
     return {
         "x_max": round(max([MIN_X_SPAN, x_mid * 1.3] + shelves) * 1.1, 2),
         "x_mid": x_mid,
-        "y_min": round(min([-MIN_Y_SPAN] + growths) * 1.1, 2),
-        "y_max": round(max([MIN_Y_SPAN] + growths) * 1.1, 2),
+        "y_min": round(min([-MIN_Y_SPAN] + gaps) * 1.1, 2),
+        "y_max": round(max([MIN_Y_SPAN] + gaps) * 1.1, 2),
+        # The rating the zero line stands for, so it can be named rather than
+        # left as an unexplained 0.
+        "y_mid": round(y_mid, 2),
     }
 
 
 def _dot_scale(points: Sequence[dict]) -> dict | None:
-    """What the largest dot area means: the maximum monthly searches on show."""
+    """What the largest dot area means: the biggest head revenue on show."""
     if not points:
         return None
-    return {"max_searches": max(1, max(p["searches"] for p in points))}
+    return {"max_revenue": max(1.0, max(p["revenue"] for p in points))}
 
 
 def _follow(board: Sequence[dict], rising: Sequence[dict], zh: bool) -> list[dict]:

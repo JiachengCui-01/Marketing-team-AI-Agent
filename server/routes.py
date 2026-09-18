@@ -585,6 +585,7 @@ def _with_current(record: dict | None, language: str,
         return None
     record["dashboard"]["current"] = market_panels.build_current(
         "US", language, node_id_path=node_id_path)
+    market_panels.drop_stale_combos(record["dashboard"])
     return record
 
 

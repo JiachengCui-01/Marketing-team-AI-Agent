@@ -213,20 +213,19 @@ export function MarketOverviewPanel({
                 countLabel={t.gmComboCount}
                 moreLabel={t.gmComboMore}
                 notes={[
-                  t.gmCombosStrict,
+                  t.gmCombosRating,
+                  t.gmCombosWhyRating,
                   t.gmCombosOrigin,
-                  dashboard?.element_combos?.window === "yoy" ? t.gmWindowYoy
-                  : dashboard?.element_combos?.window === "mixed" ? t.gmWindowMixed
-                  : t.gmWindowMom,
                   t.gmElementSize,
                   t.gmElementHover,
                   t.gmElementRailNote,
                 ]}
-                tipLabels={{ searches: t.gmElementTipSearches,
+                tipLabels={{ rating: t.gmElementTipRating,
+                             reviews: t.gmElementTipReviews,
                              asins: t.gmElementTipAsins,
                              price: t.gmElementTipPrice,
                              unmeasured: t.gmElementTipUnmeasured }}
-                railLabels={{ noDemand: t.gmElementRailNoDemand,
+                railLabels={{ noRating: t.gmElementRailNoRating,
                               noShelf: t.gmElementRailNoShelf }}
               />
             </Section>

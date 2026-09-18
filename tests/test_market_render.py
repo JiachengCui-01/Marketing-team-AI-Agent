@@ -748,9 +748,10 @@ class ComboMatrixTests(RenderTestCase):
     """The spec chart, built from stored rows only.
 
     These assertions were written against the per-attribute matrix that this
-    chart replaced. The grouping went away; the invariants did not — an
-    unmeasured axis is still `None` rather than zero, the rails still hold the
-    half-measured specs, and the bounds still have floors.
+    chart replaced, and then re-pointed when y stopped being search growth. The
+    unit changed; the invariants did not — an unmeasured axis is still `None`
+    rather than zero, the rails still hold the half-measured specs, and the
+    bounds still have floors.
     """
 
     # Each attribute word appears in more than one pairing on purpose. When two
@@ -760,10 +761,17 @@ class ComboMatrixTests(RenderTestCase):
     TITLES = ["Fluted Oak Sideboard", "Fluted Oak Console", "Fluted Oak Cabinet",
               "Fluted Oak Buffet", "Fluted Oak Credenza",
               "Fluted Walnut Hutch", "Fluted Walnut Dresser",
-              "Reeded Oak Chest", "Reeded Oak Vanity",
-              # A second spec, on the shelf and with no phrase of its own.
+              # A second rated spec, so the board median has two ratings to sit
+              # between and a gap has a sign worth asserting on.
+              "Reeded Oak Chest", "Reeded Oak Vanity", "Reeded Oak Dresser",
+              "Reeded Oak Highboy",
+              # A third spec, on the shelf and with no rating of its own.
               "Reeded Walnut Sideboard", "Reeded Walnut Console",
               "Reeded Walnut Cabinet", "Reeded Walnut Buffet"]
+
+    # By spec rather than by row number: the fixture grows and index arithmetic
+    # silently re-labels whichever listing moved.
+    RATINGS = {"Fluted Oak": 4.6, "Reeded Oak": 3.9}
 
     def setUp(self) -> None:
         super().setUp()
@@ -776,8 +784,10 @@ class ComboMatrixTests(RenderTestCase):
         store.upsert_product_metrics([
             {"marketplace": "US", "asin": f"BC{i}", "period": PERIOD,
              "node_id_path": BUFFETS, "price": 399.0, "revenue": 100_000.0,
-             "source_tool": "product_research"}
-            for i in range(len(self.TITLES))])
+             "source_tool": "product_research", "ratings": 120.0,
+             **({"rating": self._rating_for(title)}
+                if self._rating_for(title) is not None else {})}
+            for i, title in enumerate(self.TITLES)])
         # Phrases carrying the whole `fluted + oak` spec, and none for the other.
         store.upsert_keyword_metrics([
             {"marketplace": "US", "keyword": f"fluted oak {noun}", "period": PERIOD,
@@ -792,6 +802,9 @@ class ComboMatrixTests(RenderTestCase):
                                ("oak", elements.MATERIAL),
                                ("walnut", elements.MATERIAL))])
 
+    def _rating_for(self, title: str) -> float | None:
+        return next((v for k, v in self.RATINGS.items() if title.startswith(k)), None)
+
     def matrix(self) -> dict:
         return render.build_overview("US", PERIOD, "zh")["element_combos"]
 
@@ -801,23 +814,36 @@ class ComboMatrixTests(RenderTestCase):
     def test_both_axes_are_measured_from_stored_vendor_rows(self) -> None:
         point = self.spec("fluted+oak")
         self.assertGreater(point["shelf_pct"], 0)
-        self.assertAlmostEqual(point["growth_pct"], 24.0, places=1)
+        self.assertEqual(point["rating"], 4.6)
         self.assertEqual(point["asins"], 5)
 
-    def test_the_window_is_named_so_a_month_is_not_read_as_a_year(self) -> None:
-        self.assertEqual(self.matrix()["window"], elements.MOM)
+    def test_the_y_axis_is_the_gap_to_the_board_median(self) -> None:
+        """A bare 4.6 says nothing until you know what the shelf around it
+        scores; the sign is the whole reading."""
+        matrix = self.matrix()
+        mid = matrix["bounds"]["y_mid"]
+        liked = next(p for p in matrix["points"] if p["key"] == "fluted+oak")
+        disliked = next(p for p in matrix["points"] if p["key"] == "reeded+oak")
+        self.assertAlmostEqual(liked["rating_gap"], round(4.6 - mid, 2), places=2)
+        self.assertGreater(liked["rating_gap"], disliked["rating_gap"])
+
+    def test_the_rating_is_weighted_by_what_actually_sells(self) -> None:
+        """The rating a shopper meets is the one on the listings taking the
+        money, not the average of every listing naming the spec."""
+        self.assertEqual(self.spec("reeded+oak")["rating"], 3.9)
 
     def test_the_quadrants_are_named_for_the_decision(self) -> None:
         quadrants = self.matrix()["quadrants"]
         self.assertEqual(len(quadrants), 4)
-        self.assertIn("货架未跟上", quadrants[0])
+        self.assertIn("切入点", quadrants[2])
 
-    def test_a_spec_with_no_rated_demand_is_railed_not_dropped(self) -> None:
-        """There are far more titles than phrases, so what dropping it hid was
-        "we sell this and have never measured whether anyone asks for it"."""
+    def test_a_spec_with_no_rated_listing_is_railed_not_dropped(self) -> None:
+        """Dropping it would hide "we sell this and nobody has said whether it
+        is any good", which is a different claim from a zero."""
         point = self.spec("reeded+walnut")
         self.assertIsNotNone(point["shelf_pct"])
-        self.assertIsNone(point["growth_pct"], "unmeasured, which is not zero")
+        self.assertIsNone(point["rating_gap"], "unmeasured, which is not zero")
+        self.assertIsNone(point["rating"])
 
     def test_the_spec_is_broken_out_attribute_by_attribute(self) -> None:
         """A glued label reads as one long word; the hover card needs the parts."""
@@ -833,8 +859,8 @@ class ComboMatrixTests(RenderTestCase):
 
     def test_the_dot_area_is_measured_against_the_largest_on_show(self) -> None:
         matrix = self.matrix()
-        self.assertEqual(matrix["scale"]["max_searches"],
-                         max(p["searches"] for p in matrix["points"]))
+        self.assertEqual(matrix["scale"]["max_revenue"],
+                         max(p["revenue"] for p in matrix["points"]))
 
     def test_the_bounds_have_floors_so_noise_is_not_magnified(self) -> None:
         """Without them a chart whose specs sit within a point of each other is
@@ -854,9 +880,9 @@ class ComboMatrixTests(RenderTestCase):
             with self.subTest(point["key"]):
                 if point["shelf_pct"] is not None:
                     self.assertLessEqual(point["shelf_pct"], bounds["x_max"])
-                if point["growth_pct"] is not None:
-                    self.assertGreaterEqual(point["growth_pct"], bounds["y_min"])
-                    self.assertLessEqual(point["growth_pct"], bounds["y_max"])
+                if point["rating_gap"] is not None:
+                    self.assertGreaterEqual(point["rating_gap"], bounds["y_min"])
+                    self.assertLessEqual(point["rating_gap"], bounds["y_max"])
 
     def test_the_tail_is_counted_even_when_it_is_not_drawn(self) -> None:
         """A chart saying nothing about what it left out is a chart that claims
@@ -865,6 +891,26 @@ class ComboMatrixTests(RenderTestCase):
             matrix = self.matrix()
         self.assertEqual(len(matrix["points"]), 1)
         self.assertGreater(matrix["total"], 1)
+
+    def test_a_dashboard_stored_before_this_axis_is_blanked_not_drawn(self) -> None:
+        """The board is rendered on demand and a saved one can sit for days, so
+        a deploy that changes an axis meets its own old payloads. Drawing them
+        would rail every spec as "rating not measured" — a claim about the
+        market rather than about the record."""
+        stale = {"element_combos": {
+            "points": [{"key": "fluted+oak", "shelf_pct": 1.2, "growth_pct": 24.0,
+                        "searches": 9_000}],
+            "bounds": {"x_max": 5.0, "x_mid": 1.0, "y_min": -25.0, "y_max": 25.0},
+            "scale": {"max_searches": 9_000},
+            "quadrants": ["a", "b", "c", "d"]}}
+        panels.drop_stale_combos(stale)
+        self.assertEqual(stale["element_combos"]["points"], [])
+        self.assertIsNone(stale["element_combos"]["bounds"])
+
+    def test_a_current_payload_survives_the_same_check(self) -> None:
+        fresh = {"element_combos": self.matrix()}
+        panels.drop_stale_combos(fresh)
+        self.assertEqual(fresh["element_combos"]["points"], self.matrix()["points"])
 
 
 class GrowthWindowTests(RenderTestCase):

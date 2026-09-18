@@ -555,12 +555,23 @@ def combinations(products: Sequence[Mapping[str, Any]],
             continue
         signature = tuple(best[k] for k in KIND_ORDER if k in best)
         bucket = specs.setdefault(signature, {
-            "asins": 0, "revenue": 0.0, "_prices": []})
+            "asins": 0, "revenue": 0.0, "_prices": [], "_ratings": [],
+            "_reviews": []})
         bucket["asins"] += 1
-        bucket["revenue"] += _num(product.get("revenue")) or 0.0
+        revenue = _num(product.get("revenue")) or 0.0
+        bucket["revenue"] += revenue
         price = _num(product.get("price"))
         if price is not None:
             bucket["_prices"].append(price)
+        # Weighted by revenue: the rating a shopper meets is the one carried by
+        # the listings that actually sell, not the average of every listing that
+        # happens to name the spec.
+        rating = _num(product.get("rating"))
+        if rating is not None and rating > 0:
+            bucket["_ratings"].append((rating, revenue))
+        reviews = _num(product.get("ratings"))
+        if reviews is not None and reviews >= 0:
+            bucket["_reviews"].append(reviews)
 
     kept = {sig: agg for sig, agg in specs.items()
             if agg["asins"] >= MIN_COMBO_ASINS}
@@ -570,6 +581,7 @@ def combinations(products: Sequence[Mapping[str, Any]],
     for signature, agg in kept.items():
         want = demand.get(signature) or {}
         prices = agg["_prices"]
+        rating, rated_asins = _weighted_rating(agg["_ratings"])
         shown = signature[:MAX_COMBO_ATTRS]
         out.append({
             "key": "+".join(signature),
@@ -585,6 +597,13 @@ def combinations(products: Sequence[Mapping[str, Any]],
             "revenue_share_pct": (round(agg["revenue"] / total_revenue * 100.0, 1)
                                   if total_revenue > 0 else 0.0),
             "avg_price": round(sum(prices) / len(prices), 2) if prices else None,
+            # How well the market does this spec, and what it costs to be
+            # believed in it. Both come off the same listing rows the shelf
+            # share does, so they are readable for every spec on the chart
+            # rather than for the handful that a search phrase happens to name.
+            "rating": rating,
+            "rated_asins": rated_asins,
+            "reviews": _median_int(agg["_reviews"]),
             "shelf_rated": True,
             "searches": int(want.get("searches") or 0),
             "keyword_count": int(want.get("keyword_count") or 0),
@@ -595,6 +614,32 @@ def combinations(products: Sequence[Mapping[str, Any]],
         })
     out.sort(key=lambda c: (c["revenue_share_pct"], c["asins"]), reverse=True)
     return out[:MAX_COMBOS]
+
+
+def _weighted_rating(rows: Sequence[tuple[float, float]]) -> tuple[float | None, int]:
+    """Revenue-weighted star rating for a spec, and how many listings carried one.
+
+    Falls back to the plain mean when none of the rated listings has a revenue
+    estimate: a rating observed on every listing is still worth stating, and
+    dropping it would hand the chart back the blank axis it just got rid of.
+    """
+    if not rows:
+        return None, 0
+    weight = sum(w for _, w in rows)
+    if weight > 0:
+        return round(sum(r * w for r, w in rows) / weight, 2), len(rows)
+    return round(sum(r for r, _ in rows) / len(rows), 2), len(rows)
+
+
+def _median_int(values: Sequence[float]) -> int | None:
+    """Median review count — the entry bar, in the unit a listing reports it."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    value = (ordered[mid] if len(ordered) % 2
+             else (ordered[mid - 1] + ordered[mid]) / 2)
+    return int(round(value))
 
 
 def _combo_demand(specs: Mapping[tuple[str, ...], Any],
