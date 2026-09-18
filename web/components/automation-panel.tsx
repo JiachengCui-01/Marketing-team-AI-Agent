@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { ChartLineUp, Compass, Newspaper, Robot } from "@phosphor-icons/react";
 import { NewsPanel } from "@/components/news-panel";
@@ -20,11 +20,21 @@ type Drill = { nodeKey: string; label: string } | null;
  * The `drill` state is the whole 全盘 → 品类 path: the discovery board hands a node
  * up, this shell switches tabs, and the deep dive opens on it. Lifting one value
  * here is cheaper than a router or a shared store for a two-surface hop.
+ *
+ * A tab is mounted on first visit and then kept mounted, hidden. Switching used
+ * to unmount the panel, so the return leg of that hop threw away everything the
+ * reader had built up on the discovery board — scroll position, the 月度/当下
+ * switch, the report itself — and re-fetched it, dropping them back at the top
+ * of a long report to scroll for the row they had just clicked.
  */
 export function AutomationPanel({ onBack }: { onBack: () => void }) {
   const { t } = useI18n();
   const [tab, setTab] = useState<Tab>("news");
   const [drill, setDrill] = useState<Drill>(null);
+  // Which tabs exist in the DOM. Written during render on purpose: the tab being
+  // rendered is by definition visited, and nothing re-renders off this.
+  const mounted = useRef<Set<Tab>>(new Set<Tab>([tab]));
+  mounted.current.add(tab);
 
   const tabs: { id: Tab; label: string; icon: typeof Newspaper; tone: string }[] = [
     { id: "news", label: t.automationTabNews, icon: Newspaper, tone: "text-feature-news" },
@@ -79,21 +89,37 @@ export function AutomationPanel({ onBack }: { onBack: () => void }) {
         </div>
       </header>
 
-      {/* Keyed so switching tabs replays the same enter animation both ways. */}
-      <div key={tab} className="flex min-h-0 flex-1 animate-automation-switch flex-col">
-        {tab === "news" ? (
-          <NewsPanel />
-        ) : tab === "discovery" ? (
-          <MarketOverviewPanel
-            onDrill={(node) => {
-              setDrill(node);
-              setTab("category");
-            }}
-          />
-        ) : (
-          <MarketCategoryPanel initialNode={drill} />
-        )}
-      </div>
+      {/* One wrapper per tab, all of them alive once visited. `display: none`
+          keeps the scroll offsets of what is inside, and replays the enter
+          animation when the wrapper comes back — which is what the `key` used
+          to buy, minus the remount. */}
+      {tabs.map(({ id }) =>
+        mounted.current.has(id) ? (
+          <div
+            key={id}
+            className={
+              tab === id
+                ? "flex min-h-0 flex-1 animate-automation-switch flex-col"
+                : "hidden"
+            }
+            role="tabpanel"
+            aria-hidden={tab !== id}
+          >
+            {id === "news" ? (
+              <NewsPanel />
+            ) : id === "discovery" ? (
+              <MarketOverviewPanel
+                onDrill={(node) => {
+                  setDrill(node);
+                  setTab("category");
+                }}
+              />
+            ) : (
+              <MarketCategoryPanel initialNode={drill} />
+            )}
+          </div>
+        ) : null,
+      )}
     </div>
   );
 }

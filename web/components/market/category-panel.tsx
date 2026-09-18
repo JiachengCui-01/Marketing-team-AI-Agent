@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowsClockwise, Database, FileText, MagnifyingGlass } from "@phosphor-icons/react";
 
 import {
@@ -73,10 +73,16 @@ export function MarketCategoryPanel({
   const [busy, setBusy] = useState<"" | "render" | "collect" | "prd">("");
   const [error, setError] = useState<string | null>(null);
   const [prd, setPrd] = useState<MarketPrd | null>(null);
+  const scroller = useRef<HTMLDivElement>(null);
 
+  // On the object, not the key: the shell hands over a fresh object per click,
+  // so drilling into the category already on screen re-opens it at the top
+  // instead of leaving the reader wherever they had scrolled to.
   useEffect(() => {
-    if (initialNode?.nodeKey) setNode(initialNode.nodeKey);
-  }, [initialNode?.nodeKey]);
+    if (!initialNode?.nodeKey) return;
+    setNode(initialNode.nodeKey);
+    if (scroller.current) scroller.current.scrollTop = 0;
+  }, [initialNode]);
 
   const boot = useCallback(async () => {
     setLoading(true);
@@ -113,6 +119,9 @@ export function MarketCategoryPanel({
   useEffect(() => {
     void loadReport(node);
     setPrd(null);
+    // A different category is a different report; the old scroll offset means
+    // nothing in it. This panel now stays mounted, so nothing else resets it.
+    if (scroller.current) scroller.current.scrollTop = 0;
   }, [loadReport, node]);
 
   async function refresh(collect: boolean) {
@@ -182,7 +191,7 @@ export function MarketCategoryPanel({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {error ? <p className="mb-3 text-sm text-danger">{error}</p> : null}
         {node && half === "current" ? (
           <CurrentPanel current={current} showNode={false} />
