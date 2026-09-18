@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ArrowsClockwise, Database, FileText, MagnifyingGlass } from "@phosphor-icons/react";
 
 import {
@@ -45,6 +45,7 @@ import {
   SplitTabs,
   VerdictChip,
   useScoreLabels,
+  useScrollMemory,
 } from "@/components/market/shared";
 import { PrdView } from "@/components/market/prd-view";
 
@@ -58,8 +59,12 @@ import { PrdView } from "@/components/market/prd-view";
  */
 export function MarketCategoryPanel({
   initialNode,
+  active = true,
 }: {
   initialNode?: { nodeKey: string; label: string } | null;
+  /** False while the shell is showing another tab: a hidden container must not
+   *  have its remembered offset overwritten. */
+  active?: boolean;
 }) {
   const { t, locale } = useI18n();
   const labels = useScoreLabels();
@@ -73,7 +78,9 @@ export function MarketCategoryPanel({
   const [busy, setBusy] = useState<"" | "render" | "collect" | "prd">("");
   const [error, setError] = useState<string | null>(null);
   const [prd, setPrd] = useState<MarketPrd | null>(null);
-  const scroller = useRef<HTMLDivElement>(null);
+  // One offset per category per period: 月度 and 当下 are different bodies of
+  // different heights, and each is worth returning to where it was left.
+  const scroll = useScrollMemory({ key: `${node}|${half}`, active, content: report });
 
   // On the object, not the key: the shell hands over a fresh object per click,
   // so drilling into the category already on screen re-opens it at the top
@@ -81,8 +88,8 @@ export function MarketCategoryPanel({
   useEffect(() => {
     if (!initialNode?.nodeKey) return;
     setNode(initialNode.nodeKey);
-    if (scroller.current) scroller.current.scrollTop = 0;
-  }, [initialNode]);
+    scroll.forget(initialNode.nodeKey);
+  }, [initialNode, scroll]);
 
   const boot = useCallback(async () => {
     setLoading(true);
@@ -119,9 +126,6 @@ export function MarketCategoryPanel({
   useEffect(() => {
     void loadReport(node);
     setPrd(null);
-    // A different category is a different report; the old scroll offset means
-    // nothing in it. This panel now stays mounted, so nothing else resets it.
-    if (scroller.current) scroller.current.scrollTop = 0;
   }, [loadReport, node]);
 
   async function refresh(collect: boolean) {
@@ -191,7 +195,8 @@ export function MarketCategoryPanel({
         </div>
       </div>
 
-      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <div ref={scroll.ref} onScroll={scroll.onScroll}
+           className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {error ? <p className="mb-3 text-sm text-danger">{error}</p> : null}
         {node && half === "current" ? (
           <CurrentPanel current={current} showNode={false} />

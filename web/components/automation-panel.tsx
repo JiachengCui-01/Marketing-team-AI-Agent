@@ -109,13 +109,14 @@ export function AutomationPanel({ onBack }: { onBack: () => void }) {
               <NewsPanel />
             ) : id === "discovery" ? (
               <MarketOverviewPanel
+                active={tab === id}
                 onDrill={(node) => {
                   setDrill(node);
                   setTab("category");
                 }}
               />
             ) : (
-              <MarketCategoryPanel initialNode={drill} />
+              <MarketCategoryPanel initialNode={drill} active={tab === id} />
             )}
           </div>
         ) : null,

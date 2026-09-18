@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowUpRight, CheckCircle, Eye, Info, ShieldWarning, WarningCircle }
   from "@phosphor-icons/react";
 
@@ -19,6 +19,58 @@ import { useI18n } from "@/lib/i18n";
 import { Modal } from "@/components/modal";
 import { fmtMoney } from "@/components/market/charts";
 import { CitationMarkdown } from "@/components/citation-markdown";
+
+/** Remembers where a long report was left, per view, and puts it back.
+ *
+ * These reports are thousands of pixels tall and every way out of one used to
+ * land the reader back at the top: switching tabs, flipping 月度/当下, a
+ * re-render that briefly shortens the body so the browser clamps the offset to
+ * zero. Scrolling for the row you just clicked is not navigation.
+ *
+ * `key` names the view whose offset is being tracked (a category, a period);
+ * `active` is false while the panel is hidden, so a hidden container's zero
+ * never overwrites a real offset; `content` is whatever object identifies the
+ * body currently rendered — the offset is restored again after it changes,
+ * which is what survives a reload that swaps the whole body out.
+ */
+export function useScrollMemory({
+  key,
+  active = true,
+  content,
+}: {
+  key: string;
+  active?: boolean;
+  content?: unknown;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const offsets = useRef(new Map<string, number>());
+  const live = useRef(key);
+
+  const onScroll = useCallback(() => {
+    if (!ref.current) return;
+    offsets.current.set(live.current, ref.current.scrollTop);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!active) return;
+    live.current = key;
+    const el = ref.current;
+    if (!el) return;
+    const want = offsets.current.get(key) ?? 0;
+    if (el.scrollTop !== want) el.scrollTop = want;
+  }, [key, active, content]);
+
+  /** Forget every view under a prefix — a category opened fresh from the board
+   *  should start at the top, not wherever it was read down to last time. */
+  const forget = useCallback((prefix: string) => {
+    for (const k of Array.from(offsets.current.keys())) {
+      if (k === prefix || k.startsWith(`${prefix}|`)) offsets.current.delete(k);
+    }
+    if (ref.current) ref.current.scrollTop = 0;
+  }, []);
+
+  return { ref, onScroll, forget };
+}
 
 /** True when a section has nothing to show: no rows, no values, all nulls. */
 function isEmpty(data: unknown): boolean {

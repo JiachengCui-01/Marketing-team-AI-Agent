@@ -46,6 +46,7 @@ import {
   SplitTabs,
   VerdictChip,
   useScoreLabels,
+  useScrollMemory,
 } from "@/components/market/shared";
 
 /** 全盘发现 — the furniture department, ranked.
@@ -61,8 +62,11 @@ import {
  */
 export function MarketOverviewPanel({
   onDrill,
+  active = true,
 }: {
   onDrill: (node: { nodeKey: string; label: string }) => void;
+  /** False while the shell is showing another tab. */
+  active?: boolean;
 }) {
   const { t, locale } = useI18n();
   const labels = useScoreLabels();
@@ -73,6 +77,7 @@ export function MarketOverviewPanel({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<"" | "render" | "collect">("");
   const [error, setError] = useState<string | null>(null);
+  const scroll = useScrollMemory({ key: half, active, content: report });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -138,7 +143,8 @@ export function MarketOverviewPanel({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <div ref={scroll.ref} onScroll={scroll.onScroll}
+           className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {error ? <p className="mb-3 text-sm text-danger">{error}</p> : null}
         {meta && !meta.available ? (
           <p className="mb-3 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs">
