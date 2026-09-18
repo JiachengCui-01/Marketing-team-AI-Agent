@@ -854,6 +854,8 @@ export function Quadrant({
   quadrants,
   onPick,
   labelTop = 4,
+  width = 1000,
+  height = 420,
 }: {
   points: { node_key: string; label: string; competition: number; growth_pct: number | null;
             revenue_est: number | null; return_risk: number }[];
@@ -864,10 +866,11 @@ export function Quadrant({
   quadrants: [string, string, string, string];
   onPick?: (nodeKey: string) => void;
   labelTop?: number;
+  /** Canvas in user units; the svg scales to the width of the row it sits in. */
+  width?: number;
+  height?: number;
 }) {
-  const width = 420;
-  const height = 270;
-  const pad = 34;
+  const pad = 40;
   const usable = points.filter((p) => p.growth_pct !== null);
   if (!usable.length) return null;
   const growths = usable.map((p) => p.growth_pct as number);
@@ -896,7 +899,7 @@ export function Quadrant({
   }
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full" style={{ height: 270 }}
+    <svg viewBox={`0 0 ${width} ${height}`} className="h-auto w-full"
          role="img"
          aria-label={usable.map((p) =>
            `${p.label}: ${xLabel} ${p.competition.toFixed(0)}, ${yLabel} ${(p.growth_pct as number).toFixed(1)}%`).join("; ")}>
@@ -935,7 +938,7 @@ export function Quadrant({
       {[...usable]
         .sort((a, b) => (b.revenue_est ?? 0) - (a.revenue_est ?? 0))
         .map((point) => {
-        const r = 5 + Math.sqrt((point.revenue_est ?? 0) / maxRevenue) * 9;
+        const r = 6 + Math.sqrt((point.revenue_est ?? 0) / maxRevenue) * 12;
         const cx = px(point.competition);
         const cy = py(point.growth_pct as number);
         return (
@@ -1104,10 +1107,16 @@ function squarify(items: TreeItem[], width: number, height: number): Tile[] {
 export function Treemap({
   items,
   onPick,
+  width = 1000,
+  height = 320,
   labels,
 }: {
   items: TreeItem[];
   onPick?: (nodeKey: string) => void;
+  /** Canvas in user units. The aspect ratio is what decides the rendered
+   *  height — the svg scales to the width it is given. */
+  width?: number;
+  height?: number;
   labels: {
     falling: string;
     rising: string;
@@ -1126,8 +1135,6 @@ export function Treemap({
   // `preserveAspectRatio="none"` scales x and y by different factors, which
   // stretches the type — the labels came out twice as wide as they should be
   // and ran off their tiles.
-  const width = 680;
-  const height = 210;
   const tiles = squarify(rows, width, height);
 
   const state = (item: TreeItem) =>
@@ -1141,7 +1148,10 @@ export function Treemap({
 
   return (
     <div>
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full" style={{ height }}
+      {/* Height follows the width the row gives it. A fixed pixel height would
+          letterbox the tiles into a narrow block in the middle of a full-width
+          row and waste the space that makes the small tiles legible. */}
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-auto w-full"
            preserveAspectRatio="xMidYMid meet" role="img"
            aria-label={rows
              .map((r) => `${r.label} ${fmtMoney(r.value)}, ${((r.value / total) * 100).toFixed(1)}%`

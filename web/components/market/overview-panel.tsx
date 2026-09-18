@@ -227,30 +227,32 @@ export function MarketOverviewPanel({
 
             <Direction dashboard={dashboard} />
 
-            <div className="grid gap-4 lg:grid-cols-2 empty:hidden">
-              <Section title={t.gmTreemap} hint={t.gmTreemapHint} data={dashboard?.treemap}>
-                <Treemap items={dashboard?.treemap ?? []} onPick={pick}
-                         labels={{ falling: t.gmFalling, rising: t.gmRising,
-                                   unknown: t.gmNoTrend, unknownHint: t.gmNoTrendHint,
-                                   window: t.gmTrendWindow }} />
-              </Section>
-              <Section title={t.gmTrend}
-                       data={[(dashboard?.trend ?? []).length > 1 ? dashboard?.trend : null,
-                              dashboard?.movers?.rising, dashboard?.movers?.declining]}>
-                <Block label={t.gmTrend}
-                       data={(dashboard?.trend ?? []).length > 1 ? dashboard?.trend : null}>
-                  <Sparkline points={(dashboard?.trend ?? []).map((p) => ({
-                    period: p.period, value: p.value,
-                  }))} height={96} valueLabel={fmtMoney} />
-                </Block>
-                <div className="mt-3">
-                  <Movers dashboard={dashboard} onDrill={onDrill} inline />
-                </div>
-              </Section>
-            </div>
+            {/* One chart per row. Side by side, the treemap's smaller tiles lost
+                their labels and the trend line was too short to read a shape
+                off — half a column is not enough width for either. */}
+            <Section title={t.gmTreemap} hint={t.gmTreemapHint} data={dashboard?.treemap}>
+              <Treemap items={dashboard?.treemap ?? []} onPick={pick}
+                       labels={{ falling: t.gmFalling, rising: t.gmRising,
+                                 unknown: t.gmNoTrend, unknownHint: t.gmNoTrendHint,
+                                 window: t.gmTrendWindow }} />
+            </Section>
+            <Section title={t.gmTrend}
+                     data={[(dashboard?.trend ?? []).length > 1 ? dashboard?.trend : null,
+                            dashboard?.movers?.rising, dashboard?.movers?.declining]}>
+              <Block label={t.gmTrend}
+                     data={(dashboard?.trend ?? []).length > 1 ? dashboard?.trend : null}>
+                <Sparkline points={(dashboard?.trend ?? []).map((p) => ({
+                  period: p.period, value: p.value,
+                }))} height={200} valueLabel={fmtMoney} />
+              </Block>
+              <div className="mt-3">
+                <Movers dashboard={dashboard} onDrill={onDrill} inline />
+              </div>
+            </Section>
 
             <Section title={t.gmMap} data={(dashboard?.map ?? []).filter((p) => p.growth_pct !== null)}>
               <Quadrant points={dashboard?.map ?? []} xLabel={t.gmMapX} yLabel={t.gmMapY}
+                        labelTop={8}
                         quadrants={[t.gmQuadEnter, t.gmQuadCrowdedUp,
                                     t.gmQuadCrowdedDown, t.gmQuadOpenDown]}
                         onPick={pick} />
