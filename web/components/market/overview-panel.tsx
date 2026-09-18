@@ -667,12 +667,16 @@ function BoardRow({
           <BoardMetrics row={row} />
           <BoardRead lines={row.read} />
         </div>
-        <div className="w-36 shrink-0 text-right">
+        {/* Wider than it was: the card now carries every factor rather than
+            three of them, and a truncated factor name is not a breakdown. */}
+        <div className="w-52 shrink-0 text-right">
           <div className="text-lg font-semibold" style={{ fontVariantNumeric: "tabular-nums" }}>
             {row.category_score}
           </div>
           <ScoreBar score={row.category_score} breakdown={row.score_breakdown}
-                    weights={weights} labels={labels} />
+                    weights={weights} labels={labels}
+                    missing={row.score_missing}
+                    totalLabel={t.scTotal} unmeasuredLabel={t.scUnmeasured} />
           <ConfidenceNote value={row.score_confidence} />
         </div>
       </div>

@@ -230,7 +230,9 @@ export function MarketCategoryPanel({
               <div className="mb-2">
                 <ScoreBar score={dashboard?.header?.category_score ?? 0}
                           breakdown={dashboard?.header?.score_breakdown ?? {}}
-                          weights={weights} labels={labels} />
+                          weights={weights} labels={labels}
+                          missing={dashboard?.header?.score_missing}
+                          totalLabel={t.scTotal} unmeasuredLabel={t.scUnmeasured} />
                 <div className="mt-1 flex flex-wrap items-center gap-3">
                   <ConfidenceNote value={dashboard?.header?.score_confidence} />
                   <span className="text-[10px] text-fg-subtle">
@@ -691,7 +693,9 @@ function OpportunityCard({
             {opportunity.product_score}
           </div>
           <ScoreBar score={opportunity.product_score} breakdown={opportunity.score_breakdown}
-                    weights={weights} labels={labels} />
+                    weights={weights} labels={labels}
+                    missing={opportunity.score_missing}
+                    totalLabel={t.scTotal} unmeasuredLabel={t.scUnmeasured} />
           <ConfidenceNote value={opportunity.score_confidence} />
         </div>
       </div>

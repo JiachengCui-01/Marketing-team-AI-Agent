@@ -114,17 +114,20 @@ export function Sparkline({
   );
 }
 
-/** The score, and the two or three things that actually made it.
+/** The score, and every factor that made it — the whole sum, not a highlight.
  *
  * This was a strip of anonymous segments whose only labels were `title`
- * tooltips — so the number the whole board ranks on could not be explained
- * without hovering, one factor at a time. A tooltip may enhance a value; it may
- * never be the only way to read one.
+ * tooltips, then a shortlist: the top two earners and the single biggest
+ * shortfall. The shortlist was readable and it could not be checked. Two cards
+ * showing different factor names read as two different models, the four or five
+ * factors it left out were invisible whatever they scored, and nothing on the
+ * card added up to the number the board ranks on.
  *
- * What a reader needs from a score is not all seven factors: it is *why this
- * one is higher than that one*. So the bar names its biggest contributors and
- * its biggest shortfall by name, with the points each is worth, and leaves the
- * full breakdown to the table view.
+ * So every factor is listed, in the model's own order so two cards line up row
+ * for row, each with what it earned out of what it is worth, and the total is
+ * printed underneath. A factor that was never measured says so rather than
+ * showing a 0 that looks like a reading — it is scored as zero, which is a
+ * different sentence from "the market scored zero here".
  */
 export function ScoreBar({
   score,
@@ -133,7 +136,9 @@ export function ScoreBar({
   riskKey = "return_risk",
   labels = {},
   compact = false,
-  topN = 2,
+  missing = [],
+  totalLabel,
+  unmeasuredLabel,
 }: {
   score: number;
   breakdown: Record<string, number>;
@@ -141,21 +146,24 @@ export function ScoreBar({
   riskKey?: string;
   labels?: Record<string, string>;
   compact?: boolean;
-  topN?: number;
+  /** Factor keys with no reading this period. They score zero and say so. */
+  missing?: string[];
+  /** e.g. 总分 / Total — names the line the rows add up to. */
+  totalLabel?: string;
+  /** e.g. 未测到 / not measured. */
+  unmeasuredLabel?: string;
 }) {
   const risk = Math.abs(breakdown[riskKey] ?? 0);
+  const gaps = new Set(missing);
+  // Weight order, which is the model's own order: two cards then line up row for
+  // row and the eye can compare them without reading the labels again.
   const factors = Object.entries(weights).map(([key, weight]) => ({
     key,
     label: labels[key] ?? key,
     earned: breakdown[key] ?? 0,
     weight,
-    // Points forgone is what separates two scores; a factor worth 20 that
-    // earned 4 costs more than one worth 8 that earned 0.
-    lost: weight - (breakdown[key] ?? 0),
+    unmeasured: gaps.has(key),
   }));
-  const best = [...factors].sort((a, b) => b.earned - a.earned).slice(0, topN)
-    .filter((f) => f.earned > 0);
-  const worst = [...factors].sort((a, b) => b.lost - a.lost)[0];
 
   return (
     <div>
@@ -166,36 +174,57 @@ export function ScoreBar({
         <div className="bi-score-fill" style={{ width: `${Math.max(0, Math.min(100, score))}%` }} />
       </div>
       {compact ? null : (
-        <ul className="mt-1 space-y-0.5 text-[10px] leading-tight">
-          {best.map((factor) => (
-            <li key={factor.key} className="flex items-baseline gap-1 text-fg-muted">
-              <i className="bi-swatch shrink-0" />
-              <span className="truncate">{factor.label}</span>
-              <span className="ml-auto shrink-0 tabular-nums text-fg">
-                +{factor.earned.toFixed(0)}
+        <ul className="mt-1 space-y-[3px] text-[10px] leading-tight">
+          {factors.map((factor) => (
+            <li key={factor.key} className="flex items-baseline gap-1.5">
+              <span className={`w-16 shrink-0 truncate text-left ${
+                factor.unmeasured ? "text-fg-subtle" : "text-fg-muted"}`}
+                    title={factor.label}>{factor.label}</span>
+              {/* The share of its own weight this factor earned. A number
+                  already says it; the rail is what makes eleven of them
+                  scannable without being read one at a time. */}
+              <span className="bi-factor-track">
+                <span className="bi-factor-fill"
+                      style={{ width: `${Math.max(0, Math.min(100,
+                        (factor.earned / (factor.weight || 1)) * 100))}%` }} />
+              </span>
+              <span className={`ml-auto shrink-0 tabular-nums ${
+                factor.unmeasured ? "text-fg-subtle" : "text-fg"}`}>
+                {factor.unmeasured
+                  ? `${unmeasuredLabel ?? "—"} 0/${factor.weight}`
+                  : `${trim(factor.earned)}/${factor.weight}`}
               </span>
             </li>
           ))}
-          {worst && worst.lost >= 3 ? (
-            <li className="flex items-baseline gap-1 text-fg-subtle">
-              <i className="bi-swatch bi-swatch-empty shrink-0" />
-              <span className="truncate">{worst.label}</span>
-              <span className="ml-auto shrink-0 tabular-nums">
-                {worst.earned.toFixed(0)}/{worst.weight}
-              </span>
-            </li>
-          ) : null}
-          {risk > 0 ? (
-            <li className="flex items-baseline gap-1 text-danger">
-              <i className="bi-swatch bi-swatch-risk shrink-0" />
-              <span className="truncate">{labels[riskKey] ?? riskKey}</span>
-              <span className="ml-auto shrink-0 tabular-nums">−{risk.toFixed(0)}</span>
-            </li>
-          ) : null}
+          <li className="flex items-baseline gap-1.5 text-danger">
+            <span className="w-16 shrink-0 truncate text-left"
+                  title={labels[riskKey] ?? riskKey}>{labels[riskKey] ?? riskKey}</span>
+            <span className="bi-factor-track">
+              <span className="bi-factor-fill bi-factor-fill-risk"
+                    style={{ width: `${Math.min(100, (risk / 15) * 100)}%` }} />
+            </span>
+            <span className="ml-auto shrink-0 tabular-nums">−{trim(risk)}</span>
+          </li>
+          {/* The line the rows add up to. Without it the breakdown is a set of
+              numbers beside a score rather than the score taken apart. */}
+          <li className="mt-1 flex items-baseline gap-1.5 border-t border-border
+                         pt-1 font-medium">
+            <span className="w-16 shrink-0 truncate text-left">
+              {totalLabel ?? "="}
+            </span>
+            <span className="ml-auto shrink-0 tabular-nums">{score}</span>
+          </li>
         </ul>
       )}
     </div>
   );
+}
+
+/** One decimal, and none when it is a whole number: `18.4` and `20`, never
+ *  `20.0`. The factors are rounded to a tenth server-side, so printing them as
+ *  integers is what stopped the column from adding up to the score. */
+function trim(value: number): string {
+  return Number.isInteger(value) ? `${value}` : value.toFixed(1);
 }
 
 /** Where the listings are against where the money is.

@@ -810,6 +810,11 @@ def build_overview(marketplace: str, period: str, language: str,
             "category_score": score["score"],
             "score_breakdown": score["breakdown"],
             "score_confidence": score["confidence"],
+            # Which factors had no reading. A factor scored zero because the
+            # market is bad at it and one scored zero because nobody measured it
+            # are the same number and different sentences, and the card now
+            # shows every factor, so it has to be able to tell them apart.
+            "score_missing": score["missing"],
             "revenue_est": snap.get("total_revenue"),
             # The wider figure: every ASIN row we hold for this node, summed.
             "covered_revenue": (totals.get(path) or {}).get("revenue"),
@@ -1271,6 +1276,7 @@ def build_category(marketplace: str, node_id_path: str, period: str,
             "product_score": product_score["score"],
             "score_breakdown": product_score["breakdown"],
             "score_confidence": product_score["confidence"],
+            "score_missing": product_score["missing"],
             "price": product.get("price"),
             "revenue_est": product.get("revenue"),
             "ratings": product.get("ratings"),
@@ -1291,6 +1297,7 @@ def build_category(marketplace: str, node_id_path: str, period: str,
             "category_score": score["score"],
             "score_breakdown": score["breakdown"],
             "score_confidence": score["confidence"],
+            "score_missing": score["missing"],
             "completeness": completeness,
             "missing": missing,
             "kpis": filled(_category_kpis(snap, zh)),

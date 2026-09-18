@@ -132,6 +132,8 @@ export const marketMessages = {
 
     scScore: "机会分",
     scConfidence: "证据覆盖",
+    scTotal: "总分",
+    scUnmeasured: "未测到",
     scCategoryScore: "类目机会分",
     scProductScore: "产品机会分",
     scDemandScale: "需求规模",
@@ -453,6 +455,8 @@ export const marketMessages = {
 
     scScore: "Opportunity score",
     scConfidence: "Evidence coverage",
+    scTotal: "Total",
+    scUnmeasured: "not measured",
     scCategoryScore: "Category score",
     scProductScore: "Product score",
     scDemandScale: "Demand scale",

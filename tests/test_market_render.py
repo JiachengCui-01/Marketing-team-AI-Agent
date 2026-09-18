@@ -149,6 +149,30 @@ class OverviewTests(RenderTestCase):
         self.assertEqual(board, sorted(board, key=lambda r: r["category_score"],
                                        reverse=True))
 
+    def test_the_card_can_tell_a_zero_from_an_unmeasured_factor(self) -> None:
+        """The card lists every factor, so it has to say which zeros are
+        readings. Both are 0 points and they are different sentences."""
+        client = FakeClient({"publish_market_overview": self.OVERVIEW})
+        record = render.render_overview(client=client, period=PERIOD)
+        row = next(r for r in record["dashboard"]["board"]
+                   if r["node_key"] == BUFFETS)
+        self.assertIn("score_missing", row)
+        for factor in row["score_missing"]:
+            with self.subTest(factor):
+                self.assertEqual(row["score_breakdown"][factor], 0.0)
+
+    def test_the_factors_add_up_to_the_score_on_the_card(self) -> None:
+        """The breakdown is the score taken apart, not numbers beside it."""
+        client = FakeClient({"publish_market_overview": self.OVERVIEW})
+        record = render.render_overview(client=client, period=PERIOD)
+        for row in record["dashboard"]["board"]:
+            with self.subTest(row["node_key"]):
+                total = sum(v for k, v in row["score_breakdown"].items()
+                            if k != scoring.RISK_KEY)
+                total += row["score_breakdown"][scoring.RISK_KEY]
+                self.assertAlmostEqual(row["category_score"], max(0.0, total),
+                                       delta=0.5)
+
     def test_a_verdict_for_an_invented_node_is_dropped(self) -> None:
         client = FakeClient({"publish_market_overview": self.OVERVIEW})
         record = render.render_overview(client=client, period=PERIOD)

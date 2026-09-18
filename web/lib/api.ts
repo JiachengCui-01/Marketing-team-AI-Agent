@@ -1827,7 +1827,10 @@ export type MarketBoardRow = {
   return_ratio_avg_pct: number | null;
   return_risk: number;
   completeness: number;
+  /** Collection steps that did not run this period. */
   missing: string[];
+  /** Score factors with no reading — they count as zero and are labelled. */
+  score_missing?: string[];
   read?: MarketBoardRead[];
 };
 
@@ -1855,6 +1858,8 @@ export type MarketOpportunity = {
   product_score: number;
   score_breakdown: Record<string, number>;
   score_confidence: number;
+  /** Score factors with no reading — they count as zero and are labelled. */
+  score_missing?: string[];
   price: number | null;
   revenue_est: number | null;
   rating: number | null;
@@ -2023,6 +2028,8 @@ export type MarketDashboard = {
     category_score: number;
     score_breakdown: Record<string, number>;
     score_confidence: number;
+    /** Score factors with no reading — they count as zero and are labelled. */
+    score_missing?: string[];
     completeness: number;
     missing: string[];
     kpis: MarketKpi[];
