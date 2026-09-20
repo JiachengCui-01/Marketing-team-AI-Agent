@@ -47,14 +47,21 @@ from .scoring import _num
 # the surface is; "black" is what it is finished in. Folding all three into one
 # axis is what made the old chart unreadable: a size, a material and a colour
 # sat side by side with nothing to say which comparison was meaningful.
-MATERIAL, FORM, FEATURE, SIZE, COLOR, CRAFT, STYLE, ROOM, OTHER = (
-    "material", "form", "feature", "size", "color", "craft", "style", "room",
-    "other")
-KINDS = (MATERIAL, FORM, FEATURE, SIZE, COLOR, CRAFT, STYLE, ROOM, OTHER)
+#
+# `form` and `part` are split for the same reason. "Wavy" and "shelves" both
+# describe the object's construction and only one of them is something a buyer
+# looks at: a silhouette is drawn, a shelf is counted. While they shared a kind,
+# the opportunity quadrant kept recommending "black · shelves" — true, and not a
+# look anybody chose.
+MATERIAL, FORM, PART, FEATURE, SIZE, COLOR, CRAFT, STYLE, ROOM, OTHER = (
+    "material", "form", "part", "feature", "size", "color", "craft", "style",
+    "room", "other")
+KINDS = (MATERIAL, FORM, PART, FEATURE, SIZE, COLOR, CRAFT, STYLE, ROOM, OTHER)
 
 KIND_LABELS: dict[str, tuple[str, str]] = {
     MATERIAL: ("材质", "Material"),
-    FORM: ("形态", "Form"),
+    FORM: ("外形", "Silhouette"),
+    PART: ("部件", "Part"),
     FEATURE: ("功能", "Feature"),
     SIZE: ("尺寸", "Size"),
     COLOR: ("颜色", "Colour"),
@@ -66,7 +73,8 @@ KIND_LABELS: dict[str, tuple[str, str]] = {
 
 # Reading order for the grouped chart: the decisions a designer makes first come
 # first. `other` is last and is the bucket a reader should be able to ignore.
-KIND_ORDER = (CRAFT, MATERIAL, COLOR, SIZE, FORM, FEATURE, STYLE, ROOM, OTHER)
+KIND_ORDER = (CRAFT, MATERIAL, COLOR, SIZE, FORM, PART, FEATURE, STYLE, ROOM,
+              OTHER)
 
 # Bumped whenever the kind vocabulary or the classification rules change. Naming
 # is cached per term and never expires — without a version, every term
@@ -80,7 +88,14 @@ KIND_ORDER = (CRAFT, MATERIAL, COLOR, SIZE, FORM, FEATURE, STYLE, ROOM, OTHER)
 # 4: `other` had become the default rather than the last resort — 123 of ~150
 # terms, with rooms, materials and structural nouns inside it. Every one of
 # those rows is in the wrong column, so the whole vocabulary is re-asked.
-NAMING_VERSION = 4
+# 5: `form` used to mean "shape *and* structure", so shelves, drawers, doors and
+# headboards sat in the same kind as arched, wavy and low profile. The spec the
+# quadrant recommends takes one look per product line, and a structural noun
+# kept winning it — "black · shelves" is a true sentence and not a design
+# decision. `part` now holds the structure and `form` is the silhouette alone,
+# which makes every cached `form` answer a different claim from the one the kind
+# now makes.
+NAMING_VERSION = 5
 
 # Syntax, not domain: a bigram must not be glued across one of these, or
 # "cabinet with storage" becomes the term "with storage".
@@ -465,12 +480,15 @@ above it and satisfy yourself that none of them fits. Almost always one does.
              size, extra wide, compact, narrow. A bare number with a unit is a
              size; the *thing* being counted is not (`3 drawer` is size,
              `drawers` is form).
-  form     — the shape or the structure of the piece, including what parts it is
-             built out of: arched, round, l shaped, corner, sectional, shaped,
-             low profile, drawers, doors, shelves, legs, tiered, nested,
-             floating, wall mounted, freestanding. This is the kind most often
-             lost to `other` — a structural noun describing the object's form is
-             `form`, not `other`.
+  form     — the SILHOUETTE: the outline a buyer sees across the room. arched,
+             round, oval, curved, wavy, scalloped, l shaped, corner, sectional,
+             low profile, slim, chunky. Only the shape itself — the parts the
+             piece is built out of are `part`.
+  part     — a structural component, counted rather than looked at: drawers,
+             doors, shelves, legs, headboard, footboard, base, top, frame,
+             tiered, nested, floating, wall mounted, freestanding. This is the
+             kind most often lost to `other`; a structural noun is `part`, never
+             `other` and never `form`.
   feature  — what it does, a mechanism or an added function: lift top, charging
              station, adjustable shelf, reclining, swivel, extendable, storage,
              cover, cushion

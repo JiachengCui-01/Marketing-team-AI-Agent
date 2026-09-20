@@ -118,10 +118,18 @@ TOOL_OVERVIEW = {
                 # this order — the part of a selection decision that does not
                 # fit in a field, and the part a reader argues with.
                 "narrative": {"type": "string", "description":
-                              "Markdown, 200-350 words, cited inline as "
-                              "[ev_xxxxxxxx](evidence:ev_xxxxxxxx). Read the "
-                              "picks below as one programme rather than "
-                              "restating them one by one: why this set and not "
+                              "Markdown, 250-400 words, cited inline as "
+                              "[ev_xxxxxxxx](evidence:ev_xxxxxxxx). Name every "
+                              "line you are recommending in full the first time "
+                              "it appears — room, shelf, colour and look, in "
+                              "words, e.g. 「卧室 · 床架 · 胡桃色 · 中古风」 — and "
+                              "say why THAT colour and THAT look on THAT shelf: "
+                              "what the market is doing with it, what it costs "
+                              "to build, what would make you drop it. A reader "
+                              "must be able to hand this paragraph to a "
+                              "designer without looking at the cards. Then read "
+                              "the set as one programme rather than restating "
+                              "each card's fields: why this set and not "
                               "the neighbouring lines, what they share that "
                               "makes them cheap to build together (a supplier "
                               "type, a carton, a price band, a finish), which "
@@ -140,10 +148,16 @@ TOOL_OVERVIEW = {
                     "node_key": {"type": "string",
                                  "description": "nodeIdPath from the board."},
                     "spec": {"type": "string", "description":
-                             "<=40 chars. The look, copied word for word from a "
-                             "SPEC OPENINGS row — its colour and its element. "
-                             "Never invent a combination the list does not "
-                             "contain, and never widen one into 'modern styles'."},
+                             "<=40 chars, copied word for word from a PRODUCT "
+                             "LINES row: its colour and its look, both of them "
+                             "when the row has both (黑色 · 木瘤纹). The look is "
+                             "an appearance element — a surface treatment, a "
+                             "named style, a silhouette or a material — never a "
+                             "structural part. Prefer a row that carries a "
+                             "colour and a look over one carrying only one of "
+                             "them. Never invent a combination the list does "
+                             "not contain, and never widen one into 'modern "
+                             "styles'."},
                     "move": {"enum": ["enter", "validate", "watch"]},
                     "price_band": {"type": "string", "description":
                                    "<=40 chars. The band this product has to land "
@@ -375,8 +389,8 @@ TOOL_ELEMENTS = {
                 "term": {"type": "string", "description":
                          "Must be copied exactly from the supplied list."},
                 "kind": {
-                    "enum": ["material", "form", "feature", "size", "color",
-                             "craft", "style", "room", "other"],
+                    "enum": ["material", "form", "part", "feature", "size",
+                             "color", "craft", "style", "room", "other"],
                     "description":
                         "Exactly one, and the narrowest that fits. "
                         "material = what it is made of (solid wood, rattan, "
@@ -387,7 +401,11 @@ TOOL_ELEMENTS = {
                         "color = a colour or finish tone (black, white, walnut, "
                         "sage). size = a dimension or capacity decision "
                         "(oversized, 3 drawer, 70 inch, king). "
-                        "form = overall shape (arched, round, l shaped). "
+                        "form = the SILHOUETTE only, the outline seen across a "
+                        "room (arched, round, curved, wavy, l shaped, low "
+                        "profile). part = a structural component, counted "
+                        "rather than looked at (drawers, doors, shelves, legs, "
+                        "headboard, base) — never `form`. "
                         "feature = what it does (lift top, charging station). "
                         "style = a named look only (japandi, mid century, farmhouse) "
                         "— never use it as a catch-all for craft or colour. "
@@ -906,14 +924,20 @@ def _selection_brief(payload: dict, language: str) -> str:
                 return "crowded+falling"
             return "-"
 
-        # Openings first: the model reads down the list and the rows it should
-        # be proposing from are the ones it meets first.
-        ordered = sorted(points, key=lambda p: (corner(p) != "OPEN+RISING",
-                                                -(p.get("revenue") or 0.0)))
+        # Openings first, and a whole line before a half one: the model reads
+        # down the list, and the rows it should be proposing from — open,
+        # rising, and carrying both a colour and a look — are the ones it meets
+        # first. A cell that names only a colour is a real reading and a poor
+        # brief; it stays on the list, further down.
+        ordered = sorted(points, key=lambda p: (
+            corner(p) != "OPEN+RISING",
+            not (p.get("color") and p.get("look")),
+            -(p.get("revenue") or 0.0)))
         lines = [
             "PRODUCT LINES ON THE SHELF (server-computed from listing titles; "
             "the only combinations you may name — copy the colour and element "
-            "words exactly and never invent one). "
+            "words exactly and never invent one; a row carrying both a colour "
+            "and a look is a brief, a row carrying one of them is half of one). "
             "ease_of_entry = what the three largest brands inside the line have "
             f"NOT taken, 0-100, board median {mid:.0f}. share_shift = percentage "
             "points of its own category's head revenue against "

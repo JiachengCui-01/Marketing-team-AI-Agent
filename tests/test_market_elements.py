@@ -225,10 +225,10 @@ class NamingTests(unittest.TestCase):
 
     def test_a_named_term_gets_its_label_and_kind(self) -> None:
         named = elements.apply_naming(
-            self.TERMS, {"fluted": {"kind": "form", "label_zh": "竖纹",
+            self.TERMS, {"fluted": {"kind": "craft", "label_zh": "竖纹",
                                     "label_en": "Fluted"}}, True)
         self.assertEqual(named[0]["label"], "竖纹")
-        self.assertEqual(named[0]["kind_label"], "形态")
+        self.assertEqual(named[0]["kind_label"], "工艺 · 纹样")
 
     def test_an_unnamed_term_keeps_its_own_words(self) -> None:
         """An unnamed real term is worth more than a named invented one."""
@@ -438,6 +438,29 @@ class CategorySpecTests(unittest.TestCase):
         self.assertEqual([part["label"] for part in spec["n:night|black|"]["spec"]],
                          ["黑色"])
 
+    def test_a_structural_part_is_not_a_look(self) -> None:
+        """"黑色 · 搁板" is a true sentence and not a design decision. While
+        shelves and silhouettes shared the `form` kind, a structural noun kept
+        winning the one look slot and the quadrant recommended cabinets by
+        their shelves."""
+        named = list(self.NAMED) + [
+            {"term": "shelf", "kind": elements.PART, "label": "搁板",
+             "kind_label": "部件", "revenue_share_pct": 30.0}]
+        specs = {s["key"]: s for s in elements.category_specs(
+            self.rows("n:night", "Black Shelf Burl Nightstand", 6), named,
+            self.NODES)}
+        self.assertEqual(list(specs), ["n:night|black|burl"])
+        self.assertNotIn("搁板", str(specs["n:night|black|burl"]["spec"]))
+
+    def test_a_silhouette_is_a_look(self) -> None:
+        """Wavy, arched and low profile are what a buyer sees across a room."""
+        named = list(self.NAMED) + [
+            {"term": "wavy", "kind": elements.FORM, "label": "波浪流线",
+             "kind_label": "外形", "revenue_share_pct": 2.0}]
+        specs = {s["key"]: s for s in elements.category_specs(
+            self.rows("n:night", "Black Wavy Nightstand", 6), named, self.NODES)}
+        self.assertEqual(specs["n:night|black|wavy"]["look"], "波浪流线")
+
     def test_a_surface_treatment_wins_the_one_look_slot(self) -> None:
         """Nearly every title names a material, so taking the material first
         would fill the chart with "glass" and hide every treatment behind it."""
@@ -587,7 +610,7 @@ class NamingVersionGuardTests(unittest.TestCase):
     """
 
     # Bump NAMING_VERSION and then paste the digest this test prints.
-    EXPECTED = "4cba0b099102438e"
+    EXPECTED = "4b005e1a50c57c6e"
 
     def digest(self) -> str:
         material = "\n".join([
