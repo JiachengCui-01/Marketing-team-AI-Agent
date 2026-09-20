@@ -1663,6 +1663,9 @@ export type MarketSelectionPick = {
 
 export type MarketSelection = {
   call?: string;
+  /** The selection read: why this set of lines, in this order. Markdown with
+   *  inline evidence citations, like the thesis. */
+  narrative?: string;
   picks?: MarketSelectionPick[];
   avoid?: { label: string; why: string; evidence_ids?: string[] }[];
 };

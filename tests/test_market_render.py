@@ -1151,6 +1151,9 @@ class SelectionBriefTests(RenderTestCase):
         ],
         "selection": {
             "call": "本期把开发放在餐边柜的黑色木瘤纹上",
+            "narrative": ("两条线共用一张 $200-300 的价格带和同一种贴皮工艺 "
+                          "[ev_price000001](evidence:ev_price000001)，"
+                          "先开餐边柜、床架等它的样本厚起来再说。"),
             "picks": [
                 {"node_key": BUFFETS, "spec": "black · burl", "move": "enter",
                  "price_band": "$200-300", "envelope": "96.4 lb / 38,500 in³",
@@ -1220,6 +1223,13 @@ class SelectionBriefTests(RenderTestCase):
         self.assertEqual(pick["fix"], "门板对缝")
         self.assertEqual(pick["evidence_ids"], ["ev_price000001"])
         self.assertEqual(selection["avoid"][0]["label"], "Chairs · white · glass")
+
+    def test_the_read_comes_through_with_its_citation(self) -> None:
+        """The cards say what each line is; this says why this set, in this
+        order. A selection decision does not fit in eight fields."""
+        narrative = self.render()["selection"]["narrative"]
+        self.assertIn("同一种贴皮工艺", narrative)
+        self.assertIn("evidence:ev_price000001", narrative)
 
     def test_a_pick_for_a_shelf_we_do_not_track_is_dropped(self) -> None:
         """A recommendation about a market nobody read is worse than none."""

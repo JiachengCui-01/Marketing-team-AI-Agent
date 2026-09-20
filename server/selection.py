@@ -184,6 +184,9 @@ def _selection_markdown(dashboard: dict, zh: bool) -> str:
     lines = ["## 本期选品建议" if zh else "## Selection"]
     if selection.get("call"):
         lines.append(str(selection["call"]))
+    # The read before the list, the same order the board renders them in.
+    if selection.get("narrative"):
+        lines.append(str(selection["narrative"]))
     for index, pick in enumerate(picks, 1):
         shelf = labels.get(pick.get("node_key"), pick.get("node_key") or "")
         move = _MOVE_LABELS.get(str(pick.get("move")), ("", ""))[0 if zh else 1]

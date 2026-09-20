@@ -432,7 +432,16 @@ export function SelectionBrief({
   return (
     <Section title={t.gmSelection} hint={t.gmSelectionHint}>
       {selection?.call ? (
-        <p className="mb-2.5 text-sm font-medium leading-relaxed">{selection.call}</p>
+        <p className="mb-2 text-sm font-medium leading-relaxed">{selection.call}</p>
+      ) : null}
+      {/* The read, between the headline and the cards. The cards say what each
+          line is; this says why this set, in this order, and what has to hold
+          for the second one to follow — the part of a selection decision that
+          does not fit in a field, and the part a reader argues with. */}
+      {selection?.narrative ? (
+        <div className="mb-3 text-sm leading-relaxed">
+          <CitationMarkdown content={selection.narrative} />
+        </div>
       ) : null}
       <div className="space-y-2">
         {picks.map((pick, index) => (

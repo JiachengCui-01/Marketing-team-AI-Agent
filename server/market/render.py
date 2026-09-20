@@ -114,6 +114,26 @@ TOOL_OVERVIEW = {
                          "<=70 chars, one line, no markdown. The period's call in "
                          "a sentence a product lead could repeat in a meeting: "
                          "what this month is for. Not a summary of the board."},
+                # The cards say what each line is. This says why this set, in
+                # this order — the part of a selection decision that does not
+                # fit in a field, and the part a reader argues with.
+                "narrative": {"type": "string", "description":
+                              "Markdown, 200-350 words, cited inline as "
+                              "[ev_xxxxxxxx](evidence:ev_xxxxxxxx). Read the "
+                              "picks below as one programme rather than "
+                              "restating them one by one: why this set and not "
+                              "the neighbouring lines, what they share that "
+                              "makes them cheap to build together (a supplier "
+                              "type, a carton, a price band, a finish), which "
+                              "to start first and what has to be true for the "
+                              "second to follow, what it costs to be wrong "
+                              "about each, and which shelf you are deliberately "
+                              "leaving to somebody else this period. Freight, "
+                              "returns and the physical envelope carry the "
+                              "argument; entry cost is at most one sentence. "
+                              "This is the selection read — the department-wide "
+                              "reasoning belongs in `thesis` and must not be "
+                              "repeated here."},
                 "picks": {"type": "array", "maxItems": 5, "description":
                           "Ordered: what to start first, first.",
                           "items": {"type": "object", "properties": {
@@ -158,13 +178,14 @@ TOOL_OVERVIEW = {
                     "why": {"type": "string", "description": "<=90 chars."},
                     "evidence_ids": _EVIDENCE_IDS,
                 }, "required": ["label", "why", "evidence_ids"]}},
-            }, "required": ["call", "picks"]},
+            }, "required": ["call", "narrative", "picks"]},
             "thesis": {"type": "string", "description":
                        "Markdown, <=500 words, written for a product development "
-                       "team. The reasoning the picks rest on, never a second "
-                       "listing of them: the shape of the department, what moved "
-                       "this period, which sub-categories carry design headroom "
-                       "and which do not. Judge on design headroom, return cost "
+                       "team. The department, not the picks: its shape, what "
+                       "moved this period, which sub-categories carry design "
+                       "headroom and which do not. Why a given line was chosen "
+                       "is `selection.narrative`'s job and must not be written "
+                       "twice. Judge on design headroom, return cost "
                        "and freight economics; entry cost (ads, keywords) is at "
                        "most one sentence. Every claim cited. No Data Sources "
                        "section."},
@@ -962,6 +983,7 @@ def _clean_selection(selection: Any, board: Sequence[dict]) -> dict:
         return {}
     return {
         "call": str(selection.get("call") or ""),
+        "narrative": str(selection.get("narrative") or ""),
         "picks": picks,
         "avoid": [row for row in (selection.get("avoid") or []) if isinstance(row, dict)],
     }

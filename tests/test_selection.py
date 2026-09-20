@@ -234,6 +234,7 @@ class GenerationTests(unittest.TestCase):
         market the conclusion was drawn from."""
         self._store_board(dashboard={**self.BOARD, "selection": {
             "call": "本期把开发放在餐边柜的黑色木瘤纹上。",
+            "narrative": "两条线共用一张价格带和同一种贴皮工艺，先开餐边柜。",
             "picks": [{"node_key": BUFFETS, "spec": "黑色 · 木瘤纹", "move": "enter",
                        "price_band": "$200-300", "envelope": "96 lb / 38,500 in³",
                        "fix": "门板对缝", "why_now": "前三品牌只拿走四成",
@@ -242,6 +243,10 @@ class GenerationTests(unittest.TestCase):
                        "evidence_ids": []}]}})
         summary = selection.generate_report(self.config)["summary"]
         self.assertTrue(summary.startswith("## 本期选品建议"), summary[:60])
+        self.assertIn("两条线共用一张价格带", summary)
+        self.assertLess(summary.index("两条线共用一张价格带"),
+                        summary.index("Buffets & Sideboards"),
+                        "the read comes before the list, as it does on the board")
         self.assertIn("**Buffets & Sideboards · 黑色 · 木瘤纹**（立项）", summary)
         self.assertIn("为什么是现在：前三品牌只拿走四成", summary)
         self.assertIn("建议规避", summary)
