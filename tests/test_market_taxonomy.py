@@ -107,6 +107,30 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(taxonomy.short_label(taxonomy.label_for(path)), "Buffets & Sideboards")
         self.assertEqual(taxonomy.label_for("9:9:9"), "9:9:9")  # unknown falls back to the id
 
+    def test_the_area_is_the_room_the_shelf_sits_in(self) -> None:
+        """Read off the path, so a node the monthly walk enrols gets an area
+        without anyone adding it to a table."""
+        for label, area in (
+            ("Home & Kitchen:Furniture:Kitchen & Dining Room Furniture:Buffets & Sideboards",
+             "Kitchen & Dining Room Furniture"),
+            ("Home & Kitchen:Furniture:Living Room Furniture:Tables:Coffee Tables",
+             "Living Room Furniture"),
+            ("Home & Kitchen:Furniture:Bedroom Furniture:Beds, Frames & Bases:Bed Frames",
+             "Bedroom Furniture"),
+            # A department root has no room above it and stands for its own.
+            ("Patio, Lawn & Garden:Patio Furniture & Accessories",
+             "Patio Furniture & Accessories"),
+            ("", ""),
+        ):
+            with self.subTest(label=label):
+                self.assertEqual(taxonomy.area_label(label), area)
+
+    def test_every_tracked_node_has_an_area(self) -> None:
+        """The chart groups by it, and a blank chip is not a room."""
+        for node in taxonomy.TRACKED_NODES:
+            with self.subTest(node=node["node_label_path"]):
+                self.assertTrue(taxonomy.area_label(node["node_label_path"]))
+
 
 class NodeResolutionTests(unittest.TestCase):
     def test_pick_node_prefers_home_furniture_over_office(self) -> None:

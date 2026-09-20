@@ -910,129 +910,459 @@ export function ElementComboChart({
   );
 }
 
-/** Demand growth against ease of entry — and which corner you are in.
+/** One spec on one shelf: the unit the opportunity quadrant is drawn in.
  *
- * A scatter only pays for itself if the reader can name the region a dot sits
- * in. So the two reference lines are labelled with their values, each quadrant
- * is named for the decision it implies, and only the notable points carry a
- * label: past four or five, labels collide and the chart becomes the thing you
- * squint at instead of the thing you read.
+ * A point is the sentence a brief is written from — room, shelf, colour, look —
+ * rather than a category. "Sideboards are up 12%" cannot be drawn; "walnut
+ * fluted sideboards hold 9% of that shelf, up 2 points, and no brand owns them"
+ * can.
  */
-export function Quadrant({
+export type SpecPoint = {
+  key: string;
+  node_key: string;
+  /** The room-level category: Bedroom Furniture, Home Office, Patio. */
+  area: string;
+  node_label: string;
+  label: string;
+  /** The spec broken out row by row for the hover card, the two category rows
+   *  first — a look is only open or crowded somewhere. */
+  spec: { kind: string; kind_label: string; label: string }[];
+  color: string | null;
+  look: string | null;
+  /** 0–100: what the three largest brands inside the spec have *not* taken. */
+  entry: number;
+  /** Percentage points of its own shelf, against last month. Null when that
+   *  shelf has no comparison month: a rail mark, never a zero. */
+  share_shift_pp: number | null;
+  share_pct: number;
+  share_before_pct: number | null;
+  revenue: number;
+  asins: number;
+  brands: number;
+  avg_price: number | null;
+  rating: number | null;
+  reviews: number | null;
+  /** The shelf's own return risk, carried for the card. It belongs to the
+   *  category rather than to the look, so it is never a position here. */
+  return_risk: number;
+};
+
+export type SpecBounds = {
+  x_min: number;
+  x_max: number;
+  /** The median 可进入度 of the specs drawn — a claim about this board rather
+   *  than an absolute. Three brands inside one colour of one shelf are not
+   *  comparable to five brands across a whole category, so a fixed 50 would be
+   *  a number pretending to be a threshold. */
+  x_mid: number;
+  y_min: number;
+  y_max: number;
+};
+
+export type SpecTipLabels = {
+  share: string;
+  was: string;
+  revenue: string;
+  asins: string;
+  brands: string;
+  rating: string;
+  reviews: string;
+  price: string;
+  returnRisk: string;
+  /** Stands in for a number that was never measured, e.g. 未测到. */
+  unmeasured: string;
+};
+
+/** The opportunity quadrant, over specs rather than over categories.
+ *
+ * The old one plotted a dot per tracked category: the same rows the board
+ * above it already lists, minus the ones whose growth happened to be
+ * unmeasurable — a duplicate, and an incomplete duplicate. This plots what a
+ * design programme actually chooses between.
+ *
+ * x is 可进入度: what is left of a spec once its three largest brands have taken
+ * theirs. y is how much of its own shelf the spec has won since last month, in
+ * percentage points — a share rather than a growth rate, because the number of
+ * listings we hold for a node moves with whatever the monthly walk collected
+ * and a share does not. Right and up is the opening: nobody owns it, and it is
+ * taking the shelf.
+ *
+ * The room chips are a filter, not decoration: ninety specs across five rooms
+ * is a chart nobody reads all at once. The axes stay fixed while it is
+ * filtered, so a dot does not move when the reader narrows to its room.
+ */
+export function SpecQuadrant({
   points,
+  bounds,
+  scale,
+  areas = [],
+  total,
+  onPick,
   xLabel,
   yLabel,
+  medianLabel,
   quadrants,
-  onPick,
-  labelTop = 4,
+  railLabel,
+  allLabel,
+  countLabel,
+  moreLabel,
+  tipLabels,
+  notes = [],
   width = 1000,
-  height = 420,
+  height = 470,
 }: {
-  points: { node_key: string; label: string; competition: number; growth_pct: number | null;
-            revenue_est: number | null; return_risk: number }[];
+  points: SpecPoint[];
+  bounds?: SpecBounds | null;
+  scale?: { max_revenue: number } | null;
+  /** The rooms present, biggest first, for the filter chips. */
+  areas?: { area: string; count: number; revenue: number }[];
+  /** Specs measured, before the plot cap — so a truncated tail stays visible. */
+  total?: number;
+  onPick?: (nodeKey: string) => void;
   xLabel: string;
   yLabel: string;
-  /** Clockwise from top-right: open+growing, crowded+growing, crowded+shrinking,
-   *  open+shrinking. Named so a dot's position is a recommendation, not a mood. */
+  medianLabel: string;
+  /** Clockwise from top-right: open+rising, crowded+rising, crowded+falling,
+   *  open+falling. Named so a dot's position is a recommendation, not a mood. */
   quadrants: [string, string, string, string];
-  onPick?: (nodeKey: string) => void;
-  labelTop?: number;
+  railLabel: string;
+  allLabel: string;
+  countLabel: string;
+  moreLabel: string;
+  tipLabels: SpecTipLabels;
+  notes?: string[];
   /** Canvas in user units; the svg scales to the width of the row it sits in. */
   width?: number;
   height?: number;
 }) {
-  const pad = 40;
-  const usable = points.filter((p) => p.growth_pct !== null);
-  if (!usable.length) return null;
-  const growths = usable.map((p) => p.growth_pct as number);
-  const yMin = Math.min(-5, ...growths);
-  const yMax = Math.max(5, ...growths);
-  const maxRevenue = Math.max(1, ...usable.map((p) => p.revenue_est ?? 0));
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [hover, setHover] =
+    useState<{ point: SpecPoint; style: CSSProperties } | null>(null);
+  const [room, setRoom] = useState("");
+  if (!points.length || !bounds || !scale) return null;
 
-  const px = (competition: number) => pad + (competition / 100) * (width - pad * 2);
-  const py = (growth: number) =>
-    height - pad - ((growth - yMin) / (yMax - yMin || 1)) * (height - pad * 2);
+  const shown = room ? points.filter((p) => p.area === room) : points;
+  const field = shown.filter((p) => p.share_shift_pp != null);
+  const rail = shown.filter((p) => p.share_shift_pp == null);
+  const hidden = Math.max(0, (total ?? points.length) - points.length);
 
-  // Label the ones worth naming, biggest first — but never two labels on top of
-  // each other. Categories routinely share a growth rate or a concentration, so
-  // their dots coincide; stacked labels then read as a smudge and the chart
-  // stops being readable exactly where it is densest. The unlabelled ones keep
-  // their tooltip, and every row is in the board below.
-  const named = new Set<string>();
-  const placed: [number, number][] = [];
-  for (const point of [...usable].sort((a, b) => (b.revenue_est ?? 0) - (a.revenue_est ?? 0))) {
-    if (named.size >= labelTop) break;
-    const cx = px(point.competition);
-    const cy = py(point.growth_pct as number);
-    if (placed.some(([ox, oy]) => Math.abs(ox - cx) < 70 && Math.abs(oy - cy) < 16)) continue;
-    named.add(point.node_key);
-    placed.push([cx, cy]);
+  const padL = 46;
+  const padR = 22;
+  const padT = 26;
+  const padB = 40;
+  // The rail is a strip taken off the field rather than chrome outside it, so a
+  // rail mark lines up with the field dots it shares an x with. Its height
+  // comes from the whole chart and not from the filtered subset: otherwise
+  // picking a room whose shelves all have a comparison month would give the
+  // field 24 more pixels and move every remaining dot, which is exactly what a
+  // filter must not do.
+  const railed = points.some((p) => p.share_shift_pp == null);
+  const railH = railed ? 24 : 0;
+  const fieldB = padB + railH;
+  const { x_min: xMin, x_max: xMax, x_mid: xMid, y_min: yMin, y_max: yMax } = bounds;
+  const maxRevenue = Math.max(1, scale.max_revenue);
+  const px = (v: number) =>
+    padL + ((v - xMin) / (xMax - xMin || 1)) * (width - padL - padR);
+  const py = (v: number) =>
+    height - fieldB - ((v - yMin) / (yMax - yMin || 1)) * (height - padT - fieldB);
+
+  /** Which corner a spec is in, which is also what colours it.
+   *
+   * Only two of the four carry a decision. Open and winning share is the
+   * opening; crowded and losing it is the one to walk away from. The other two
+   * are readings rather than verdicts, and a third hue would say there was a
+   * third thing to do. */
+  const verdict = (point: SpecPoint) => {
+    const shift = point.share_shift_pp ?? 0;
+    if (point.entry >= xMid && shift > 0) return "open";
+    if (point.entry < xMid && shift < 0) return "trap";
+    return "flat";
+  };
+
+  // Biggest first: a small dot is never drawn under a large one, and the names
+  // dropped on collision are the least important ones. Past the cap a name
+  // lives in the hover card — two dozen labels in a dense middle technically
+  // fit and collectively read as noise.
+  const labelCap = 14;
+  const ordered = [...field].sort((a, b) => b.revenue - a.revenue);
+  const placed: { x: number; y: number }[] = [];
+  const labelled = new Set<string>();
+  for (const point of ordered) {
+    if (labelled.size >= labelCap) break;
+    const cx = px(point.entry);
+    const cy = py(point.share_shift_pp as number);
+    // A seat the size of the name it holds: two lines, each of them a phrase
+    // rather than a word. A seat cut to one short term's width lets two names
+    // clear each other by the numbers and still read as one smudge.
+    if (placed.some((seat) => Math.abs(seat.x - cx) < 100
+                              && Math.abs(seat.y - cy) < 26)) continue;
+    placed.push({ x: cx, y: cy });
+    labelled.add(point.key);
   }
 
+  /** Keep a name inside the frame: a dot near either edge has half its label
+   *  outside the drawing, and an SVG does not wrap or clip it — it simply hangs
+   *  off the chart and lands on whatever sits beside it. */
+  const nameAt = (cx: number) => (
+    cx > width - padR - 56 ? { x: width - padR, anchor: "end" as const }
+    : cx < padL + 56 ? { x: padL, anchor: "start" as const }
+    : { x: cx, anchor: "middle" as const });
+
+  /** Anchor the card to the dot, not to the cursor: the drawing is a scaled
+   *  viewBox, so a user-space coordinate becomes a pixel one by the ratio the
+   *  browser used to fit it — read off the element, because the width changes
+   *  with the window. */
+  function show(point: SpecPoint, cx: number, cy: number) {
+    const box = svgRef.current?.getBoundingClientRect();
+    const k = box ? box.width / width : 1;
+    const top = cy * k;
+    // Below the dot when the dot sits high: a card anchored above it would hang
+    // over the section before this one.
+    const below = top < 150;
+    setHover({
+      point,
+      style: {
+        // Clamped, or a dot at either end pushes half the card out of the row.
+        left: Math.round(Math.min(Math.max(cx * k, 104),
+                                  Math.max(104, (box?.width ?? width) - 104))),
+        top: Math.round(below ? top + 16 : top - 14),
+        transform: `translate(-50%, ${below ? "0" : "-100%"})`,
+      },
+    });
+  }
+
+  const hide = () => setHover(null);
+
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="h-auto w-full"
-         role="img"
-         aria-label={usable.map((p) =>
-           `${p.label}: ${xLabel} ${p.competition.toFixed(0)}, ${yLabel} ${(p.growth_pct as number).toFixed(1)}%`).join("; ")}>
-      {/* Reference lines carry their own values, so a position can be read. */}
-      <line className="bi-axis-solid" x1={pad} x2={width - pad} y1={py(0)} y2={py(0)} />
-      <line className="bi-axis-solid" x1={px(50)} x2={px(50)} y1={pad} y2={height - pad} />
-      <text className="bi-axis-tick" x={pad - 4} y={py(0) + 3} textAnchor="end">0%</text>
-      <text className="bi-axis-tick" x={pad - 4} y={pad + 3} textAnchor="end">
-        {yMax.toFixed(0)}%
-      </text>
-      <text className="bi-axis-tick" x={pad - 4} y={height - pad + 3} textAnchor="end">
-        {yMin.toFixed(0)}%
-      </text>
-      <text className="bi-axis-tick" x={px(50)} y={height - pad + 13} textAnchor="middle">50</text>
-      <text className="bi-axis-tick" x={width - pad} y={height - pad + 13} textAnchor="end">
-        100 · {xLabel}
-      </text>
-      <text className="bi-axis-tick" x={pad} y={height - pad + 13} textAnchor="start">0</text>
-      {/* Horizontal and clear of the ticks. A rotated axis title that lands on
-          top of "14%" costs more legibility than it buys. */}
-      <text className="bi-axis-tick" x={pad - 4} y={14} textAnchor="start">{yLabel} ↑</text>
+    <div className="relative">
+      <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+        <span className="mr-1 text-[11px] text-fg-subtle tabular-nums">
+          {total ?? points.length} {countLabel}
+          {hidden > 0 ? ` · ${hidden} ${moreLabel}` : ""}
+        </span>
+        <button type="button" onClick={() => setRoom("")}
+                className={`bi-chip ${room ? "" : "bi-chip-observed"}`}>
+          {allLabel} {points.length}
+        </button>
+        {areas.map((entry) => (
+          <button key={entry.area} type="button"
+                  onClick={() => setRoom(room === entry.area ? "" : entry.area)}
+                  className={`bi-chip ${room === entry.area ? "bi-chip-observed" : ""}`}>
+            {entry.area} {entry.count}
+          </button>
+        ))}
+      </div>
 
-      <text className="bi-quadrant-name" x={width - pad - 2} y={pad + 9} textAnchor="end">
-        {quadrants[0]}
-      </text>
-      <text className="bi-quadrant-name" x={pad + 2} y={pad + 9} textAnchor="start">
-        {quadrants[1]}
-      </text>
-      <text className="bi-quadrant-name" x={pad + 2} y={height - pad - 4} textAnchor="start">
-        {quadrants[2]}
-      </text>
-      <text className="bi-quadrant-name" x={width - pad - 2} y={height - pad - 4} textAnchor="end">
-        {quadrants[3]}
-      </text>
+      <svg ref={svgRef} viewBox={`0 0 ${width} ${height}`} className="w-full"
+           role="img"
+           aria-label={shown.map((p) => describeSpec(p, xLabel, yLabel, tipLabels))
+             .join("; ")}>
+        {/* The two corners that carry a decision, tinted instead of captioned,
+            so nobody has to hold "right of the dashed line and above zero" in
+            their head while reading dots. */}
+        <rect className="bi-quadrant-open" x={px(xMid)} y={padT}
+              width={Math.max(0, width - padR - px(xMid))}
+              height={Math.max(0, py(0) - padT)} />
+        <rect className="bi-quadrant-risk" x={padL} y={py(0)}
+              width={Math.max(0, px(xMid) - padL)}
+              height={Math.max(0, height - fieldB - py(0))} />
 
-      {[...usable]
-        .sort((a, b) => (b.revenue_est ?? 0) - (a.revenue_est ?? 0))
-        .map((point) => {
-        const r = 6 + Math.sqrt((point.revenue_est ?? 0) / maxRevenue) * 12;
-        const cx = px(point.competition);
-        const cy = py(point.growth_pct as number);
-        return (
-          <g key={point.node_key} onClick={() => onPick?.(point.node_key)}
-             style={{ cursor: onPick ? "pointer" : "default" }}>
-            {/* The hit target is bigger than the mark; an 8px dot is not a button. */}
-            <circle cx={cx} cy={cy} r={Math.max(14, r + 8)} fill="transparent" />
-            <circle className={point.return_risk > 8 ? "bi-dot bi-dot-risk" : "bi-dot"}
-                    cx={cx} cy={cy} r={r}>
-              <title>{`${point.label} · ${xLabel} ${point.competition.toFixed(0)} · `
-                + `${yLabel} ${(point.growth_pct as number).toFixed(1)}% · `
-                + fmtMoney(point.revenue_est)}</title>
-            </circle>
-            {named.has(point.node_key) ? (
-              <text className="bi-quadrant-label" x={cx} y={cy - r - 4} textAnchor="middle">
-                {point.label.length > 16 ? `${point.label.slice(0, 15)}…` : point.label}
-              </text>
-            ) : null}
-          </g>
-        );
-      })}
-    </svg>
+        {/* Zero is a real line here — a spec that held exactly its share — so it
+            is solid. The median is a property of this board, so it is dashed. */}
+        <line className="bi-axis-solid" x1={padL} x2={width - padR}
+              y1={py(0)} y2={py(0)} />
+        <line className="bi-axis-dashed" x1={px(xMid)} x2={px(xMid)}
+              y1={padT} y2={height - fieldB} />
+
+        {railed ? (
+          <>
+            <line className="bi-rail-edge" x1={padL} x2={width - padR}
+                  y1={height - fieldB + 7} y2={height - fieldB + 7} />
+            <text className="bi-rail-name" x={width - padR}
+                  y={height - padB - railH / 2 + 3} textAnchor="end">{railLabel}</text>
+          </>
+        ) : null}
+
+        <text className="bi-axis-tick" x={padL - 6} y={py(0) + 3} textAnchor="end">0</text>
+        <text className="bi-axis-tick" x={padL - 6} y={padT + 4} textAnchor="end">
+          +{yMax.toFixed(1)}
+        </text>
+        <text className="bi-axis-tick" x={padL - 6} y={height - fieldB} textAnchor="end">
+          {yMin.toFixed(1)}
+        </text>
+        <text className="bi-axis-tick" x={px(xMid)} y={height - padB + 13}
+              textAnchor="middle">{medianLabel} {xMid.toFixed(0)}</text>
+        <text className="bi-axis-tick" x={padL} y={height - padB + 13}
+              textAnchor="start">{xMin.toFixed(0)}</text>
+        <text className="bi-axis-tick" x={width - padR} y={height - padB + 13}
+              textAnchor="end">{xMax.toFixed(0)}</text>
+        {/* Both axis names on one line under the plot. A rotated y title reads
+            badly for Chinese — rotating CJK turns each glyph on its side rather
+            than stacking them — and the arrow is what ties a name to its axis. */}
+        <text className="bi-axis-title" x={2} y={height - padB + 26}
+              textAnchor="start">{yLabel} ↑</text>
+        <text className="bi-axis-title" x={width - padR} y={height - padB + 26}
+              textAnchor="end">{xLabel} →</text>
+
+        <text className="bi-quadrant-name" x={width - padR - 2} y={padT - 6}
+              textAnchor="end">{quadrants[0]}</text>
+        <text className="bi-quadrant-name" x={padL + 2} y={padT - 6}
+              textAnchor="start">{quadrants[1]}</text>
+        <text className="bi-quadrant-name" x={padL + 2} y={height - fieldB - 9}
+              textAnchor="start">{quadrants[2]}</text>
+        <text className="bi-quadrant-name" x={width - padR - 2} y={height - fieldB - 9}
+              textAnchor="end">{quadrants[3]}</text>
+
+        {/* Rail marks first, so a field dot is never drawn under one. */}
+        {rail.map((point) => {
+          const cx = px(point.entry);
+          const cy = height - padB - railH / 2;
+          // Under the mark rather than over it. Above, the name lands on the
+          // rail's own edge and on the corner caption that sits there, which is
+          // two claims stacked on one another.
+          const seat = { x: cx, y: cy + 12 };
+          const clash = placed.some((other) => Math.abs(other.x - seat.x) < 110
+                                               && Math.abs(other.y - seat.y) < 14);
+          if (!clash) placed.push(seat);
+          const name = nameAt(cx);
+          return (
+            <g key={point.key} className="bi-dot-group" tabIndex={0} role="button"
+               aria-label={describeSpec(point, xLabel, yLabel, tipLabels)}
+               onClick={() => onPick?.(point.node_key)}
+               onMouseEnter={() => show(point, cx, cy)} onMouseLeave={hide}
+               onFocus={() => show(point, cx, cy)} onBlur={hide}>
+              <rect x={cx - 9} y={cy - 7} width={18} height={14} fill="transparent" />
+              {/* An open square, not a disc: a different shape for a different
+                  claim, so nobody reads a rail mark as a measured position. */}
+              <rect className="bi-rail-mark" x={cx - 4} y={cy - 4}
+                    width={8} height={8} rx={1.5} />
+              {!clash ? (
+                <text className="bi-point-label" x={name.x} y={cy + 12}
+                      textAnchor={name.anchor}>
+                  {truncate(point.label, 18)}
+                </text>
+              ) : null}
+            </g>
+          );
+        })}
+
+        {ordered.map((point) => {
+          const corner = verdict(point);
+          const r = 4 + Math.sqrt(point.revenue / maxRevenue) * 13;
+          const cx = px(point.entry);
+          const cy = py(point.share_shift_pp as number);
+          const name = nameAt(cx);
+          const hot = hover?.point.key === point.key;
+          return (
+            <g key={point.key} className="bi-dot-group" tabIndex={0} role="button"
+               aria-label={describeSpec(point, xLabel, yLabel, tipLabels)}
+               onClick={() => onPick?.(point.node_key)}
+               onMouseEnter={() => show(point, cx, cy)} onMouseLeave={hide}
+               onFocus={() => show(point, cx, cy)} onBlur={hide}>
+              {/* The hit target is bigger than the mark; an 8px dot is not a
+                  button, and this is what opens the card. */}
+              <circle cx={cx} cy={cy} r={Math.max(15, r + 8)} fill="transparent" />
+              {/* Disc for the money, core for the position: overlapping discs
+                  stay countable because their cores do not merge. */}
+              <circle className={`bi-dot-disc${corner === "open" ? "" : corner === "trap"
+                                   ? " bi-dot-disc-risk" : " bi-dot-disc-flat"}`
+                                 + (hot ? " bi-dot-hot" : "")}
+                      cx={cx} cy={cy} r={r} />
+              <circle className={`bi-dot-core${corner === "open" ? "" : corner === "trap"
+                                   ? " bi-dot-core-risk" : " bi-dot-core-flat"}`}
+                      cx={cx} cy={cy} r={Math.min(3, r / 3)} />
+              {labelled.has(point.key) ? (
+                /* Two lines: the shelf, then the two decisions. One line of the
+                   three joined by dots is 160 units wide — six of those is the
+                   whole chart, and the seventh lands on top of one of them. */
+                <text className="bi-point-label" x={name.x} y={cy - r - 16}
+                      textAnchor={name.anchor}>
+                  <tspan x={name.x}>{truncate(point.node_label, 16)}</tspan>
+                  <tspan x={name.x} dy="10.5">
+                    {truncate([point.color, point.look].filter(Boolean).join(" · "), 14)}
+                  </tspan>
+                </text>
+              ) : null}
+            </g>
+          );
+        })}
+      </svg>
+
+      {hover ? (
+        <div className="bi-dot-tip" style={hover.style}>
+          <div className="bi-dot-tip-head">
+            <span className="bi-dot-tip-name">{hover.point.label}</span>
+          </div>
+          {/* The spec's own rows first: which decision took which value is what
+              the reader came for, and the measurements are the argument for it. */}
+          <div className="mb-1.5 border-b border-border pb-1.5">
+            {hover.point.spec.map((part) => (
+              <TipRow key={part.kind} label={part.kind_label} value={part.label} />
+            ))}
+          </div>
+          <TipRow label={yLabel}
+                  value={shiftText(hover.point.share_shift_pp, tipLabels.unmeasured)}
+                  tone={!hover.point.share_shift_pp ? undefined
+                        : hover.point.share_shift_pp > 0 ? "up" : "down"} />
+          <TipRow label={xLabel} value={hover.point.entry.toFixed(0)} />
+          <TipRow label={tipLabels.share}
+                  value={hover.point.share_before_pct == null
+                    ? fmtPct(hover.point.share_pct)
+                    : `${fmtPct(hover.point.share_pct)}（${tipLabels.was} `
+                      + `${fmtPct(hover.point.share_before_pct)}）`} />
+          <TipRow label={tipLabels.revenue} value={fmtMoney(hover.point.revenue)} />
+          <TipRow label={tipLabels.asins} value={`${hover.point.asins}`} />
+          <TipRow label={tipLabels.brands} value={`${hover.point.brands}`} />
+          <TipRow label={tipLabels.rating}
+                  value={hover.point.rating == null ? tipLabels.unmeasured
+                         : `${hover.point.rating.toFixed(2)}★`} />
+          {hover.point.reviews != null ? (
+            <TipRow label={tipLabels.reviews}
+                    value={hover.point.reviews.toLocaleString()} />
+          ) : null}
+          {hover.point.avg_price != null ? (
+            <TipRow label={tipLabels.price} value={fmtMoney(hover.point.avg_price)} />
+          ) : null}
+          {hover.point.return_risk > 0 ? (
+            <TipRow label={tipLabels.returnRisk}
+                    value={hover.point.return_risk.toFixed(1)}
+                    tone={hover.point.return_risk > 8 ? "down" : undefined} />
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]
+                      text-fg-subtle">
+        <span className="flex items-center gap-1">
+          ↗<i className="bi-swatch shrink-0 bi-legend-open" />{quadrants[0]}
+        </span>
+        <span>↖&nbsp;{quadrants[1]}</span>
+        <span className="flex items-center gap-1">
+          ↙<i className="bi-swatch shrink-0 bi-legend-risk" />{quadrants[2]}
+        </span>
+        <span>↘&nbsp;{quadrants[3]}</span>
+      </div>
+      {notes.map((note) => (
+        <div key={note} className="mt-0.5 text-[10px] text-fg-subtle">{note}</div>
+      ))}
+    </div>
   );
+}
+
+/** A signed movement in percentage points, or the word for a reading nobody took. */
+function shiftText(value: number | null, unmeasured: string): string {
+  if (value == null || !Number.isFinite(value)) return unmeasured;
+  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}pp`;
+}
+
+/** The card's contents as one string, for the reader who cannot hover. */
+function describeSpec(point: SpecPoint, xLabel: string, yLabel: string,
+                      tipLabels: SpecTipLabels): string {
+  return `${point.label} · ${yLabel} ${shiftText(point.share_shift_pp, tipLabels.unmeasured)}`
+    + ` · ${xLabel} ${point.entry.toFixed(0)}`
+    + ` · ${tipLabels.share} ${fmtPct(point.share_pct)}`
+    + ` · ${tipLabels.revenue} ${fmtMoney(point.revenue)}`
+    + ` · ${tipLabels.asins} ${point.asins}`;
 }
 
 /** A zero-anchored diverging bar: risers and decliners on one scale. */

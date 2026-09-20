@@ -584,6 +584,26 @@ def all_products(marketplace: str, period: str, *, limit: int = 800) -> list[dic
         ))
 
 
+def product_periods(marketplace: str, *, before: str, limit: int = 6) -> list[str]:
+    """Months with stored ASIN rows, most recent first, older than ``before``.
+
+    The comparison month for a shelf reading is whichever month we actually hold
+    listings for, not the calendar's previous one. A walk that was paused, a
+    node enrolled late or a month spent on a backlog all leave gaps, and
+    comparing against an empty month would report every spec on the board as
+    brand new.
+    """
+    db._ensure()
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT period FROM market_product_metrics "
+            "WHERE marketplace = ? AND period < ? "
+            "ORDER BY period DESC LIMIT ?",
+            (marketplace, before, limit),
+        ).fetchall()
+    return [str(row[0]) for row in rows]
+
+
 def product_totals(marketplace: str, period: str) -> dict[str, dict]:
     """Summed ASIN revenue and units per node, from the rows actually collected.
 

@@ -1,4 +1,5 @@
-import type { ElementChartBounds, ElementPoint, ElementScale }
+import type { ElementChartBounds, ElementPoint, ElementScale,
+              SpecBounds, SpecPoint }
   from "@/components/market/charts";
 
 // In production the frontend should prefer the same-origin `/api` rewrite unless
@@ -1643,6 +1644,29 @@ export type MarketAlert = {
   evidence_ids: string[];
 };
 
+/** The selection brief the report opens with: product lines to start, and the
+ *  lines not to. A pick is a shelf plus the look it would be built in - the
+ *  unit a selection meeting decides on, which a category alone is not. */
+export type MarketSelectionPick = {
+  node_key: string;
+  /** Colour and element, copied from a line the shelf has actually built. */
+  spec: string;
+  /** enter | validate | watch - the same enum the board's verdicts use. */
+  move: string;
+  price_band?: string;
+  envelope?: string;
+  fix?: string;
+  why_now: string;
+  risk?: string;
+  evidence_ids?: string[];
+};
+
+export type MarketSelection = {
+  call?: string;
+  picks?: MarketSelectionPick[];
+  avoid?: { label: string; why: string; evidence_ids?: string[] }[];
+};
+
 export type MarketMonitor = {
   risks: MarketAlert[];
   opportunities: MarketAlert[];
@@ -1930,14 +1954,20 @@ export type MarketDashboard = {
   headline?: { kpis: MarketKpi[] };
   board?: MarketBoardRow[];
   movers?: { rising: MarketBoardRow[]; declining: MarketBoardRow[] };
-  map?: {
-    node_key: string;
-    label: string;
-    competition: number;
-    growth_pct: number | null;
-    revenue_est: number | null;
-    return_risk: number;
-  }[];
+  /** The opportunity quadrant. One point per product line -- area,
+   *  category, colour, look -- read off the listings that carry it,
+   *  rather than one point per category. The point and bound shapes are
+   *  the chart's own types rather than a second spelling of them here. */
+  spec_map?: {
+    points: SpecPoint[];
+    bounds?: SpecBounds | null;
+    scale?: { max_revenue: number } | null;
+    areas?: { area: string; count: number; revenue: number }[];
+    /** Specs measured, before the plot cap. */
+    total?: number;
+    /** The two months the share shift compared. */
+    window?: { from: string; to: string };
+  };
   price?: MarketBand[];
   treemap?: {
     node_key: string;
@@ -2019,6 +2049,9 @@ export type MarketDashboard = {
     return_risk: number;
   }[];
   budget?: MarketBudget;
+  /** Written by the model from the server's own rows, and the block the report
+   *  opens with. Absent until the board is re-rendered. */
+  selection?: MarketSelection;
   thesis?: string;
   verdicts?: Record<string, MarketVerdict>;
   header?: {

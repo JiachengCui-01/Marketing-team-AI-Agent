@@ -14,7 +14,7 @@ what landed so a silently missing family is visible rather than merely absent.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping, MutableMapping, Sequence
 
 from . import elements, gateway, jobs, monitor, scoring, store, taxonomy
@@ -440,6 +440,137 @@ def _dot_scale(points: Sequence[dict]) -> dict | None:
     return {"max_revenue": max(1.0, max(p["revenue"] for p in points))}
 
 
+# How many points the opportunity quadrant plots. Higher than the spec chart's
+# cap because a point here carries a category as well as a look: thirteen
+# shelves with half a dozen live openings each is the reading, and a cap of
+# forty-five is what leaves a reader asking where their category went.
+MAX_SPEC_POINTS = 96
+# Floor for the quadrant's y axis, in percentage points of a node's head
+# revenue. A look that moved a tenth of a point did not move, and without a
+# floor a board of flat months would be zoomed until it looked like weather.
+MIN_SHIFT_SPAN = 1.5
+
+
+def _every_shelf_first(points: Sequence[dict], cap: int) -> list[dict]:
+    """Fill the chart a round at a time, one spec per shelf, biggest shelf first.
+
+    A straight top-N by revenue spends the whole chart on sofas and beds and
+    leaves the small categories off it entirely — which is the complaint the
+    category map earned, in a chart with six times as many points to spend. So
+    every shelf gets its best spec before any shelf gets its second.
+    """
+    by_node: dict[str, list[dict]] = {}
+    for point in points:
+        by_node.setdefault(point["node_key"], []).append(point)
+    kept: list[dict] = []
+    for rank in range(max((len(group) for group in by_node.values()), default=0)):
+        for group in by_node.values():
+            if rank < len(group):
+                kept.append(group[rank])
+                if len(kept) >= cap:
+                    return sorted(kept, key=lambda p: p["revenue"], reverse=True)
+    return sorted(kept, key=lambda p: p["revenue"], reverse=True)
+
+
+def _spec_map(specs: Sequence[dict], board: Sequence[dict], zh: bool,
+              *, window: tuple[str, str]) -> dict:
+    """The opportunity quadrant, over specs rather than over categories.
+
+    A category map says "work in Nightstands". Nobody can draw that. The unit
+    here is the sentence a brief is written from — room, shelf, colour, look —
+    because those are the four decisions that produce a drawing, and because a
+    category's average hides the thing worth finding: the one corner of a
+    crowded shelf that three brands have not taken yet.
+
+    x is 可进入度, what is left of the cell after its three largest brands.
+    y is the cell's share of its own shelf against last month, in percentage
+    points. Both are read off the listings; neither is modelled. A cell whose
+    node has no comparison month keeps its x and loses its y — it goes to the
+    chart's rail rather than being drawn at zero or dropped, which is what the
+    category map did to every category whose growth we could not measure.
+    """
+    rows = {row["node_key"]: row for row in board}
+    # What the card calls the two category rows. Named apart from
+    # ``taxonomy.area_label`` below, which answers a different question.
+    area_row, node_row = ("大致品类", "细分品类") if zh else ("Area", "Category")
+    points: list[dict] = []
+    for spec in specs:
+        row = rows.get(spec["node_key"])
+        if not row:
+            continue
+        area = taxonomy.area_label(row.get("node_label_path") or "")
+        points.append({
+            "key": spec["key"],
+            "node_key": spec["node_key"],
+            "area": area,
+            "node_label": row["label"],
+            # Printed on the chart where it fits: the shelf first, because that
+            # is what a reader scans for, then the two decisions.
+            "label": " · ".join([row["label"]]
+                                + [part["label"] for part in spec["spec"]]),
+            # The card's rows. The category is part of the spec here, not a
+            # caption on it — a look is only open or crowded somewhere.
+            "spec": ([{"kind": "area", "kind_label": area_row, "label": area},
+                      {"kind": "node", "kind_label": node_row,
+                       "label": row["label"]}]
+                     + list(spec["spec"])),
+            "color": spec["color"],
+            "look": spec["look"],
+            "entry": spec["entry"],
+            "share_shift_pp": spec["share_shift_pp"],
+            "share_pct": spec["share_pct"],
+            "share_before_pct": spec["share_before_pct"],
+            "revenue": spec["revenue"],
+            "asins": spec["asins"],
+            "brands": spec["brands"],
+            "avg_price": spec["avg_price"],
+            "rating": spec["rating"],
+            "reviews": spec["reviews"],
+            # The shelf's own return rate, carried rather than drawn: it belongs
+            # to the category and not to the look, so it is a row in the card
+            # and never a position on the chart.
+            "return_risk": row.get("return_risk") or 0.0,
+        })
+    points.sort(key=lambda p: p["revenue"], reverse=True)
+    shown = _every_shelf_first(points, MAX_SPEC_POINTS)
+    if not shown:
+        return {"points": [], "bounds": None, "scale": None, "areas": [],
+                "total": 0, "window": {"from": window[0], "to": window[1]}}
+    shifts = [p["share_shift_pp"] for p in shown if p["share_shift_pp"] is not None]
+    entries = [p["entry"] for p in shown]
+    areas: dict[str, dict] = {}
+    for point in shown:
+        bucket = areas.setdefault(point["area"],
+                                  {"area": point["area"], "count": 0, "revenue": 0.0})
+        bucket["count"] += 1
+        bucket["revenue"] = round(bucket["revenue"] + point["revenue"], 2)
+    return {
+        "points": shown,
+        "bounds": {
+            # 0 and 100 mean something on this axis — owned outright, and owned
+            # by nobody — so the frame starts at zero rather than at the
+            # smallest reading. The top end follows the points, because at this
+            # grain nothing reaches 100 and a fixed frame would spend half its
+            # width on empty shelf.
+            "x_min": 0.0,
+            "x_max": round(min(100.0, max(65.0, max(entries) * 1.08)), 1),
+            # The median of what is drawn, not a fixed 50: three brands inside
+            # one colour of one shelf are not comparable to five brands across
+            # a whole category, so the line has to say "more open than the
+            # typical spec on this board" rather than pretend to an absolute.
+            "x_mid": round(scoring._median(entries) or 0.0, 1),
+            "y_min": round(min([-MIN_SHIFT_SPAN] + shifts) * 1.15, 2),
+            "y_max": round(max([MIN_SHIFT_SPAN] + shifts) * 1.15, 2),
+        },
+        "scale": _dot_scale(shown),
+        "areas": sorted(areas.values(), key=lambda a: a["revenue"], reverse=True),
+        "total": len(points),
+        # Which two months the y axis compared, so nothing downstream has to
+        # guess whether "last month" means the calendar's or ours.
+        "window": {"from": window[0], "to": window[1]},
+    }
+
+
 def _follow(board: Sequence[dict], rising: Sequence[dict], zh: bool) -> list[dict]:
     """What to put on the product roadmap, and the one reason why.
 
@@ -703,6 +834,12 @@ class MiningInputs:
     products: list[dict]
     phrases: list[dict]
     before: list[dict]
+    # The same listing rows for the comparison month, and which month that was.
+    # The opportunity quadrant's y axis is a share against last month, so it
+    # needs the titles twice; nothing else here does, and an empty list is the
+    # honest answer when there is no earlier month stored.
+    products_before: list[dict] = field(default_factory=list)
+    before_period: str = ""
 
 
 def mining_inputs(marketplace: str, period: str) -> MiningInputs:
@@ -715,6 +852,11 @@ def mining_inputs(marketplace: str, period: str) -> MiningInputs:
     Reading more stored rows costs a wider SELECT and nothing else.
     """
     before = gateway.step_period(period, -1)
+    # Phrases compare against the calendar's previous month; listings compare
+    # against the most recent month that actually has listings. The difference
+    # matters: a phrase row missing is one term unrated, a listing month missing
+    # would make every spec on the shelf look newly invented.
+    comparison = next(iter(store.product_periods(marketplace, before=period)), "")
     return MiningInputs(
         # Every title held for the month. The old 2,500 was a third of what a
         # full month's listing pull collects, and the third it kept was the
@@ -722,7 +864,11 @@ def mining_inputs(marketplace: str, period: str) -> MiningInputs:
         products=store.all_products(marketplace, period,
                                     limit=elements.MAX_TITLE_ROWS),
         phrases=_demand_rows(marketplace, period),
-        before=_demand_rows(marketplace, before) if before else [])
+        before=_demand_rows(marketplace, before) if before else [],
+        products_before=(store.all_products(marketplace, comparison,
+                                            limit=elements.MAX_TITLE_ROWS)
+                         if comparison else []),
+        before_period=comparison)
 
 
 def mined_terms(marketplace: str, period: str, *,
@@ -907,10 +1053,17 @@ def build_overview(marketplace: str, period: str, language: str,
         "board": board,
         "monitor": watch,
         "movers": {"rising": rising, "declining": declining},
-        "map": [{"node_key": r["node_key"], "label": r["label"],
-                 "competition": 100.0 - (r["top5_brand_share_pct"] or 0.0),
-                 "growth_pct": r["growth_pct"], "revenue_est": r["revenue_est"],
-                 "return_risk": r["return_risk"]} for r in board],
+        # The opportunity quadrant. It used to plot one dot per category, which
+        # is a chart of thirteen rows the board already lists — and it could
+        # only draw the categories whose growth happened to be measurable, so it
+        # was both a duplicate and an incomplete one. A point here is a spec:
+        # room, shelf, colour and look, read off the listings that carry it.
+        "spec_map": _spec_map(
+            elements.category_specs(
+                mining.products, element_rows,
+                {n["node_id_path"]: n for n in taxonomy.leaf_nodes(marketplace)},
+                before=mining.products_before),
+            board, zh, window=(mining.before_period, period)),
         "treemap": [{"node_key": r["node_key"], "label": r["label"],
                      "value": r["covered_revenue"] or r["revenue_est"] or 0.0,
                      "growth_pct": r["growth_pct"],

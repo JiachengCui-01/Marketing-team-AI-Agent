@@ -387,6 +387,167 @@ class CombinationTests(unittest.TestCase):
         self.assertEqual(spec["searches"], 0)
 
 
+class CategorySpecTests(unittest.TestCase):
+    """Room × shelf × colour × look — what the opportunity quadrant plots.
+
+    A look is only open or crowded *somewhere*: the same surface treatment can
+    be three brands' property in nightstands and untouched in sideboards, and
+    one number averaged over both categories reports neither.
+    """
+
+    NAMED = [
+        {"term": "burl", "kind": elements.CRAFT, "label": "木瘤纹",
+         "kind_label": "工艺 · 纹样", "revenue_share_pct": 9.0},
+        {"term": "mid century", "kind": elements.STYLE, "label": "中古风",
+         "kind_label": "风格", "revenue_share_pct": 6.0},
+        {"term": "glass", "kind": elements.MATERIAL, "label": "玻璃",
+         "kind_label": "材质", "revenue_share_pct": 5.0},
+        {"term": "black", "kind": elements.COLOR, "label": "黑色",
+         "kind_label": "颜色", "revenue_share_pct": 7.0},
+        {"term": "walnut", "kind": elements.COLOR, "label": "胡桃色",
+         "kind_label": "颜色", "revenue_share_pct": 4.0},
+        {"term": "12 inch", "kind": elements.SIZE, "label": "12 寸",
+         "kind_label": "尺寸", "revenue_share_pct": 8.0},
+        {"term": "clearance", "kind": elements.OTHER, "label": "清仓",
+         "kind_label": "其他", "revenue_share_pct": 6.0},
+    ]
+    NODES = {"n:night": {}, "n:side": {}}
+
+    def rows(self, node: str, name: str, count: int, *, brands: list[str] | None = None,
+             revenue: float = 1_000.0, tag: str = "a") -> list[dict]:
+        return [{"asin": f"{tag}{i}", "node_id_path": node, "title": name,
+                 "brand": (brands[i % len(brands)] if brands else "Acme"),
+                 "revenue": revenue, "price": 300.0, "rating": 4.2, "ratings": 120}
+                for i in range(count)]
+
+    def specs(self, products: list[dict], **kwargs) -> dict[str, dict]:
+        return {s["key"]: s for s in
+                elements.category_specs(products, self.NAMED, self.NODES, **kwargs)}
+
+    def test_the_same_look_in_two_categories_is_two_points(self) -> None:
+        """Averaging them would hide the one shelf where it is still open."""
+        specs = self.specs(self.rows("n:night", "Black Burl Nightstand", 6)
+                           + self.rows("n:side", "Black Burl Sideboard", 6, tag="b"))
+        self.assertEqual(set(specs), {"n:night|black|burl", "n:side|black|burl"})
+
+    def test_a_size_is_a_decision_but_not_a_look(self) -> None:
+        """"12 inch" beside "burl" would read as two ways of drawing the same
+        thing. Sizes belong to the element table, not to this chart."""
+        spec = self.specs(self.rows("n:night", "Black 12 Inch Nightstand", 6))
+        self.assertEqual(list(spec), ["n:night|black|"])
+        self.assertEqual([part["label"] for part in spec["n:night|black|"]["spec"]],
+                         ["黑色"])
+
+    def test_a_surface_treatment_wins_the_one_look_slot(self) -> None:
+        """Nearly every title names a material, so taking the material first
+        would fill the chart with "glass" and hide every treatment behind it."""
+        spec = self.specs(self.rows("n:night", "Black Burl Glass Nightstand", 6))
+        self.assertEqual(list(spec), ["n:night|black|burl"])
+
+    def test_a_non_attribute_kind_never_enters_a_spec(self) -> None:
+        spec = self.specs(self.rows("n:night", "Clearance Black Nightstand", 6))
+        self.assertEqual(list(spec), ["n:night|black|"])
+
+    def test_a_cell_on_too_few_listings_is_one_sellers_idea(self) -> None:
+        self.assertEqual(
+            self.specs(self.rows("n:night", "Black Burl Nightstand",
+                                 elements.MIN_SPEC_ASINS - 1)),
+            {})
+
+    def test_a_listing_naming_neither_is_not_a_spec_but_is_still_the_shelf(self) -> None:
+        """The plain titles are the denominator. Leaving them out would inflate
+        every cell by however much of the shelf writes copy without adjectives."""
+        specs = self.specs(self.rows("n:night", "Black Burl Nightstand", 6)
+                           + self.rows("n:night", "Nightstand", 6, tag="p"))
+        self.assertEqual(list(specs), ["n:night|black|burl"])
+        self.assertEqual(specs["n:night|black|burl"]["share_pct"], 50.0)
+
+    def test_absent_last_month_is_a_measured_zero(self) -> None:
+        """A look that did not exist and now holds a third of the shelf is the
+        most interesting row on the chart; dropping it for having no
+        predecessor would delete exactly the specs worth finding."""
+        specs = self.specs(
+            self.rows("n:night", "Black Burl Nightstand", 6)
+            + self.rows("n:night", "Nightstand", 6, tag="p"),
+            before=self.rows("n:night", "Nightstand", 12, tag="p"))
+        self.assertEqual(specs["n:night|black|burl"]["share_before_pct"], 0.0)
+        self.assertEqual(specs["n:night|black|burl"]["share_shift_pp"], 50.0)
+
+    def test_a_shelf_with_no_comparison_month_keeps_x_and_loses_y(self) -> None:
+        """Unmeasured is not zero. The chart rails this one instead of drawing
+        it as a spec that held its share exactly."""
+        specs = self.specs(self.rows("n:night", "Black Burl Nightstand", 6),
+                           before=self.rows("n:side", "Black Burl Sideboard", 6))
+        spec = specs["n:night|black|burl"]
+        self.assertIsNone(spec["share_shift_pp"])
+        self.assertIsNone(spec["share_before_pct"])
+        self.assertIsNotNone(spec["entry"])
+
+    def test_the_shift_is_share_rather_than_revenue_growth(self) -> None:
+        """Twice as many listings collected this month doubles every cell's
+        revenue and moves no share. One of those is a measurement."""
+        before = (self.rows("n:night", "Black Burl Nightstand", 6)
+                  + self.rows("n:night", "Nightstand", 6, tag="p"))
+        now = (self.rows("n:night", "Black Burl Nightstand", 12, revenue=2_000.0)
+               + self.rows("n:night", "Nightstand", 12, revenue=2_000.0, tag="p"))
+        specs = self.specs(now, before=before)
+        self.assertEqual(specs["n:night|black|burl"]["share_shift_pp"], 0.0)
+
+    def test_entry_is_what_the_three_largest_brands_left(self) -> None:
+        """The board's 可进入度 is ``100 - top5 brand share``. Top five is
+        degenerate at this grain — six listings have five brands in their top
+        five whatever the shelf looks like — so it is the top three."""
+        specs = self.specs(self.rows("n:night", "Black Burl Nightstand", 6,
+                                     brands=["A", "A", "A", "B", "C", "D"]))
+        # A holds three sixths, B and C one each: five of six, so one is left.
+        self.assertEqual(specs["n:night|black|burl"]["entry"], 16.7)
+        self.assertEqual(specs["n:night|black|burl"]["brands"], 4)
+
+    def test_an_unrecorded_brand_counts_as_its_own_owner(self) -> None:
+        """Missing data may leave a cell looking open; it must never invent a
+        monopoly out of six blank brand columns."""
+        specs = self.specs(self.rows("n:night", "Black Burl Nightstand", 6,
+                                     brands=[""]))
+        self.assertEqual(specs["n:night|black|burl"]["entry"], 50.0)
+
+    def test_measuring_a_cell_is_not_the_same_as_plotting_it(self) -> None:
+        """Every cell that clears the listing bar comes back, however many that
+        is. Capping here would make the count beside the chart report how many
+        specs survived a cap rather than how many the shelf has — and it would
+        decide which categories get drawn in the module that cannot see the
+        chart."""
+        named = list(self.NAMED) + [
+            {"term": f"c{i}", "kind": elements.COLOR, "label": f"色{i}",
+             "kind_label": "颜色", "revenue_share_pct": 1.0} for i in range(20)]
+        products: list[dict] = []
+        for i in range(20):
+            products += self.rows("n:side", f"C{i} Burl Sideboard", 6,
+                                  revenue=10_000.0, tag=f"s{i}")
+        products += self.rows("n:night", "Black Burl Nightstand", 6, revenue=1.0,
+                              tag="n")
+        specs = {s["key"]: s for s in
+                 elements.category_specs(products, named, self.NODES)}
+        self.assertIn("n:night|black|burl", specs)
+        self.assertEqual(len([k for k in specs if k.startswith("n:side|")]), 20)
+
+    def test_the_spec_is_named_row_by_row_for_the_card(self) -> None:
+        """"颜色 黑色 · 工艺 · 纹样 木瘤纹" reads; a glued string does not."""
+        spec = self.specs(self.rows("n:night", "Black Burl Nightstand", 6))
+        rows = spec["n:night|black|burl"]["spec"]
+        self.assertEqual([(r["kind_label"], r["label"]) for r in rows],
+                         [("颜色", "黑色"), ("工艺 · 纹样", "木瘤纹")])
+
+    def test_nothing_named_means_no_chart_rather_than_an_empty_grid(self) -> None:
+        self.assertEqual(elements.category_specs(
+            self.rows("n:night", "Black Burl Nightstand", 6), [], self.NODES), [])
+
+    def test_a_listing_outside_the_tracked_nodes_is_not_a_shelf(self) -> None:
+        """Department roll-ups carry the same ASINs as their children; counting
+        them would put every listing on the chart twice."""
+        self.assertEqual(
+            self.specs(self.rows("n:rollup", "Black Burl Nightstand", 6)), {})
+
+
 class BriefTests(unittest.TestCase):
     def test_an_empty_read_produces_no_block(self) -> None:
         """An empty heading in the prompt is worse than no heading."""

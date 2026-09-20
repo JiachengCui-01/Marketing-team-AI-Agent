@@ -200,6 +200,25 @@ def short_label(node_label_path: str) -> str:
     return parts[-1] if parts else node_label_path
 
 
+def area_label(node_label_path: str) -> str:
+    """The room-level category a node sits in: Bedroom Furniture, Patio, Office.
+
+    The leaf answers "which shelf"; this answers "which part of the house", and
+    a design programme is planned at that grain — a colour that is winning
+    across every bedroom node is a different fact from one winning in
+    nightstands alone.
+
+    Read off the path rather than declared, so a node enrolled by the monthly
+    walk gets an area without anyone adding it to a table. Every department root
+    in :data:`SCOPE_PREFIXES` is two segments deep, so the third is the room; a
+    department root itself has no room above it and stands for its own area.
+    """
+    parts = [part for part in (node_label_path or "").split(":") if part]
+    if len(parts) >= 3:
+        return parts[2]
+    return parts[-1] if parts else node_label_path
+
+
 def in_scope(node_label_path: str) -> bool:
     """True when a node sits in one of the departments this business sells into."""
     lowered = (node_label_path or "").lower()

@@ -696,6 +696,207 @@ def _combo_demand(specs: Mapping[tuple[str, ...], Any],
         buckets[signature] = bucket
     return buckets
 
+
+# ------------------------------------------------- specs on a single shelf ----
+# `combinations` reads the department as one shelf: "black fluted" is one point
+# wherever it was built. That answers "what is this department doing", and it is
+# the wrong unit for the question a roadmap is written from. Fluted in
+# Nightstands and fluted in Sofas are different factories, different competitors
+# and different money, and averaging them hides the one node where the look is
+# still open.
+#
+# So the titles are read a second time with the node kept, and a point becomes
+# the four things a brief actually names: the room, the shelf, the colour and
+# the look.
+
+# What counts as a look. The word the brief uses is 外观元素 — a surface
+# treatment, a named style, a silhouette or a material: burl, mid century,
+# distressed, wavy, glass. Sizes, mechanisms and rooms are real decisions too
+# and they are not what the piece looks like; folding them in here would put
+# "12 inch" next to "burl" as though a buyer chose between them.
+#
+# Order is priority, because one slot holds one look: the more specific decision
+# wins. A material is last precisely because nearly every title names one, so
+# taking it first would fill the chart with "oak" and hide every surface
+# treatment behind it.
+LOOK_KINDS: tuple[str, ...] = (CRAFT, STYLE, FORM, MATERIAL)
+_SPEC_KINDS: frozenset[str] = frozenset((COLOR,) + LOOK_KINDS)
+
+# A cell of the category × colour × look grid below this many listings is one
+# seller's idea rather than something the shelf does. Higher than
+# ``MIN_COMBO_ASINS`` because this cell is narrower: it is a spec *and* a node.
+#
+# It is the only bar here. Every cell that clears it is measured and returned;
+# which of them a chart has room for is the panel's decision, and keeping that
+# decision out of this module is what lets the count beside the chart say how
+# many specs the shelf actually has rather than how many survived a cap.
+MIN_SPEC_ASINS = 5
+# Whose share "可进入度" is measured against. Top *five* is the node-level
+# figure the vendor publishes and it is degenerate at this grain: a spec carried
+# by six listings has five brands inside its top five whatever the shelf looks
+# like.
+TOP_BRANDS = 3
+
+
+def category_specs(products: Sequence[Mapping[str, Any]],
+                   named: Sequence[Mapping[str, Any]],
+                   nodes: Mapping[str, Any],
+                   *, before: Sequence[Mapping[str, Any]] = ()) -> list[dict]:
+    """Room × shelf × colour × look, measured on the listings that carry it.
+
+    Every cell came off real titles inside one node. Enumerating the catalog
+    against the vocabulary would produce tens of thousands of products nobody
+    has built, each with a measured-looking position — the same objection that
+    keeps :func:`combinations` reading signatures off listings rather than
+    multiplying term lists together.
+
+    Two numbers per cell, both read off the same rows:
+
+    * **可进入度** — what is left after the three largest brands inside the cell.
+      A look three brands own is not open to a fourth however fast it is
+      growing, and that is a different fact from the node's own concentration:
+      a crowded category can hold a wide-open corner.
+    * **份额变化** — how much of its node's head revenue the cell holds now
+      against last month, in percentage points. Deliberately a share and not a
+      growth rate: the number of listings we hold for a node moves with what the
+      monthly walk managed to collect, so absolute revenue is part measurement
+      and part collection artefact, while a share is not. It also strips out the
+      category's own tide, which is what leaves the look's own movement.
+
+    A node with nothing stored for the comparison month has no share to move
+    against, and its cells come back with ``share_shift_pp`` unset — for the
+    chart to rail rather than draw at zero.
+    """
+    kinds = {row["term"]: row["kind"] for row in named
+             if row.get("kind") in _SPEC_KINDS}
+    if not kinds or not nodes:
+        return []
+    labels = {row["term"]: row.get("label") or row["term"] for row in named}
+    kind_labels = {row["term"]: row.get("kind_label") or row["kind"] for row in named}
+    # Rank inside a kind, so a title naming two colours picks the same one every
+    # month rather than whichever the tokeniser happened to emit first.
+    rank = {row["term"]: -(row.get("revenue_share_pct") or 0.0) for row in named}
+
+    cells, totals = _shelf_cells(products, kinds, rank, nodes)
+    prior, prior_totals = _shelf_cells(before, kinds, rank, nodes)
+
+    out: list[dict] = []
+    for (node, colour, look), agg in cells.items():
+        if agg["asins"] < MIN_SPEC_ASINS or agg["revenue"] <= 0:
+            continue
+        total = totals.get(node) or 0.0
+        share = agg["revenue"] / total * 100.0 if total > 0 else 0.0
+        # Absent last month is a measured zero, as long as the node itself was
+        # collected — a look that did not exist and now holds 3% of the shelf is
+        # the most interesting row on this chart, and dropping it for having no
+        # predecessor would delete exactly the specs worth finding.
+        before_total = prior_totals.get(node) or 0.0
+        if before_total > 0:
+            was = ((prior.get((node, colour, look)) or {}).get("revenue") or 0.0)
+            share_before = was / before_total * 100.0
+            shift = round(share - share_before, 2)
+        else:
+            share_before, shift = None, None
+        rating, _rated = _weighted_rating(agg["_ratings"])
+        prices = agg["_prices"]
+        terms = [t for t in (colour, look) if t]
+        out.append({
+            "key": "|".join((node, colour, look)),
+            "node_key": node,
+            # The spec broken out row by row for the hover card. The two
+            # category rows are added by the panel, which is where the node's
+            # own labels live — a look is only open or crowded *somewhere*.
+            "spec": [{"kind": kinds[t], "kind_label": kind_labels[t],
+                      "label": labels[t]} for t in terms],
+            "color": labels.get(colour) if colour else None,
+            "look": labels.get(look) if look else None,
+            "asins": agg["asins"],
+            "revenue": round(agg["revenue"], 2),
+            "share_pct": round(share, 2),
+            "share_before_pct": (round(share_before, 2)
+                                 if share_before is not None else None),
+            "share_shift_pp": shift,
+            "entry": _entry_score(agg),
+            "brands": len(agg["_brands"]),
+            "avg_price": round(sum(prices) / len(prices), 2) if prices else None,
+            "rating": rating,
+            "reviews": _median_int(agg["_reviews"]),
+        })
+
+    # Biggest first: the money is the reading, and it is also the order the
+    # panel spends its plot budget in.
+    out.sort(key=lambda s: s["revenue"], reverse=True)
+    return out
+
+
+def _shelf_cells(products: Sequence[Mapping[str, Any]],
+                 kinds: Mapping[str, str],
+                 rank: Mapping[str, float],
+                 nodes: Mapping[str, Any],
+                 ) -> tuple[dict[tuple[str, str, str], dict], dict[str, float]]:
+    """Listings grouped into (node, colour, look), with each node's own total.
+
+    The total counts every listing in the node, including the ones naming
+    neither a colour nor a look: it is the denominator the shares are of, and
+    leaving the unnamed listings out of it would inflate every cell by however
+    much of the shelf writes plain titles.
+    """
+    cells: dict[tuple[str, str, str], dict] = {}
+    totals: dict[str, float] = {}
+    for product in products:
+        node = str(product.get("node_id_path") or "")
+        if node not in nodes:
+            continue
+        revenue = _num(product.get("revenue")) or 0.0
+        totals[node] = totals.get(node, 0.0) + revenue
+        title = str(product.get("title") or "")
+        if not title:
+            continue
+        best: dict[str, str] = {}
+        present = [t for t in _terms(_tokens(title)) if t in kinds]
+        for term in sorted(present, key=lambda t: (rank.get(t, 0.0), t)):
+            best.setdefault(kinds[term], term)
+        colour = best.get(COLOR, "")
+        look = next((best[kind] for kind in LOOK_KINDS if kind in best), "")
+        if not colour and not look:
+            continue
+        cell = cells.setdefault((node, colour, look), {
+            "asins": 0, "revenue": 0.0, "_prices": [], "_ratings": [],
+            "_reviews": [], "_brands": {}})
+        cell["asins"] += 1
+        cell["revenue"] += revenue
+        # An unrecorded brand is not evidence that one brand owns the cell, so
+        # each such listing counts as its own owner. The conservative direction:
+        # missing data can leave a cell looking open, never crowded.
+        brand = str(product.get("brand") or "").strip().lower()
+        owner = brand or f"·{product.get('asin') or len(cell['_brands'])}"
+        cell["_brands"][owner] = cell["_brands"].get(owner, 0.0) + revenue
+        price = _num(product.get("price"))
+        if price is not None:
+            cell["_prices"].append(price)
+        rating = _num(product.get("rating"))
+        if rating is not None and rating > 0:
+            cell["_ratings"].append((rating, revenue))
+        reviews = _num(product.get("ratings"))
+        if reviews is not None and reviews >= 0:
+            cell["_reviews"].append(reviews)
+    return cells, totals
+
+
+def _entry_score(cell: Mapping[str, Any]) -> float:
+    """What is left of a cell once its three largest brands have taken theirs.
+
+    100 is a look nobody owns; 0 is one three brands hold outright. The same
+    reading as the board's 可进入度, which is ``100 - top5_brand_crn``, at the
+    grain where the decision is made.
+    """
+    revenue = cell["revenue"]
+    if revenue <= 0:
+        return 0.0
+    top = sorted(cell["_brands"].values(), reverse=True)[:TOP_BRANDS]
+    return round(max(0.0, 100.0 - sum(top) / revenue * 100.0), 1)
+
+
 def naming_brief(terms: Sequence[dict]) -> str:
     """The mined terms as the model receives them, for naming only."""
     lines = [_KIND_RULES, "",

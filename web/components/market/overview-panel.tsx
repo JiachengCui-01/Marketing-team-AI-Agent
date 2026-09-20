@@ -23,9 +23,9 @@ import {
   DeltaBullet,
   DistributionBars,
   ElementComboChart,
-  Quadrant,
   ScoreBar,
   Sparkline,
+  SpecQuadrant,
   StackedRows,
   Treemap,
   fmtMoney,
@@ -43,6 +43,7 @@ import {
   KpiRow,
   MonitorBoard,
   Section,
+  SelectionBrief,
   SplitTabs,
   VerdictChip,
   useScoreLabels,
@@ -163,6 +164,19 @@ export function MarketOverviewPanel({
           <DataGapCard summary={report.summary} onRetry={() => refresh(true)} />
         ) : (
           <>
+            {/* First, above the tiles. The conclusion outranks the scale of the
+                market it was drawn from: a reader who stops after one screen
+                should have the answer to the question they opened the report
+                with, and the tiles, the board, the quadrant and the price bands
+                are what they read when they want to disagree with it. */}
+            <SelectionBrief selection={dashboard?.selection}
+                            labels={Object.fromEntries(
+                              (dashboard?.board ?? []).map((row) => [row.node_key, row.label]))}
+                            onDrill={onDrill} />
+
+            {/* The period stays on the tiles rather than riding up with the
+                brief: the brief is dropped whole when no pick survived its
+                citations, and the date has to be on screen either way. */}
             <Section title={t.gmTitle}
                      right={<span className="text-[10px] text-fg-subtle">
                        {t.gmPeriod} {report.period}
@@ -255,12 +269,49 @@ export function MarketOverviewPanel({
               </div>
             </Section>
 
-            <Section title={t.gmMap} data={(dashboard?.map ?? []).filter((p) => p.growth_pct !== null)}>
-              <Quadrant points={dashboard?.map ?? []} xLabel={t.gmMapX} yLabel={t.gmMapY}
-                        labelTop={8}
-                        quadrants={[t.gmQuadEnter, t.gmQuadCrowdedUp,
-                                    t.gmQuadCrowdedDown, t.gmQuadOpenDown]}
-                        onPick={pick} />
+            {/* One point per product line rather than per category. The
+                category version of this chart restated thirteen rows of the
+                board above it, and drew only the categories whose growth was
+                measurable — so it was both a duplicate and an incomplete one. */}
+            <Section title={t.gmMap} hint={t.gmMapHint}
+                     data={dashboard?.spec_map?.points ?? null}
+                     right={dashboard?.spec_map?.window?.from ? (
+                       <span className="text-[10px] text-fg-subtle tabular-nums">
+                         {t.gmMapWindow} {dashboard.spec_map.window.from}
+                         &nbsp;→&nbsp;{dashboard.spec_map.window.to}
+                       </span>
+                     ) : null}>
+              <SpecQuadrant
+                points={dashboard?.spec_map?.points ?? []}
+                bounds={dashboard?.spec_map?.bounds ?? undefined}
+                scale={dashboard?.spec_map?.scale ?? undefined}
+                areas={dashboard?.spec_map?.areas ?? []}
+                total={dashboard?.spec_map?.total}
+                onPick={pick}
+                xLabel={t.gmMapX}
+                yLabel={t.gmMapY}
+                medianLabel={t.gmElementMedian}
+                quadrants={[t.gmQuadEnter, t.gmQuadCrowdedUp,
+                            t.gmQuadCrowdedDown, t.gmQuadOpenDown]}
+                railLabel={t.gmMapRail}
+                allLabel={t.gmMapAll}
+                countLabel={t.gmComboCount}
+                moreLabel={t.gmComboMore}
+                tipLabels={{ share: t.gmMapTipShare, was: t.gmMapTipWas,
+                             revenue: t.gmMapTipRevenue, asins: t.gmMapTipAsins,
+                             brands: t.gmMapTipBrands, rating: t.gmElementTipRating,
+                             reviews: t.gmElementTipReviews, price: t.gmElementTipPrice,
+                             returnRisk: t.gmMapTipReturn,
+                             unmeasured: t.gmElementTipUnmeasured }}
+                notes={[
+                  t.gmMapOrigin,
+                  t.gmMapEntryNote,
+                  t.gmMapShiftNote,
+                  t.gmMapSizeNote,
+                  t.gmMapRailNote,
+                  t.gmMapReturnNote,
+                  t.gmElementHover,
+                ]} />
             </Section>
 
             <Section title={t.gmPhysical} hint={t.gmPhysicalHint}

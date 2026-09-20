@@ -14,6 +14,7 @@ import {
   type MarketMonitor,
   type MarketPulseMetric,
   type MarketPulseRow,
+  type MarketSelection,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { Modal } from "@/components/modal";
@@ -397,6 +398,107 @@ export function ConfidenceNote({ value }: { value: number | undefined }) {
       )}
       {t.scConfidence} {value.toFixed(2)}
     </span>
+  );
+}
+
+/** The selection brief: what to put into development this period.
+ *
+ * It opens the report because it is the only section that answers the question
+ * the report is opened for. Everything below it — the board, the quadrant, the
+ * price bands, the return rates — is the argument; this is the conclusion, and
+ * a conclusion that arrives after nine charts is one the reader assembled
+ * themselves.
+ *
+ * A card per product line rather than a paragraph. A selection meeting reads
+ * down a column — what, at what price, how heavy, which defect, why now, what
+ * kills it — and prose makes them hunt for the fifth of those in the middle of
+ * a sentence about the third. Every card carries the evidence behind it, so a
+ * pick can be argued with instead of only believed.
+ */
+export function SelectionBrief({
+  selection,
+  labels,
+  onDrill,
+}: {
+  selection?: MarketSelection;
+  /** node_key -> the shelf's own name, from the board below. */
+  labels: Record<string, string>;
+  onDrill?: (node: { nodeKey: string; label: string }) => void;
+}) {
+  const { t } = useI18n();
+  const picks = selection?.picks ?? [];
+  const avoid = selection?.avoid ?? [];
+  if (!picks.length) return null;
+  return (
+    <Section title={t.gmSelection} hint={t.gmSelectionHint}>
+      {selection?.call ? (
+        <p className="mb-2.5 text-sm font-medium leading-relaxed">{selection.call}</p>
+      ) : null}
+      <div className="space-y-2">
+        {picks.map((pick, index) => (
+          <div key={`${pick.node_key}-${pick.spec}-${index}`} className="bi-card">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] tabular-nums text-fg-subtle">{index + 1}</span>
+              {onDrill ? (
+                <button className="text-xs font-medium hover:underline"
+                        onClick={() => onDrill({ nodeKey: pick.node_key,
+                                                 label: labels[pick.node_key] ?? pick.node_key })}>
+                  {labels[pick.node_key] ?? pick.node_key}
+                </button>
+              ) : (
+                <span className="text-xs font-medium">
+                  {labels[pick.node_key] ?? pick.node_key}
+                </span>
+              )}
+              {/* The look is the half of the pick that is not a category, so it
+                  reads as its own object rather than as more of the name. */}
+              <span className="bi-chip bi-chip-observed">{pick.spec}</span>
+              <VerdictChip verdict={pick.move} />
+              {pick.evidence_ids?.length ? <EvidenceChip ids={pick.evidence_ids} /> : null}
+            </div>
+            <div className="mt-1.5 grid gap-x-4 gap-y-1 sm:grid-cols-2">
+              <PickRow label={t.gmSelWhy} value={pick.why_now} wide />
+              <PickRow label={t.gmSelPrice} value={pick.price_band} />
+              <PickRow label={t.gmSelEnvelope} value={pick.envelope} />
+              <PickRow label={t.gmSelFix} value={pick.fix} />
+              <PickRow label={t.gmSelRisk} value={pick.risk} tone="warn" />
+            </div>
+          </div>
+        ))}
+      </div>
+      {avoid.length ? (
+        <div className="mt-2.5">
+          <div className="mb-1 text-[11px] font-medium text-fg-muted">{t.gmSelAvoid}</div>
+          <div className="space-y-1">
+            {avoid.map((row, index) => (
+              <div key={`${row.label}-${index}`}
+                   className="flex flex-wrap items-baseline gap-1.5 text-[11px]">
+                <span className="bi-chip bi-chip-high">{row.label}</span>
+                <span className="text-fg-muted">{row.why}</span>
+                {row.evidence_ids?.length ? <EvidenceChip ids={row.evidence_ids} /> : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </Section>
+  );
+}
+
+/** One line of a pick. Dropped when the model had nothing to put in it — an
+ *  empty row reads as "no defect to fix", which is a claim nobody made. */
+function PickRow({ label, value, wide, tone }: {
+  label: string;
+  value?: string;
+  wide?: boolean;
+  tone?: "warn";
+}) {
+  if (!value) return null;
+  return (
+    <div className={`flex gap-1.5 text-[11px] leading-relaxed${wide ? " sm:col-span-2" : ""}`}>
+      <span className="shrink-0 text-fg-subtle">{label}</span>
+      <span className={tone === "warn" ? "text-warn" : "text-fg-muted"}>{value}</span>
+    </div>
   );
 }
 

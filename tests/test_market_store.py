@@ -337,6 +337,22 @@ class MarketStoreTests(unittest.TestCase):
 
     # ----- products / keywords / reviews -------------------------------------
 
+    def test_product_periods_are_the_months_we_actually_hold(self) -> None:
+        """The comparison month for a shelf reading is whichever month has
+        listings, not the calendar's previous one. A paused walk or a node
+        enrolled late leaves gaps, and comparing against an empty month would
+        report every spec on the board as newly invented."""
+        store.upsert_products([{"marketplace": "US", "asin": "B01", "title": "Oak sideboard"}])
+        store.upsert_product_metrics([
+            {"marketplace": "US", "asin": "B01", "period": period,
+             "node_id_path": self.NODE, "revenue": 100.0}
+            for period in ("202604", "202606", "202608")])
+        self.assertEqual(store.product_periods("US", before="202608"),
+                         ["202606", "202604"])
+        self.assertEqual(store.product_periods("US", before="202608", limit=1),
+                         ["202606"])
+        self.assertEqual(store.product_periods("US", before="202604"), [])
+
     def test_top_products_joins_the_dimension_and_orders_by_revenue(self) -> None:
         store.upsert_products([
             {"marketplace": "US", "asin": "B01", "title": "Oak sideboard", "brand": "A"},

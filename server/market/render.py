@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Sequence
+from typing import Any, Sequence
 
 from marketing_agent import config
 from marketing_agent.source_policy import data_gap_message
@@ -98,14 +98,76 @@ TOOL_OVERVIEW = {
     "input_schema": {
         "type": "object",
         "properties": {
+            # The block the report opens with. Structured rather than prose
+            # because a selection meeting reads down a column — "what, at what
+            # price, how heavy, what defect, why now, what kills it" — and a
+            # paragraph makes them hunt for the fifth of those six in the middle
+            # of a sentence about the third.
+            "selection": {"type": "object", "description":
+                          "The selection brief the report opens with: what goes "
+                          "into development this period, what to leave alone, and "
+                          "what each decision rests on. Every pick is a product "
+                          "line, not a category — a shelf plus the look it would "
+                          "be built in.",
+                          "properties": {
+                "call": {"type": "string", "description":
+                         "<=70 chars, one line, no markdown. The period's call in "
+                         "a sentence a product lead could repeat in a meeting: "
+                         "what this month is for. Not a summary of the board."},
+                "picks": {"type": "array", "maxItems": 5, "description":
+                          "Ordered: what to start first, first.",
+                          "items": {"type": "object", "properties": {
+                    "node_key": {"type": "string",
+                                 "description": "nodeIdPath from the board."},
+                    "spec": {"type": "string", "description":
+                             "<=40 chars. The look, copied word for word from a "
+                             "SPEC OPENINGS row — its colour and its element. "
+                             "Never invent a combination the list does not "
+                             "contain, and never widen one into 'modern styles'."},
+                    "move": {"enum": ["enter", "validate", "watch"]},
+                    "price_band": {"type": "string", "description":
+                                   "<=40 chars. The band this product has to land "
+                                   "in, from PRICE BANDS or the node's own median."},
+                    "envelope": {"type": "string", "description":
+                                 "<=70 chars. The physical envelope the build has "
+                                 "to fit: weight, volume, variation depth. These "
+                                 "are the numbers that cannot be changed later."},
+                    "fix": {"type": "string", "description":
+                            "<=90 chars. The complaint or return driver this "
+                            "product has to engineer out. If nothing in the "
+                            "evidence names one, say that instead of inventing it."},
+                    "why_now": {"type": "string", "description":
+                                "<=110 chars. What changed that makes this the "
+                                "period to start it — the shelf share it is "
+                                "winning, the brands that have not taken it, the "
+                                "category's own move. Plain text: the citation "
+                                "for this pick goes in evidence_ids, never inline."},
+                    "risk": {"type": "string", "description":
+                             "<=90 chars. What would kill it: freight, returns, "
+                             "an entrenched review wall, a thin sample."},
+                    "evidence_ids": _EVIDENCE_IDS,
+                }, "required": ["node_key", "spec", "move", "why_now",
+                                "evidence_ids"]}},
+                "avoid": {"type": "array", "maxItems": 4, "description":
+                          "Product lines not to start, and the reason. Prefer the "
+                          "crowded-and-losing rows of SPEC OPENINGS and the AVOID "
+                          "list; do not repeat a pick here.",
+                          "items": {"type": "object", "properties": {
+                    "label": {"type": "string", "description":
+                              "<=40 chars: the shelf and the look."},
+                    "why": {"type": "string", "description": "<=90 chars."},
+                    "evidence_ids": _EVIDENCE_IDS,
+                }, "required": ["label", "why", "evidence_ids"]}},
+            }, "required": ["call", "picks"]},
             "thesis": {"type": "string", "description":
                        "Markdown, <=500 words, written for a product development "
-                       "team. Which 2-3 sub-categories deserve a product programme "
-                       "this period and what that product would have to be — price "
-                       "band, physical envelope, the complaint it fixes — and which "
-                       "to skip and why. Judge on design headroom, return cost and "
-                       "freight economics; entry cost (ads, keywords) is at most one "
-                       "sentence. Every claim cited. No Data Sources section."},
+                       "team. The reasoning the picks rest on, never a second "
+                       "listing of them: the shape of the department, what moved "
+                       "this period, which sub-categories carry design headroom "
+                       "and which do not. Judge on design headroom, return cost "
+                       "and freight economics; entry cost (ads, keywords) is at "
+                       "most one sentence. Every claim cited. No Data Sources "
+                       "section."},
             "category_verdicts": {"type": "array", "items": {"type": "object", "properties": {
                 "node_key": {"type": "string", "description": "nodeIdPath from the index."},
                 "verdict": _VERDICT,
@@ -462,6 +524,9 @@ def render_overview(
     user = "\n\n".join([part for part in [
         f"MARKETPLACE: {marketplace}   PERIOD: {period}",
         _board_brief(payload["board"], language),
+        # Before the element lists and the alerts: the opening block is written
+        # from these rows, and what leads the input is what leads the output.
+        _selection_brief(payload, language),
         _direction_brief(payload, language),
         monitor.brief(payload["monitor"], language),
         index.sheet(language=language),
@@ -470,6 +535,7 @@ def render_overview(
     cleaned, dropped = ev.validate_citations(narrative, index.ids())
 
     payload["thesis"] = cleaned.get("thesis", "")
+    payload["selection"] = _clean_selection(cleaned.get("selection"), payload["board"])
     payload["verdicts"] = {v["node_key"]: v for v in cleaned.get("category_verdicts", [])
                            if v.get("node_key") in {r["node_key"] for r in payload["board"]}}
     payload["movers_reading"] = cleaned.get("movers_reading", [])
@@ -739,6 +805,131 @@ def _direction_brief(payload: dict, language: str) -> str:
     if element_text:
         blocks.append(element_text)
     return "\n\n".join(blocks)
+
+
+# How many product lines the model may choose from. The chart plots up to
+# ninety-six; a prompt does not need the tail, and a list this long already
+# spans every shelf on the board because the panel fills it a round at a time.
+MAX_SPEC_ROWS = 26
+MAX_PHYSICAL_ROWS = 14
+
+
+def _num_text(value: float | None, digits: int = 0) -> str:
+    """A number for the brief, or the dash that says nobody measured it."""
+    return "—" if value is None else f"{value:,.{digits}f}"
+
+
+def _selection_brief(payload: dict, language: str) -> str:
+    """What a selection meeting decides on: lines, price, weight, returns.
+
+    The board tells the model which shelves are worth working. None of that
+    answers "so what do we draw", which is the question this brief exists to
+    make answerable: the combinations the shelf has actually built, what each
+    one costs to enter, the band the money sits in, and the weight the freight
+    has to carry.
+
+    Every number here is server-computed off stored rows rather than pulled
+    from the evidence index, so it is labelled as such and the model is told to
+    quote it rather than recompute it — the same contract the board scores and
+    the FOLLOW/AVOID lists already run on.
+    """
+    blocks: list[str] = []
+    points = ((payload.get("spec_map") or {}).get("points") or [])
+    bounds = (payload.get("spec_map") or {}).get("bounds") or {}
+    if points:
+        mid = bounds.get("x_mid") or 0.0
+        window = (payload.get("spec_map") or {}).get("window") or {}
+
+        def corner(point: dict) -> str:
+            shift = point.get("share_shift_pp")
+            if shift is None:
+                return "no-comparison-month"
+            if point["entry"] >= mid and shift > 0:
+                return "OPEN+RISING"
+            if point["entry"] < mid and shift < 0:
+                return "crowded+falling"
+            return "-"
+
+        # Openings first: the model reads down the list and the rows it should
+        # be proposing from are the ones it meets first.
+        ordered = sorted(points, key=lambda p: (corner(p) != "OPEN+RISING",
+                                                -(p.get("revenue") or 0.0)))
+        lines = [
+            "PRODUCT LINES ON THE SHELF (server-computed from listing titles; "
+            "the only combinations you may name — copy the colour and element "
+            "words exactly and never invent one). "
+            "ease_of_entry = what the three largest brands inside the line have "
+            f"NOT taken, 0-100, board median {mid:.0f}. share_shift = percentage "
+            "points of its own category's head revenue against "
+            f"{window.get('from') or 'the comparison month'}.",
+            "node_key | shelf | colour · look | corner | ease_of_entry | share% | "
+            "share_shift_pp | head_revenue | asins | brands | rating | avg_price",
+        ]
+        for point in ordered[:MAX_SPEC_ROWS]:
+            look = " · ".join([v for v in (point.get("color"), point.get("look")) if v])
+            shift = point.get("share_shift_pp")
+            rating = point.get("rating")
+            price = point.get("avg_price")
+            lines.append(
+                f"{point['node_key']} | {point['node_label']} | {look} | "
+                f"{corner(point)} | {point['entry']:.0f} | {point['share_pct']:.1f} | "
+                f"{'—' if shift is None else f'{shift:+.2f}'} | "
+                f"{point['revenue']:,.0f} | {point['asins']} | {point['brands']} | "
+                f"{'—' if rating is None else f'{rating:.2f}'} | "
+                f"{'—' if price is None else f'{price:,.0f}'}")
+        blocks.append("\n".join(lines))
+
+    bands = payload.get("price") or []
+    if bands:
+        lines = ["PRICE BANDS (server-computed, whole department; a band whose "
+                 "revenue share runs ahead of its listing share is where the "
+                 "money is, not where the listings are)",
+                 "band | listings% | revenue%"]
+        for band in bands:
+            lines.append(f"{band['bucket_key']} | {band.get('listing_share_pct', 0):.1f} | "
+                         f"{band.get('revenue_share_pct', 0):.1f}")
+        blocks.append("\n".join(lines))
+
+    physical = payload.get("physical") or []
+    if physical:
+        lines = ["PHYSICAL ENVELOPE AND RETURN COST (server-computed per category; "
+                 "freight and the cost of a return scale with weight, the price "
+                 "does not)",
+                 "node_key | label | avg_weight_lb | avg_volume_in3 | avg_price | "
+                 "price_per_lb | return_rate% | peer_return_rate%"]
+        for row in physical[:MAX_PHYSICAL_ROWS]:
+            lines.append(
+                f"{row['node_key']} | {row['label']} | "
+                f"{_num_text(row.get('avg_weight'), 1)} | "
+                f"{_num_text(row.get('avg_volume'))} | "
+                f"{_num_text(row.get('avg_price'))} | "
+                f"{_num_text(row.get('price_per_lb'), 2)} | "
+                f"{_num_text(row.get('return_ratio_pct'), 2)} | "
+                f"{_num_text(row.get('return_ratio_avg_pct'), 2)}")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+def _clean_selection(selection: Any, board: Sequence[dict]) -> dict:
+    """Keep the picks that name a shelf this board actually tracks.
+
+    The same rule the category verdicts run on, for the same reason: a pick for
+    a node nobody collected is a recommendation about a market we did not read.
+    Citations were already enforced upstream — a pick whose evidence did not
+    survive is gone before this sees it.
+    """
+    if not isinstance(selection, dict):
+        return {}
+    known = {row["node_key"] for row in board}
+    picks = [pick for pick in (selection.get("picks") or [])
+             if isinstance(pick, dict) and pick.get("node_key") in known]
+    if not picks:
+        return {}
+    return {
+        "call": str(selection.get("call") or ""),
+        "picks": picks,
+        "avoid": [row for row in (selection.get("avoid") or []) if isinstance(row, dict)],
+    }
 
 
 def _category_brief(payload: dict, language: str) -> str:

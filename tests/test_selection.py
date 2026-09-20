@@ -173,11 +173,12 @@ class GenerationTests(unittest.TestCase):
     def tearDown(self) -> None:
         db.reset_for_tests()
 
-    def _store_board(self, language: str = "zh") -> dict:
+    def _store_board(self, language: str = "zh", dashboard: dict | None = None) -> dict:
+        board = dashboard or self.BOARD
         return market_store.save_dashboard(
             user_id=None, marketplace="US", scope="overview", node_id_path=None,
-            period="202608", language=language, status="ok", dashboard=self.BOARD,
-            summary=self.BOARD["thesis"], evidence=[],
+            period="202608", language=language, status="ok", dashboard=board,
+            summary=board["thesis"], evidence=[],
             vendor_tools=["market_research", "product_research"],
             data_as_of=None, completeness=1.0)
 
@@ -226,6 +227,31 @@ class GenerationTests(unittest.TestCase):
         self.assertEqual(dashboard["market"][0]["brand_concentration"], "18.0%")
         self.assertEqual(dashboard["kpis"], self.BOARD["headline"]["kpis"])
         self.assertEqual(dashboard["notes"], ["评论痛点未采集"])
+
+    def test_the_summary_opens_with_the_selection_picks(self) -> None:
+        """The report list and the export show the head of this string. What a
+        reader meets there should be the conclusion, not the description of the
+        market the conclusion was drawn from."""
+        self._store_board(dashboard={**self.BOARD, "selection": {
+            "call": "本期把开发放在餐边柜的黑色木瘤纹上。",
+            "picks": [{"node_key": BUFFETS, "spec": "黑色 · 木瘤纹", "move": "enter",
+                       "price_band": "$200-300", "envelope": "96 lb / 38,500 in³",
+                       "fix": "门板对缝", "why_now": "前三品牌只拿走四成",
+                       "risk": "重量吃掉退货毛利", "evidence_ids": []}],
+            "avoid": [{"label": "餐椅 · 白色 · 玻璃", "why": "拥挤且份额在退",
+                       "evidence_ids": []}]}})
+        summary = selection.generate_report(self.config)["summary"]
+        self.assertTrue(summary.startswith("## 本期选品建议"), summary[:60])
+        self.assertIn("**Buffets & Sideboards · 黑色 · 木瘤纹**（立项）", summary)
+        self.assertIn("为什么是现在：前三品牌只拿走四成", summary)
+        self.assertIn("建议规避", summary)
+        # The thesis still follows it rather than being replaced by it.
+        self.assertIn("餐边柜是本期最值得做的方向", summary)
+
+    def test_a_board_with_no_picks_keeps_the_summary_it_had(self) -> None:
+        self._store_board()
+        summary = selection.generate_report(self.config)["summary"]
+        self.assertTrue(summary.startswith("餐边柜是本期最值得做的方向"), summary[:40])
 
     def test_the_monitoring_summary_reaches_the_legacy_summary(self) -> None:
         self._store_board()

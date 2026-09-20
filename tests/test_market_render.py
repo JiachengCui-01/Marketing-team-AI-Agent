@@ -937,6 +937,261 @@ class ComboMatrixTests(RenderTestCase):
         self.assertEqual(fresh["element_combos"]["points"], self.matrix()["points"])
 
 
+NIGHTSTANDS = "1055398:1063306:1063308:3733251"
+# Two colours across two looks, so no word is only ever seen inside one pairing:
+# `elements._dedupe` collapses a term that always appears with the same
+# neighbour into the bigram, and a bigram carries no kind of its own.
+SHELF = {"Black Burl Sideboard": 6, "Black Glass Sideboard": 5,
+         "Walnut Burl Sideboard": 5, "Walnut Glass Sideboard": 5}
+SHELF_BEFORE = {"Black Burl Sideboard": 2, "Black Glass Sideboard": 6,
+                "Walnut Burl Sideboard": 6, "Walnut Glass Sideboard": 6}
+# Two listings each from the top two brands and one each from the rest, so "what
+# the three largest brands left" is a number with a right answer.
+SHELF_BRANDS = ["A", "A", "B", "C", "D", "E"]
+
+
+def seed_shelf(period: str, shelf: dict, node: str, tag: str) -> None:
+    """Listings with real looks in their titles, for one node and one month."""
+    rows, metrics, index = [], [], 0
+    for title, count in shelf.items():
+        for i in range(count):
+            asin = f"S{tag}{index}"
+            index += 1
+            rows.append({"marketplace": "US", "asin": asin, "title": title,
+                         "brand": SHELF_BRANDS[i % len(SHELF_BRANDS)]})
+            metrics.append({"marketplace": "US", "asin": asin, "period": period,
+                            "node_id_path": node, "price": 300.0,
+                            "revenue": 100_000.0, "rating": 4.2, "ratings": 120.0,
+                            "source_tool": "product_research"})
+    store.upsert_products(rows)
+    store.upsert_product_metrics(metrics)
+
+
+def seed_product_lines() -> None:
+    """Two months of shelves plus the naming the looks are read through.
+
+    Shared by the quadrant tests and the selection-brief tests: both need the
+    same thing — a board where some lines are open and rising and one shelf has
+    no comparison month at all.
+    """
+    # Nightstands only exists this month: the board needs a snapshot for the node
+    # to be ranked at all, and the chart has to rail it rather than draw a share
+    # shift nobody could compute.
+    store.upsert_node_snapshot("US", NIGHTSTANDS, PERIOD, {
+        "total_revenue": 2_000_000.0, "avg_price": 189.0,
+        "top5_brand_crn": 0.41}, completeness=0.4, missing=[])
+    seed_shelf(PERIOD, SHELF, BUFFETS, "now")
+    seed_shelf("202607", SHELF_BEFORE, BUFFETS, "was")
+    seed_shelf(PERIOD, {"Black Burl Nightstand": 5}, NIGHTSTANDS, "night")
+    store.save_element_naming("US", [
+        {"term": term, "kind": kind, "label": term, "label_zh": term,
+         "label_en": term, "drop": False,
+         "naming_version": elements.NAMING_VERSION}
+        for term, kind in (("black", elements.COLOR), ("walnut", elements.COLOR),
+                           ("burl", elements.CRAFT), ("glass", elements.MATERIAL))])
+
+
+class SpecMapTests(RenderTestCase):
+    """The opportunity quadrant, over product lines rather than categories.
+
+    It used to plot one dot per tracked category — the same rows the board
+    above it lists, minus the ones whose growth could not be measured. A point
+    here is what a design programme chooses between: a room, a shelf, a colour
+    and a look, with both axes read off stored listings.
+    """
+
+    NIGHTSTANDS = NIGHTSTANDS
+
+    def setUp(self) -> None:
+        super().setUp()
+        seed_product_lines()
+
+    def chart(self) -> dict:
+        return render.build_overview("US", PERIOD, "zh")["spec_map"]
+
+    def point(self, key: str) -> dict:
+        return next(p for p in self.chart()["points"] if p["key"] == key)
+
+    def test_a_point_is_a_room_a_shelf_a_colour_and_a_look(self) -> None:
+        """The four rows a brief names. A category alone cannot be drawn."""
+        spec = self.point(f"{BUFFETS}|black|burl")["spec"]
+        self.assertEqual([row["kind"] for row in spec],
+                         ["area", "node", "color", "craft"])
+        self.assertEqual([row["label"] for row in spec],
+                         ["Kitchen & Dining Room Furniture", "Buffets & Sideboards",
+                          "black", "burl"])
+
+    def test_the_same_look_is_measured_once_per_shelf(self) -> None:
+        """Burl in sideboards and burl in nightstands are different factories,
+        different competitors and different money."""
+        keys = {p["key"] for p in self.chart()["points"]}
+        self.assertIn(f"{BUFFETS}|black|burl", keys)
+        self.assertIn(f"{self.NIGHTSTANDS}|black|burl", keys)
+
+    def test_the_y_axis_is_share_against_the_stored_previous_month(self) -> None:
+        point = self.point(f"{BUFFETS}|black|burl")
+        self.assertIsNotNone(point["share_before_pct"])
+        self.assertGreater(point["share_shift_pp"], 0)
+        self.assertEqual(self.chart()["window"], {"from": "202607", "to": PERIOD})
+
+    def test_a_shelf_with_no_stored_previous_month_is_railed(self) -> None:
+        """Unmeasured is not zero, and it is not a reason to leave a category
+        off the chart either — which is what the category map did."""
+        point = self.point(f"{self.NIGHTSTANDS}|black|burl")
+        self.assertIsNone(point["share_shift_pp"])
+        self.assertIsNotNone(point["entry"])
+
+    def test_the_x_axis_is_what_the_three_largest_brands_left(self) -> None:
+        # Six listings: A took two, B and C one each. Two of six are left.
+        self.assertEqual(self.point(f"{BUFFETS}|black|burl")["entry"], 33.3)
+
+    def test_the_divider_is_this_chart_s_median_not_a_fixed_fifty(self) -> None:
+        """Three brands inside one colour of one shelf are not comparable to
+        five brands across a whole category, so an absolute threshold here
+        would be a number pretending to be one."""
+        chart = self.chart()
+        entries = sorted(p["entry"] for p in chart["points"])
+        mid = (entries[len(entries) // 2] if len(entries) % 2
+               else (entries[len(entries) // 2 - 1] + entries[len(entries) // 2]) / 2)
+        self.assertAlmostEqual(chart["bounds"]["x_mid"], round(mid, 1), places=1)
+
+    def test_the_rooms_are_shipped_for_the_filter(self) -> None:
+        rooms = {a["area"]: a["count"] for a in self.chart()["areas"]}
+        self.assertEqual(rooms.get("Bedroom Furniture"), 1)
+        self.assertGreaterEqual(rooms.get("Kitchen & Dining Room Furniture", 0), 2)
+
+    def test_the_category_map_is_not_shipped_alongside_it(self) -> None:
+        """Two opportunity quadrants disagreeing about what an opening is would
+        be worse than the one that was replaced."""
+        self.assertNotIn("map", render.build_overview("US", PERIOD, "zh"))
+
+    def test_the_plot_cap_is_spent_a_round_at_a_time(self) -> None:
+        """A straight top-N by revenue spends the chart on the largest shelves
+        and leaves the small categories off it — which is the complaint the
+        category map earned, with six times as many points to spend."""
+        crowded = ([{"node_key": "big", "revenue": 1_000 - i} for i in range(40)]
+                   + [{"node_key": "small", "revenue": 4 - i} for i in range(2)])
+        kept = panels._every_shelf_first(crowded, 12)
+        self.assertEqual(len([p for p in kept if p["node_key"] == "small"]), 2)
+        self.assertEqual(len(kept), 12)
+        # Still revenue-ordered on the way out, so the chart draws big dots
+        # under small ones rather than over them.
+        self.assertEqual([p["revenue"] for p in kept],
+                         sorted((p["revenue"] for p in kept), reverse=True))
+
+
+class SelectionBriefTests(RenderTestCase):
+    """The block the report opens with: what to put into development.
+
+    Everything else on the board argues; this concludes. So the model is handed
+    the product lines the shelf has actually built, the band the money sits in
+    and the weight the freight has to carry — and what comes back is filtered by
+    the same two rules the rest of the narrative lives under: it must name a
+    node we track, and it must cite something.
+    """
+
+    NIGHTSTANDS = NIGHTSTANDS
+
+    NARRATIVE = {
+        "thesis": "餐边柜领跑 [ev_price000001](evidence:ev_price000001)。",
+        "category_verdicts": [
+            {"node_key": BUFFETS, "verdict": "enter", "rationale": "集中度低",
+             "evidence_ids": ["ev_price000001"]},
+        ],
+        "selection": {
+            "call": "本期把开发放在餐边柜的黑色木瘤纹上",
+            "picks": [
+                {"node_key": BUFFETS, "spec": "black · burl", "move": "enter",
+                 "price_band": "$200-300", "envelope": "96.4 lb / 38,500 in³",
+                 "fix": "门板对缝", "why_now": "前三品牌只拿走四成，份额还在涨",
+                 "risk": "重量吃掉退货毛利", "evidence_ids": ["ev_price000001"]},
+                # A shelf nobody collected.
+                {"node_key": "9:9:9:9", "spec": "black · burl", "move": "enter",
+                 "why_now": "invented", "evidence_ids": ["ev_price000001"]},
+                # A pick whose evidence does not resolve.
+                {"node_key": BUFFETS, "spec": "walnut · glass", "move": "watch",
+                 "why_now": "uncited", "evidence_ids": ["ev_nothing00001"]},
+            ],
+            "avoid": [{"label": "Chairs · white · glass", "why": "拥挤且份额在退",
+                       "evidence_ids": ["ev_price000001"]}],
+        },
+        "notes": [],
+    }
+
+    def setUp(self) -> None:
+        super().setUp()
+        seed_product_lines()
+
+    def render(self, narrative: dict | None = None) -> dict:
+        client = FakeClient({"publish_market_overview": narrative or self.NARRATIVE})
+        self.client = client
+        return render.render_overview(client=client, period=PERIOD)["dashboard"]
+
+    def prompt(self) -> str:
+        self.render()
+        return self.client.prompt_for("publish_market_overview")
+
+    def test_the_model_is_shown_the_lines_the_shelf_has_built(self) -> None:
+        """Without them it can only recommend a category, which is not a thing
+        anybody can draw."""
+        prompt = self.prompt()
+        self.assertIn("PRODUCT LINES ON THE SHELF", prompt)
+        self.assertIn("black · burl", prompt)
+        self.assertIn(BUFFETS, prompt)
+        self.assertIn("ease_of_entry", prompt)
+
+    def test_the_openings_are_the_rows_it_meets_first(self) -> None:
+        """A model reads down a list. The lines it should be proposing from
+        have to be at the top of it, not sorted in among the crowded ones."""
+        prompt = self.prompt()
+        block = prompt.split("PRODUCT LINES ON THE SHELF")[1]
+        rows = [line for line in block.splitlines() if line.startswith(BUFFETS)
+                or line.startswith(self.NIGHTSTANDS)]
+        corners = [row.split("|")[3].strip() for row in rows]
+        self.assertIn("OPEN+RISING", corners)
+        self.assertEqual(corners[0], "OPEN+RISING")
+
+    def test_the_model_is_shown_the_price_band_and_the_freight_envelope(self) -> None:
+        """A pick states a price band and a weight. Both have to come off the
+        warehouse, or the model writes the plausible one instead."""
+        prompt = self.prompt()
+        self.assertIn("PRICE BANDS", prompt)
+        self.assertIn("PHYSICAL ENVELOPE AND RETURN COST", prompt)
+        self.assertIn("96.4", prompt)
+
+    def test_a_pick_survives_with_every_field_it_was_given(self) -> None:
+        selection = self.render()["selection"]
+        self.assertEqual(selection["call"], "本期把开发放在餐边柜的黑色木瘤纹上")
+        pick = selection["picks"][0]
+        self.assertEqual((pick["node_key"], pick["spec"], pick["move"]),
+                         (BUFFETS, "black · burl", "enter"))
+        self.assertEqual(pick["price_band"], "$200-300")
+        self.assertEqual(pick["fix"], "门板对缝")
+        self.assertEqual(pick["evidence_ids"], ["ev_price000001"])
+        self.assertEqual(selection["avoid"][0]["label"], "Chairs · white · glass")
+
+    def test_a_pick_for_a_shelf_we_do_not_track_is_dropped(self) -> None:
+        """A recommendation about a market nobody read is worse than none."""
+        picks = self.render()["selection"]["picks"]
+        self.assertNotIn("9:9:9:9", [p["node_key"] for p in picks])
+
+    def test_a_pick_whose_evidence_does_not_resolve_is_dropped(self) -> None:
+        """The same rule the verdicts run on: an uncited claim is the failure
+        mode this design exists to prevent."""
+        picks = self.render()["selection"]["picks"]
+        self.assertEqual(len(picks), 1)
+        self.assertNotIn("walnut · glass", [p["spec"] for p in picks])
+
+    def test_no_pick_means_no_block_rather_than_an_empty_heading(self) -> None:
+        dashboard = self.render({**self.NARRATIVE, "selection": {"call": "本期无建议",
+                                                                 "picks": []}})
+        self.assertEqual(dashboard["selection"], {})
+
+    def test_a_model_that_omits_the_block_entirely_is_not_an_error(self) -> None:
+        dashboard = self.render({"thesis": "无。", "category_verdicts": [], "notes": []})
+        self.assertEqual(dashboard["selection"], {})
+
+
 class GrowthWindowTests(RenderTestCase):
     """A missing trend must not be drawn as a flat one.
 

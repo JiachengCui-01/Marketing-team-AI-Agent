@@ -161,6 +161,52 @@ def _pct_text(value: float | None) -> str:
     return "—" if value is None else f"{value:.1f}%"
 
 
+_MOVE_LABELS = {
+    "enter": ("立项", "start"),
+    "validate": ("先验证", "validate first"),
+    "watch": ("观望", "watch"),
+}
+
+
+def _selection_markdown(dashboard: dict, zh: bool) -> str:
+    """The selection picks as the markdown the legacy summary opens with.
+
+    A projection of the same structured block the board renders as cards — not a
+    second writing of it. The export has no card layout to lean on, so each pick
+    becomes one bolded line and its supporting fields become the clause after
+    it, in the order a selection meeting asks for them.
+    """
+    selection = dashboard.get("selection") or {}
+    picks = selection.get("picks") or []
+    if not picks:
+        return ""
+    labels = {row["node_key"]: row["label"] for row in (dashboard.get("board") or [])}
+    lines = ["## 本期选品建议" if zh else "## Selection"]
+    if selection.get("call"):
+        lines.append(str(selection["call"]))
+    for index, pick in enumerate(picks, 1):
+        shelf = labels.get(pick.get("node_key"), pick.get("node_key") or "")
+        move = _MOVE_LABELS.get(str(pick.get("move")), ("", ""))[0 if zh else 1]
+        head = f"{index}. **{shelf} · {pick.get('spec', '')}**"
+        if move:
+            head += f"（{move}）" if zh else f" ({move})"
+        lines.append(head)
+        for key, label in (("why_now", "为什么是现在" if zh else "Why now"),
+                           ("price_band", "目标价格带" if zh else "Price band"),
+                           ("envelope", "物理包络" if zh else "Envelope"),
+                           ("fix", "要解决" if zh else "Fix"),
+                           ("risk", "风险" if zh else "Risk")):
+            if pick.get(key):
+                lines.append(f"   - {label}：{pick[key]}" if zh
+                             else f"   - {label}: {pick[key]}")
+    avoid = selection.get("avoid") or []
+    if avoid:
+        lines.append("**建议规避**" if zh else "**Do not start**")
+        for row in avoid:
+            lines.append(f"- {row.get('label', '')} — {row.get('why', '')}")
+    return "\n".join(lines)
+
+
 def project_dashboard(dashboard: dict, language: str) -> tuple[dict, str]:
     """The market board in the legacy dashboard shape, plus its summary.
 
@@ -212,7 +258,14 @@ def project_dashboard(dashboard: dict, language: str) -> tuple[dict, str]:
             "points": department,
         })
 
+    # The picks lead the summary, ahead of the thesis. This string is what the
+    # report list shows and what the export carries, and a reader who only sees
+    # its first paragraph should be reading the conclusion rather than the
+    # market description the conclusion was drawn from.
     summary = str(dashboard.get("thesis") or "")
+    picks = _selection_markdown(dashboard, zh)
+    if picks:
+        summary = f"{picks}\n\n{summary}" if summary else picks
     monitor_summary = str(dashboard.get("monitor_summary") or "")
     if monitor_summary:
         heading = "\n\n## 风险与机会\n\n" if zh else "\n\n## Risks and opportunities\n\n"
