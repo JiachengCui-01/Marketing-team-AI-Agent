@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ArrowSquareOut, ArrowsClockwise, Compass, Database } from "@phosphor-icons/react";
+import { ArrowSquareOut, ArrowsClockwise, Compass, Database, WarningCircle }
+  from "@phosphor-icons/react";
 
 import {
   getMarketBudget,
@@ -164,6 +165,14 @@ export function MarketOverviewPanel({
           <DataGapCard summary={report.summary} onRetry={() => refresh(true)} />
         ) : (
           <>
+            {/* A report with no narrative has to say so. Every model-written
+                block hides itself when empty, which is right for one missing
+                section and wrong for all of them at once: the reader is left
+                looking at a board that silently lost its conclusions with no
+                way to tell a model outage from a market nobody had anything to
+                say about. */}
+            <NarrativeNotice source={dashboard?.narrative_source} />
+
             {/* First, above the tiles. The conclusion outranks the scale of the
                 market it was drawn from: a reader who stops after one screen
                 should have the answer to the question they opened the report
@@ -498,6 +507,32 @@ export function MarketOverviewPanel({
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Why this report has no prose in it, when it has none.
+ *
+ * The render never fails on a model problem — the board is server-computed and
+ * losing the narrative loses prose only, which is the right trade. What was
+ * wrong is that it lost it silently: every model-written block hides itself
+ * when empty, so a whole missing narrative looked exactly like a market with
+ * nothing to say. The reason has always been recorded in the payload; this puts
+ * it on screen, next to the button that fixes it.
+ */
+function NarrativeNotice({ source }: { source?: string }) {
+  const { t } = useI18n();
+  if (!source || source === "llm") return null;
+  const why = (t.gmNarrativeWhy as Record<string, string>)[source] ?? source;
+  return (
+    <div className="mb-6 rounded-xl border border-warn/40 bg-warn/10 px-3 py-2.5">
+      <div className="flex items-center gap-1.5 text-xs font-medium">
+        <WarningCircle size={14} weight="duotone" className="text-warn" />
+        {t.gmNarrativeMissing}
+      </div>
+      <p className="mt-1 text-[11px] leading-relaxed text-fg-muted">
+        {why}。{t.gmNarrativeRetry}
+      </p>
     </div>
   );
 }

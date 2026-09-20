@@ -230,6 +230,41 @@ class OverviewTests(RenderTestCase):
         self.assertEqual(record["dashboard"]["narrative_source"], "unavailable")
         self.assertTrue(record["dashboard"]["board"])
 
+    def test_an_answer_cut_off_by_the_budget_says_so(self) -> None:
+        """A truncated response arrives as the half of the tool call the model
+        had written. Its JSON does not parse, the client turns that into an
+        empty object, and without the stop reason it is indistinguishable from
+        a model that had nothing to say — so the board loses every word of
+        narrative while reporting that nothing went wrong."""
+        client = FakeClient({})
+        client.messages.create = mock.Mock(
+            return_value=mock.Mock(content=[], stop_reason="max_tokens"))
+        record = render.render_overview(client=client, period=PERIOD)
+        self.assertEqual(record["dashboard"]["narrative_source"], "truncated")
+        self.assertTrue(record["dashboard"]["board"])
+
+    def test_half_an_answer_is_flagged_even_though_it_parses(self) -> None:
+        """It is missing sections nobody asked it to drop."""
+        block = mock.Mock(type="tool_use", input={"thesis": "餐边柜仍是最好的方向。"})
+        block.name = "publish_market_overview"
+        client = FakeClient({})
+        client.messages.create = mock.Mock(
+            return_value=mock.Mock(content=[block], stop_reason="max_tokens"))
+        record = render.render_overview(client=client, period=PERIOD)
+        self.assertEqual(record["dashboard"]["narrative_source"], "truncated")
+        self.assertIn("餐边柜", record["dashboard"]["thesis"])
+
+    def test_the_answer_gets_room_for_every_block_it_must_emit(self) -> None:
+        """One JSON object carrying a thesis, a verdict per tracked category,
+        the movers, the direction read, the monitor summary and the selection
+        picks. Six thousand tokens is not enough for that, and being cut off is
+        silent — so the ceiling is a guarded number, not a default."""
+        client = FakeClient({"publish_market_overview": self.OVERVIEW})
+        spy = mock.Mock(side_effect=client._create)
+        client.messages.create = spy
+        render.render_overview(client=client, period=PERIOD)
+        self.assertGreaterEqual(spy.call_args.kwargs["max_tokens"], 12_000)
+
     def test_the_dashboard_is_stored_and_readable(self) -> None:
         client = FakeClient({"publish_market_overview": self.OVERVIEW})
         render.render_overview(client=client, period=PERIOD, language="zh")

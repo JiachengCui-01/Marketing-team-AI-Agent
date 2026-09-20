@@ -396,11 +396,20 @@ class RenderError(RuntimeError):
 
 # ------------------------------------------------------------- model plumbing ----
 
-def _call_model(client, *, system: str, tool: dict, user: str, max_tokens: int = 6000):
+def _call_model(client, *, system: str, tool: dict, user: str, max_tokens: int = 12_000):
     """Forced single tool call with the repo's retry policy.
 
     The retry is now an ordinary convenience rather than credit insurance: the
     vendor data is already committed to SQLite before this runs.
+
+    The budget is the whole answer, not the prose inside it. The overview tool
+    has to emit a thesis, a verdict for every tracked category, the movers, the
+    direction read, the monitor summary and the selection picks in one JSON
+    object; at 6,000 that object was being cut off mid-string, and a cut-off
+    tool call parses as ``{}`` — which is why a board could come back with every
+    number intact and not one word of narrative. Output is billed per token
+    actually written, so a ceiling that is never reached costs nothing. The
+    orchestrator runs at 16,000.
     """
     last: Exception | None = None
     for attempt in range(MODEL_ATTEMPTS):
@@ -428,11 +437,18 @@ def _parse(response, name: str) -> dict | None:
 
 
 def _run_tool(client, *, tool: dict, user: str, language: str,
-              max_tokens: int = 6000) -> tuple[dict, str]:
+              max_tokens: int = 12_000) -> tuple[dict, str]:
     """Returns ``(payload, source)`` — never raises for a model-side problem.
 
-    ``source`` mirrors the repo's other model helpers: ``llm`` | ``no_tool_call`` |
-    ``unavailable`` | ``error``.
+    ``source`` mirrors the repo's other model helpers: ``llm`` | ``truncated`` |
+    ``no_tool_call`` | ``unavailable`` | ``error``.
+
+    ``truncated`` is its own answer rather than part of ``no_tool_call``. A
+    response cut off by the token budget arrives as the half of the tool call
+    the model had written, whose JSON does not parse, which the client turns
+    into an empty object — indistinguishable, without the stop reason, from a
+    model that had nothing to say. The two need different reactions: one is
+    retried with room, the other is not.
     """
     if client is None:
         return {}, "unavailable"
@@ -444,6 +460,12 @@ def _run_tool(client, *, tool: dict, user: str, language: str,
         logger.warning("market render: %s failed: %s", tool["name"], exc)
         return {}, "error"
     payload = _parse(response, tool["name"])
+    # Reported even when the half that arrived parses: a partial answer is
+    # missing sections nobody asked it to drop, and the reader has to be told
+    # that rather than left to notice which heading is absent.
+    if str(getattr(response, "stop_reason", "") or "") == "max_tokens":
+        logger.warning("market render: %s hit the token budget", tool["name"])
+        return payload if isinstance(payload, dict) else {}, "truncated"
     return (payload, "llm") if payload else ({}, "no_tool_call")
 
 
