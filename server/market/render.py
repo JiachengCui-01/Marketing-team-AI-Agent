@@ -436,6 +436,19 @@ def _parse(response, name: str) -> dict | None:
     return None
 
 
+# The vendor statuses worth their own answer. Each of these is a different
+# thing for a person to go and do — top up, replace a key, wait — and "模型调用
+# 失败（超时或接口报错）" sends the reader to look for a bug that is not there.
+# A board sat for weeks with no narrative on a 402, which is a sentence, not a
+# diagnosis: the account was empty and nothing on the page said so.
+_STATUS_SOURCES = {401: "auth", 403: "auth", 402: "no_balance", 429: "rate_limited"}
+
+
+def _failure_source(exc: Exception) -> str:
+    """Name the model-side failure, when the vendor named it for us."""
+    return _STATUS_SOURCES.get(getattr(exc, "status_code", None), "error")
+
+
 def _run_tool(client, *, tool: dict, user: str, language: str,
               max_tokens: int = 12_000) -> tuple[dict, str]:
     """Returns ``(payload, source)`` — never raises for a model-side problem.
@@ -458,7 +471,7 @@ def _run_tool(client, *, tool: dict, user: str, language: str,
                                max_tokens=max_tokens)
     except Exception as exc:  # noqa: BLE001 — a narrative is never worth a 500
         logger.warning("market render: %s failed: %s", tool["name"], exc)
-        return {}, "error"
+        return {}, _failure_source(exc)
     payload = _parse(response, tool["name"])
     # Reported even when the half that arrived parses: a partial answer is
     # missing sections nobody asked it to drop, and the reader has to be told

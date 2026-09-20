@@ -230,6 +230,22 @@ class OverviewTests(RenderTestCase):
         self.assertEqual(record["dashboard"]["narrative_source"], "unavailable")
         self.assertTrue(record["dashboard"]["board"])
 
+    def test_a_vendor_status_is_named_rather_than_called_a_failure(self) -> None:
+        """"模型调用失败" sends a reader to look for a bug. Each of these is a
+        different thing for a person to go and do, and a board sat for weeks
+        with no narrative on a 402 — an empty account, not a broken render."""
+        for status, source in ((402, "no_balance"), (401, "auth"), (403, "auth"),
+                               (429, "rate_limited"), (500, "error"), (None, "error")):
+            with self.subTest(status=status):
+                broken = FakeClient({})
+                exc = RuntimeError("vendor said no")
+                if status is not None:
+                    exc.status_code = status
+                broken.messages.create = mock.Mock(side_effect=exc)
+                record = render.render_overview(client=broken, period=PERIOD)
+                self.assertEqual(record["dashboard"]["narrative_source"], source)
+                self.assertTrue(record["dashboard"]["board"])
+
     def test_an_answer_cut_off_by_the_budget_says_so(self) -> None:
         """A truncated response arrives as the half of the tool call the model
         had written. Its JSON does not parse, the client turns that into an

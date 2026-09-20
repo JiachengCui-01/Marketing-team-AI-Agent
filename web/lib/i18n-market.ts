@@ -28,6 +28,9 @@ export const marketMessages = {
     gmNarrativeMissing: "这份报告里没有模型写的部分",
     gmNarrativeRetry: "数字、榜单和图都是服务端算的，不受影响；点右上角「重新生成」再跑一次模型即可，不花卖家精灵额度。",
     gmNarrativeWhy: {
+      no_balance: "DeepSeek 账户余额不足，接口返回 402 —— 充值后点「重新生成」即可，不用重新采集",
+      auth: "模型密钥无效或被拒绝（401/403），检查服务端的 DEEPSEEK_API_KEY",
+      rate_limited: "模型接口限流（429），过一会儿再点「重新生成」",
       error: "模型调用失败（超时或接口报错）",
       unavailable: "服务端没有配置模型（DEEPSEEK_API_KEY）",
       no_tool_call: "模型没有按结构化格式返回",
@@ -383,6 +386,9 @@ export const marketMessages = {
     gmNarrativeMissing: "This report has no model-written sections",
     gmNarrativeRetry: "The numbers, the board and the charts are server-computed and unaffected. Hit 重新生成 / Re-render to run the model again — it spends no vendor credits.",
     gmNarrativeWhy: {
+      no_balance: "the DeepSeek account is out of balance (HTTP 402) — top it up and re-render; no collection needed",
+      auth: "the model key was rejected (401/403) — check DEEPSEEK_API_KEY on the server",
+      rate_limited: "the model API is rate-limiting (429) — re-render in a moment",
       error: "the model call failed (timeout or an API error)",
       unavailable: "no model is configured on the server (DEEPSEEK_API_KEY)",
       no_tool_call: "the model did not answer in the structured format",
