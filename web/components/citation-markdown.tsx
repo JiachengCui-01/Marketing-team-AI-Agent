@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ExternalLink, Link2 } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -195,6 +195,15 @@ function MarkdownBody({ children, inline = false }: { children: string; inline?:
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
+      // `evidence:` has to survive the sanitiser or the branch above never
+      // runs. react-markdown drops every scheme outside http/https/mailto/tel
+      // and hands the renderer an empty href, so the market reports were
+      // printing `ev_a1b2c3` as bare text where a chip belongs — the citation
+      // UI existed and could not be reached. Everything else still goes
+      // through the default transform; this widens it by one internal scheme
+      // that resolves to a drawer, not to a navigation.
+      urlTransform={(url) =>
+        url.startsWith("evidence:") ? url : defaultUrlTransform(url)}
       components={components}
     >
       {children}
