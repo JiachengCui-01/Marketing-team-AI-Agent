@@ -1463,28 +1463,70 @@ class SelectionBriefTests(RenderTestCase):
         self.render()
         return self.client.prompt_for("publish_market_overview")
 
+    def table(self, heading: str, prompt: str | None = None) -> list[dict]:
+        """One brief block, parsed by column name.
+
+        By name and not by position: the two tests that read a column out of
+        this table indexed into it, so adding `area` to the row moved `corner`
+        and both of them started asserting about a colour.
+        """
+        block = (prompt or self.prompt()).split(heading)[1].split("\n\n")[0]
+        rows = [line for line in block.splitlines() if "|" in line]
+        header = [cell.strip() for cell in rows[0].split("|")]
+        return [dict(zip(header, [cell.strip() for cell in row.split("|")]))
+                for row in rows[1:]]
+
     def test_the_model_is_shown_the_lines_the_shelf_has_built(self) -> None:
         """Without them it can only recommend a category, which is not a thing
         anybody can draw."""
         prompt = self.prompt()
         self.assertIn("PRODUCT LINES ON THE SHELF", prompt)
-        self.assertIn("black · burl", prompt)
-        self.assertIn(BUFFETS, prompt)
         self.assertIn("ease_of_entry", prompt)
+        rows = self.table("PRODUCT LINES ON THE SHELF", prompt)
+        first = rows[0]
+        self.assertEqual(first["node_key"], BUFFETS)
+        self.assertEqual((first["colour"], first["look"]), ("black", "burl"))
+
+    def test_a_line_is_named_down_to_the_part_of_the_house(self) -> None:
+        """The schema asks for 「area · shelf · colour · look」 and the table
+        used to carry the last two. The model cannot copy a column it was
+        never shown, so it wrote the shelf and left the programme generic."""
+        rows = self.table("PRODUCT LINES ON THE SHELF")
+        self.assertEqual(rows[0]["area"], "Kitchen & Dining Room Furniture")
+        self.assertEqual(rows[0]["shelf"], "Buffets & Sideboards")
 
     def test_the_openings_are_the_rows_it_meets_first(self) -> None:
         """A model reads down a list. The lines it should be proposing from
         have to be at the top of it, not sorted in among the crowded ones."""
-        prompt = self.prompt()
-        block = prompt.split("PRODUCT LINES ON THE SHELF")[1]
-        rows = [line for line in block.splitlines() if line.startswith(BUFFETS)
-                or line.startswith(self.NIGHTSTANDS)]
-        corners = [row.split("|")[3].strip() for row in rows]
+        corners = [row["corner"] for row in self.table("PRODUCT LINES ON THE SHELF")]
         # AHEAD rather than RISING: the corner is read against the same median
         # line the chart draws, so a line that diluted less than the board still
         # qualifies — and the header tells the model to say which it means.
         self.assertIn("OPEN+AHEAD", corners)
         self.assertEqual(corners[0], "OPEN+AHEAD")
+
+    def test_a_pattern_outranks_a_material_at_the_same_standing(self) -> None:
+        """Nearly every title names a material and almost none name a pattern,
+        so on revenue alone the material rows took the top of the list and the
+        brief recommended "black, made of glass" — true, and not a decision."""
+        rows = self.table("PRODUCT LINES ON THE SHELF")
+        kinds = [row["look_kind"] for row in rows]
+        self.assertIn("craft", kinds)
+        self.assertIn("material", kinds)
+        self.assertLess(max(i for i, k in enumerate(kinds) if k == "craft"),
+                        min(i for i, k in enumerate(kinds) if k == "material"))
+
+    def test_the_signatures_say_which_elements_travel_together(self) -> None:
+        """One look per line is what keeps a spec cell measurable, so a title
+        naming both a pattern and a style is filed under the pattern and the
+        style never appears beside it. The signatures are the other half of
+        that trade, and they were charted but never shown to the model."""
+        prompt = self.prompt()
+        self.assertIn("SPEC SIGNATURES", prompt)
+        rows = self.table("SPEC SIGNATURES", prompt)
+        self.assertIn("burl · black", [row["signature"] for row in rows])
+        self.assertTrue(all(int(row["attrs"]) >= 2 for row in rows),
+                        "a one-attribute row is an element, not a signature")
 
     def test_the_model_is_shown_the_price_band_and_the_freight_envelope(self) -> None:
         """A pick states a price band and a weight. Both have to come off the

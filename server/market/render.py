@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from marketing_agent import config
 from marketing_agent.source_policy import data_gap_message
@@ -121,8 +121,21 @@ TOOL_OVERVIEW = {
                               "Markdown, 250-400 words, cited inline as "
                               "[ev_xxxxxxxx](evidence:ev_xxxxxxxx). Name every "
                               "line you are recommending in full the first time "
-                              "it appears — room, shelf, colour and look, in "
-                              "words, e.g. 「卧室 · 床架 · 胡桃色 · 中古风」 — and "
+                              "it appears, in words and in this order — area, "
+                              "shelf, colour, look, e.g. 「卧室 · 床架 · 胡桃色 · "
+                              "中古风」. area and shelf are their own columns on "
+                              "the PRODUCT LINES row: copy both, a colour and a "
+                              "look with no shelf under them is not something "
+                              "anybody can draw. Prefer a line whose look_kind "
+                              "is craft, style or form; if you recommend one "
+                              "whose look is only a material, say in the same "
+                              "sentence why the material is the decision. Where "
+                              "a SPEC SIGNATURES row shows other appearance "
+                              "elements travelling with that look, name them "
+                              "too and mark them as department-wide — 「…· 木瘤"
+                              "纹，这组签名上它多和玻璃门、中古风一起出现」 — "
+                              "never attach a signature's element to the shelf "
+                              "as though its own row carried it. Then "
                               "say why THAT colour and THAT look on THAT shelf: "
                               "what the market is doing with it, what it costs "
                               "to build, what would make you drop it. A reader "
@@ -155,9 +168,14 @@ TOOL_OVERVIEW = {
                              "named style, a silhouette or a material — never a "
                              "structural part. Prefer a row that carries a "
                              "colour and a look over one carrying only one of "
-                             "them. Never invent a combination the list does "
-                             "not contain, and never widen one into 'modern "
-                             "styles'."},
+                             "them, and among those prefer look_kind craft, "
+                             "style or form over material: almost every listing "
+                             "names a material, so those rows are the largest "
+                             "on the shelf and the least like a decision. Never "
+                             "invent a combination the list does not contain, "
+                             "never borrow an element from a SPEC SIGNATURES "
+                             "row this line does not carry, and never widen one "
+                             "into 'modern styles'."},
                     "move": {"enum": ["enter", "validate", "watch"]},
                     "price_band": {"type": "string", "description":
                                    "<=40 chars. The band this product has to land "
@@ -885,7 +903,25 @@ def _direction_brief(payload: dict, language: str) -> str:
 # ninety-six; a prompt does not need the tail, and a list this long already
 # spans every shelf on the board because the panel fills it a round at a time.
 MAX_SPEC_ROWS = 26
+MAX_SIGNATURE_ROWS = 18
 MAX_PHYSICAL_ROWS = 14
+
+# Which sort of decision a line's look is, in the order a designer makes them.
+# The same priority `elements.LOOK_KINDS` applies when it picks one look per
+# listing, applied a second time here for the same reason: nearly every title
+# names a material and almost none name a pattern, so the material rows are
+# systematically the biggest ones on the shelf. Sorted by revenue alone they
+# take the whole list, and the brief ends up recommending "black, made of
+# metal" — a true reading of the shelf and not a product decision.
+_LOOK_KIND_RANK = {"craft": 0, "style": 1, "form": 2, "material": 3}
+
+
+def _look_kind(point: Mapping[str, Any]) -> str:
+    """The kind of the one look a spec row carries: craft/style/form/material."""
+    for part in point.get("spec") or ():
+        if part.get("kind") in _LOOK_KIND_RANK:
+            return str(part["kind"])
+    return ""
 
 
 def _num_text(value: float | None, digits: int = 0) -> str:
@@ -932,20 +968,32 @@ def _selection_brief(payload: dict, language: str) -> str:
                 return "crowded+behind"
             return "-"
 
-        # Openings first, and a whole line before a half one: the model reads
-        # down the list, and the rows it should be proposing from — open,
-        # rising, and carrying both a colour and a look — are the ones it meets
-        # first. A cell that names only a colour is a real reading and a poor
-        # brief; it stays on the list, further down.
+        # Openings first, a whole line before a half one, then the specific
+        # looks before the materials: the model reads down the list, it is cut
+        # at MAX_SPEC_ROWS, and sorted by revenue inside a tier the material
+        # rows took the top of it every month. See `_LOOK_KIND_RANK`.
         ordered = sorted(points, key=lambda p: (
             corner(p) != "OPEN+AHEAD",
             not (p.get("color") and p.get("look")),
+            _LOOK_KIND_RANK.get(_look_kind(p), 9),
             -(p.get("revenue") or 0.0)))
         lines = [
             "PRODUCT LINES ON THE SHELF (server-computed from listing titles; "
-            "the only combinations you may name — copy the colour and element "
-            "words exactly and never invent one; a row carrying both a colour "
-            "and a look is a brief, a row carrying one of them is half of one). "
+            "the only combinations you may name — copy the area, shelf, colour "
+            "and element words exactly and never invent one; a row carrying "
+            "both a colour and a look is a brief, a row carrying one of them "
+            "is half of one). area is the part of the house the shelf sits in "
+            "and shelf is the category itself: name both, a colour and a look "
+            "with no shelf under them is not something anybody can draw. "
+            "look_kind says what sort of decision the look is — `craft` a "
+            "surface treatment or pattern, `style` a named style, `form` a "
+            "silhouette, `material` what it is made of. Rows are ordered with "
+            "craft, style and form above material, because nearly every title "
+            "names a material and almost none name a pattern: a material row "
+            "is usually the biggest line on its shelf and almost never the "
+            "decision worth recommending. Recommend a bare `material` line "
+            "only when you say in the same breath why the material itself is "
+            "the decision. "
             "ease_of_entry = what the three largest brands inside the line have "
             f"NOT taken, 0-100, board median {mid:.0f}. share_shift = percentage "
             "points of its own category's head revenue against "
@@ -954,21 +1002,57 @@ def _selection_brief(payload: dict, language: str) -> str:
             "taking shelf faster than the typical spec on the board and not "
             "necessarily that it grew — say which you mean, and if the median "
             "is negative the whole department diluted and that is the story.",
-            "node_key | shelf | colour · look | corner | ease_of_entry | share% | "
-            "share_shift_pp | head_revenue | asins | brands | rating | avg_price",
+            "node_key | area | shelf | colour | look | look_kind | corner | "
+            "ease_of_entry | share% | share_shift_pp | head_revenue | asins | "
+            "brands | rating | avg_price",
         ]
         for point in ordered[:MAX_SPEC_ROWS]:
-            look = " · ".join([v for v in (point.get("color"), point.get("look")) if v])
             shift = point.get("share_shift_pp")
             rating = point.get("rating")
             price = point.get("avg_price")
             lines.append(
-                f"{point['node_key']} | {point['node_label']} | {look} | "
+                f"{point['node_key']} | {point.get('area') or '—'} | "
+                f"{point['node_label']} | {point.get('color') or '—'} | "
+                f"{point.get('look') or '—'} | {_look_kind(point) or '—'} | "
                 f"{corner(point)} | {point['entry']:.0f} | {point['share_pct']:.1f} | "
                 f"{'—' if shift is None else f'{shift:+.2f}'} | "
                 f"{point['revenue']:,.0f} | {point['asins']} | {point['brands']} | "
                 f"{'—' if rating is None else f'{rating:.2f}'} | "
                 f"{'—' if price is None else f'{price:,.0f}'}")
+        blocks.append("\n".join(lines))
+
+    # One look per line is what keeps a spec cell measurable — a listing naming
+    # both a pattern and a style is filed under the pattern, so the style never
+    # appears beside it on that shelf. The signatures are the other half of that
+    # trade: the same titles read for every attribute at once, department-wide.
+    # Without them the brief can say "黑色 · 木瘤纹" and can never say which
+    # elements 木瘤纹 actually ships with, which is the sentence a designer
+    # needs. They were computed and charted from the day the spec chart landed
+    # and never put in front of the model.
+    signatures = ((payload.get("element_combos") or {}).get("points") or [])
+    if signatures:
+        lines = [
+            "SPEC SIGNATURES (server-computed off listing titles, whole "
+            "department: each row is a combination the market has actually "
+            "built, read off real titles and never multiplied out of a word "
+            "list). There is no node here — a signature spans shelves — so it "
+            "is how you name which appearance elements travel together and at "
+            "what price, not where to build them. The shelf, the colour and "
+            "the pick itself still come from PRODUCT LINES: naming a signature "
+            "is not a licence to attach its elements to a shelf whose own row "
+            "does not carry them, and saying so is the difference between a "
+            "reading and an invention. rating_gap is the signature's "
+            "revenue-weighted rating against the median signature on the "
+            "board — well sold and badly rated is somebody making money doing "
+            "it badly, which is a brief.",
+            "signature | attrs | asins | head_revenue_share% | avg_price | rating_gap",
+        ]
+        for row in signatures[:MAX_SIGNATURE_ROWS]:
+            lines.append(
+                f"{row['label']} | {len(row.get('spec') or ())} | {row['asins']} | "
+                f"{_num_text(row.get('shelf_pct'), 2)} | "
+                f"{_num_text(row.get('avg_price'))} | "
+                f"{_num_text(row.get('rating_gap'), 2)}")
         blocks.append("\n".join(lines))
 
     bands = payload.get("price") or []
