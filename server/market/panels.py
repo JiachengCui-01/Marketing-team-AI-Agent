@@ -323,8 +323,29 @@ def build_current(marketplace: str, language: str, *,
 # looked meaningful, and a chart of low-share specs would push the median line
 # off the frame. x is in percentage points of head revenue; y is in stars, where
 # a quarter of a star is already a wide gap between two ratings.
-MIN_X_SPAN = 5.0
+#
+# Floors, not frames: the axis is otherwise fitted to the points on it. x used
+# to run to a fixed five points of head revenue, which on a real board — where
+# the busiest spec holds two — spent well over half the width on empty shelf
+# and pushed every dot into the left quarter of the chart.
+MIN_X_SPAN = 0.8
 MIN_Y_SPAN = 0.25
+# A reading this far clear of the rest of the pack stops setting the axis:
+# half the span it would otherwise claim, all to itself. One spec rated a star
+# and a half under the board is a real reading, and letting it own five sixths
+# of the height squeezes the other forty-four into a band at the top. Past the
+# fence a point is pinned to the frame edge and drawn pinned — still on the
+# chart, still in the hover card, no longer paying for the whole axis.
+#
+# The share is always measured against the span the readings started with, and
+# never against what is left after a trim. Against the shrinking span it
+# cascades: shelf shares are Pareto-shaped, so every step down the tail is a
+# large fraction of the little that remains, and a run of trims eats the four
+# biggest specs on the board — which are the four the chart exists to show.
+OUTLIER_GAP_SHARE = 0.5
+# And never more than this share of them, so a genuinely wide spread is drawn
+# wide instead of trimmed down to its middle.
+MAX_TRIMMED_SHARE = 0.1
 # How many specs one chart may plot. A spec is a narrow claim, so the tail is
 # long and mostly one-listing noise; the count of what was measured is reported
 # beside the chart so the tail is visible without being drawn.
@@ -413,20 +434,79 @@ def _quadrant_names(zh: bool) -> tuple[str, str, str, str]:
              "Shelf-heavy, poorly rated (the opening)", "Thin and poorly rated"))
 
 
-def _chart_bounds(points: Sequence[dict], x_mid: float, y_mid: float) -> dict:
-    """Axis bounds, from the points actually being drawn.
+def _fitted(values: Sequence[float]) -> tuple[float, float]:
+    """The interval the readings actually occupy, minus any detached extreme.
 
-    The floors are what stop a chart of near-identical specs from being zoomed
-    until noise looks like signal, and they keep the median line inside the
-    frame even when every spec sits well below it.
+    Sorted, then walked in from whichever end has the wider gap to its
+    neighbour. A value separated from the next one in by half of the readings'
+    whole span is not describing the distribution any more, it is dragging the
+    frame; a tail that steps down evenly has no such gap and is kept whole. The
+    walk stops at a tenth of the points, so a spread that is genuinely wide is
+    drawn wide.
+    """
+    ordered = sorted(values)
+    lo, hi = 0, len(ordered) - 1
+    span = ordered[hi] - ordered[lo]
+    if span <= 0:
+        return ordered[lo], ordered[hi]
+    budget = int(len(ordered) * MAX_TRIMMED_SHARE)
+    while budget > 0 and hi - lo >= 2:
+        low_gap = ordered[lo + 1] - ordered[lo]
+        high_gap = ordered[hi] - ordered[hi - 1]
+        # The span here is the one the readings arrived with, deliberately: see
+        # OUTLIER_GAP_SHARE.
+        if max(low_gap, high_gap) < span * OUTLIER_GAP_SHARE:
+            break
+        if low_gap >= high_gap:
+            lo += 1
+        else:
+            hi -= 1
+        budget -= 1
+    return ordered[lo], ordered[hi]
+
+
+def _padded(lo: float, hi: float, min_span: float) -> tuple[float, float]:
+    """A little air around the readings, and never a frame thinner than the
+    floor — a span of zero is what a board of one spec would otherwise ask for.
+    """
+    room = max(hi - lo, min_span) * 0.06
+    lo, hi = lo - room, hi + room
+    if hi - lo < min_span:
+        middle = (lo + hi) / 2
+        lo, hi = middle - min_span / 2, middle + min_span / 2
+    return lo, hi
+
+
+def _chart_bounds(points: Sequence[dict], x_mid: float, y_mid: float) -> dict:
+    """Axis bounds, fitted to the points actually being drawn.
+
+    The frame follows the distribution rather than standing still in front of
+    it: whatever the board looks like this month, the dots should fill the
+    chart. The floors are what stop a chart of near-identical specs from being
+    zoomed until noise looks like signal, and both reference lines are forced
+    inside the frame — a chart that draws a median it cannot show is worse than
+    one with some slack in it.
     """
     shelves = [p["shelf_pct"] for p in points if p["shelf_pct"] is not None]
     gaps = [p["rating_gap"] for p in points if p["rating_gap"] is not None]
+    x_lo, x_hi = _fitted(shelves) if shelves else (0.0, MIN_X_SPAN)
+    y_lo, y_hi = _fitted(gaps) if gaps else (-MIN_Y_SPAN, MIN_Y_SPAN)
+    # The two dashed lines are drawn off these bounds, so both have to be
+    # reachable: the vertical one at the median share, the horizontal one at the
+    # board median rating, which is a gap of zero.
+    x_lo, x_hi = _padded(min(x_lo, x_mid), max(x_hi, x_mid), MIN_X_SPAN)
+    y_lo, y_hi = _padded(min(y_lo, 0.0), max(y_hi, 0.0), MIN_Y_SPAN)
+    # Zero is a real reading on a share axis — it means "holds none of the head"
+    # — so the frame keeps it whenever the smallest spec is anywhere near it,
+    # rather than cutting the axis to win a few pixels. A share is never
+    # negative either way.
+    x_lo = 0.0 if x_lo <= (x_hi - x_lo) * 0.25 else max(0.0, x_lo)
     return {
-        "x_max": round(max([MIN_X_SPAN, x_mid * 1.3] + shelves) * 1.1, 2),
+        "x_min": round(x_lo, 2),
+        "x_max": round(x_hi, 2),
         "x_mid": x_mid,
-        "y_min": round(min([-MIN_Y_SPAN] + gaps) * 1.1, 2),
-        "y_max": round(max([MIN_Y_SPAN] + gaps) * 1.1, 2),
+        "y_min": round(y_lo, 2),
+        "y_max": round(y_hi, 2),
         # The rating the zero line stands for, so it can be named rather than
         # left as an unexplained 0.
         "y_mid": round(y_mid, 2),

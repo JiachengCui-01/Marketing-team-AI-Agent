@@ -1696,6 +1696,19 @@ select.field:focus {
   .bi-dot-core-flat {
     fill: rgb(var(--fg-subtle));
   }
+  /* A dot pressed against a fitted frame: the reading is further out than the
+     chart goes. Solid, and in the dot's own colour, because it is the same
+     spec — it is the shape that says the position is the frame's and not the
+     market's. */
+  .bi-dot-pin {
+    fill: rgb(var(--feature-selection) / 0.75);
+  }
+  .bi-dot-pin-risk {
+    fill: rgb(var(--danger) / 0.7);
+  }
+  .bi-dot-pin-flat {
+    fill: rgb(var(--fg-subtle) / 0.75);
+  }
   /* The whole dot is one hit target, and it takes keyboard focus so the hover
      card is reachable without a mouse. */
   .bi-dot-group {

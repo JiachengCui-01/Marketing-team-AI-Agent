@@ -17,6 +17,12 @@ export type Point = { period: string; value: number };
 
 const ACCENT = "rgb(var(--feature-selection))";
 
+/** Hold a value inside a fitted axis, so a reading outside the frame is drawn
+ *  pinned to its edge rather than off the drawing. */
+function clamp(value: number, lo: number, hi: number): number {
+  return Math.min(Math.max(value, lo), hi);
+}
+
 /** Fit a label to a character budget, with an ellipsis rather than a hard cut. */
 function truncate(text: string, budget: number): string {
   if (budget < 3) return "";
@@ -401,6 +407,10 @@ export function inField(point: ElementPoint): point is ElementFieldPoint {
  *  rather than about the points drawn, which is why the server computes it over
  *  every measured element rather than over the ones that fit on the chart. */
 export type ElementChartBounds = {
+  /** Where the x axis starts. Usually 0 — a share of nothing is a real reading
+   *  — but a board whose specs all sit well clear of zero is drawn where the
+   *  specs are. Absent on a dashboard stored before the frame was fitted. */
+  x_min?: number;
   x_max: number;
   x_mid: number;
   y_min: number;
@@ -505,6 +515,8 @@ export function ElementMatrix({
   // Bounds from this row's own elements; the dot area from the whole set, so a
   // big element in a quiet row cannot out-draw a bigger one in a busy row.
   const { x_max: xMax, x_mid: xMid, y_min: yMin, y_max: yMax } = bounds;
+  // Older payloads have no x_min: the axis started at zero by construction.
+  const xMin = bounds.x_min ?? 0;
   const maxRevenue = Math.max(1, scale.max_revenue);
 
   // The rails are inside the padding, not extra chrome outside it: each takes a
@@ -515,9 +527,55 @@ export function ElementMatrix({
   const fieldL = padL + railW;
   const fieldB = padB + railH;
 
-  const px = (v: number) => fieldL + (v / xMax) * (width - fieldL - padR);
+  const px = (v: number) =>
+    fieldL + ((clamp(v, xMin, xMax) - xMin) / (xMax - xMin || 1))
+             * (width - fieldL - padR);
   const py = (v: number) =>
-    height - fieldB - ((v - yMin) / (yMax - yMin || 1)) * (height - padT - fieldB);
+    height - fieldB
+    - ((clamp(v, yMin, yMax) - yMin) / (yMax - yMin || 1)) * (height - padT - fieldB);
+
+  // The frame is fitted to where the points are, so a reading far enough clear
+  // of the rest of them can fall outside it — see the server's `_fitted`. It is
+  // pinned to the frame rather than dropped, and drawn with an arrow against
+  // the wall it is pressed to, so nobody reads the pinned position as the
+  // measurement. Which wall, if any:
+  type Wall = "top" | "bottom" | "left" | "right";
+  const pinnedAt = (point: ElementFieldPoint): Wall | null =>
+    point.rating_gap < yMin ? "bottom" : point.rating_gap > yMax ? "top"
+    : point.shelf_pct > xMax ? "right" : point.shelf_pct < xMin ? "left" : null;
+  /** The arrow itself: a triangle at the frame edge, apex pointing at the
+   *  reading the chart stops short of. `cx`/`cy` are the clamped position, so
+   *  the arrow sits on the edge while the disc rests just inside it. */
+  const pinArrow = (wall: Wall, cx: number, cy: number): string => {
+    const [back, half] = [6.5, 4.5];
+    if (wall === "bottom") {
+      const y = height - fieldB;
+      return `M${cx - half},${y - back} L${cx + half},${y - back} L${cx},${y} Z`;
+    }
+    if (wall === "top") {
+      return `M${cx - half},${padT + back} L${cx + half},${padT + back} `
+             + `L${cx},${padT} Z`;
+    }
+    if (wall === "right") {
+      const x = width - padR;
+      return `M${x - back},${cy - half} L${x - back},${cy + half} L${x},${cy} Z`;
+    }
+    return `M${fieldL + back},${cy - half} L${fieldL + back},${cy + half} `
+           + `L${fieldL},${cy} Z`;
+  };
+  // And whether either end of either axis has one, which is what the tick value
+  // there has to admit to: "-0.3" and "at most -0.3" are different claims.
+  const cut = {
+    xMax: field.some((p) => p.shelf_pct > xMax),
+    xMin: field.some((p) => p.shelf_pct < xMin),
+    yMax: field.some((p) => p.rating_gap > yMax),
+    yMin: field.some((p) => p.rating_gap < yMin),
+  };
+  // Tick values follow the span rather than a fixed precision: a fitted axis
+  // can be a tenth of a point wide, and "0% … 0%" is what a hard toFixed(0)
+  // prints for it.
+  const xTick = (v: number) => `${v.toFixed(xMax - xMin < 10 ? 1 : 0)}%`;
+  const yTick = (v: number) => v.toFixed(yMax - yMin < 0.5 ? 2 : 1);
 
   // Biggest first, so a small dot is never hidden under a large one, and so the
   // labels that get dropped on collision are the least important ones.
@@ -535,13 +593,19 @@ export function ElementMatrix({
   // in the hover card, which is where the reader looks for a specific point
   // anyway.
   const labelCap = aspect === "solo" ? 16 : ordered.length;
+  // A seat the size of the name that sits in it. An attribute row holds one
+  // word — "walnut", "60 inch" — and 56 units is generous for it; a spec is a
+  // four-part phrase around 120 units long, and at the row's seat size two of
+  // them clear each other by the numbers and still print as one smudge. The
+  // dots that lose a seat keep their name in the hover card.
+  const [seatW, seatH] = aspect === "solo" ? [130, 18] : [56, 13];
   const labelled = new Set<string>();
   for (const point of ordered) {
     if (labelled.size >= labelCap) break;
     const cx = px(point.shelf_pct);
     const cy = py(point.rating_gap);
-    if (placed.some((seat) => Math.abs(seat.x - cx) < 56
-                              && Math.abs(seat.y - cy) < 13)) continue;
+    if (placed.some((seat) => Math.abs(seat.x - cx) < seatW
+                              && Math.abs(seat.y - cy) < seatH)) continue;
     placed.push({ x: cx, y: cy });
     labelled.add(point.key);
   }
@@ -633,21 +697,24 @@ export function ElementMatrix({
         <text className="bi-axis-tick" x={padL - 6} y={py(0) + 9} textAnchor="end">
           {(bounds.y_mid ?? 0).toFixed(1)}★
         </text>
+        {/* A fitted frame can stop short of a reading, and the tick is where it
+            says so: ≥ / ≤ rather than a bare number that a pinned dot would
+            turn into a lie. */}
         <text className="bi-axis-tick" x={padL - 6} y={padT + 4} textAnchor="end">
-          +{yMax.toFixed(1)}
+          {cut.yMax ? "≥" : "+"}{yTick(yMax)}
         </text>
         <text className="bi-axis-tick" x={padL - 6} y={height - fieldB} textAnchor="end">
-          {yMin.toFixed(1)}
+          {cut.yMin ? "≤" : ""}{yTick(yMin)}
         </text>
         {/* The dashed line's value is meaningless without the word: nothing tells
             a reader that 13% is the median of the elements we track. */}
         <text className="bi-axis-tick" x={px(xMid)} y={height - padB + 13} textAnchor="middle">
-          {medianLabel} {xMid.toFixed(0)}%
+          {medianLabel} {xTick(xMid)}
         </text>
         <text className="bi-axis-tick" x={fieldL} y={height - padB + 13}
-              textAnchor="start">0</text>
+              textAnchor="start">{cut.xMin ? "≤" : ""}{xTick(xMin)}</text>
         <text className="bi-axis-tick" x={width - padR} y={height - padB + 13} textAnchor="end">
-          {xMax.toFixed(0)}%
+          {cut.xMax ? "≥" : ""}{xTick(xMax)}
         </text>
 
         {/* Axis names, on every row. The one-line note in the section heading was
@@ -681,7 +748,8 @@ export function ElementMatrix({
           // real element look like a decoration: "there is something here" and
           // no way to find out what without hunting for it with a mouse.
           const clash = placed.some(
-            (seat) => Math.abs(seat.x - cx) < 52 && Math.abs(seat.y - cy) < 12);
+            (seat) => Math.abs(seat.x - cx) < seatW - 4
+                      && Math.abs(seat.y - cy) < seatH - 1);
           if (!clash) placed.push({ x: cx, y: cy });
           return (
             <g key={point.key} className="bi-dot-group" tabIndex={0} role="button"
@@ -704,8 +772,14 @@ export function ElementMatrix({
 
         {ordered.map((point) => {
           const r = 4 + Math.sqrt(point.revenue / maxRevenue) * 11;
-          const cx = px(point.shelf_pct);
-          const cy = py(point.rating_gap);
+          // A pinned dot rests just inside the wall it is pressed to: half a
+          // disc hanging over the axis would land in the rail strip and read as
+          // a rail mark, which is a different claim again.
+          const wall = pinnedAt(point);
+          const edgeX = px(point.shelf_pct);
+          const edgeY = py(point.rating_gap);
+          const cx = edgeX + (wall === "left" ? r : wall === "right" ? -r : 0);
+          const cy = edgeY + (wall === "top" ? r : wall === "bottom" ? -r : 0);
           // Colour says which corner, not which sign: below the median rating is
           // only an opening where there is money to take, and above it is only
           // a warning for the same reason. A well-rated spec nobody buys is
@@ -737,6 +811,15 @@ export function ElementMatrix({
               <circle className={`bi-dot-core${opening ? "" : crowded
                                    ? " bi-dot-core-risk" : " bi-dot-core-flat"}`}
                       cx={cx} cy={cy} r={Math.min(3, r / 3)} />
+              {/* Off the fitted frame: the arrow, and the reading itself in the
+                  hover card. Dropping the point would be a claim about the
+                  market; drawing it at the edge unmarked would be a claim about
+                  its position. */}
+              {wall ? (
+                <path className={`bi-dot-pin${opening ? "" : crowded
+                                   ? " bi-dot-pin-risk" : " bi-dot-pin-flat"}`}
+                      d={pinArrow(wall, edgeX, edgeY)} />
+              ) : null}
               {!clash ? (
                 <text className="bi-point-label" x={cx} y={cy - r - 5} textAnchor="middle">
                   {truncate(point.label, aspect === "solo" ? 16 : 12)}

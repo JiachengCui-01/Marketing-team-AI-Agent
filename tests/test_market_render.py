@@ -941,12 +941,14 @@ class ComboMatrixTests(RenderTestCase):
         """Without them a chart whose specs sit within a point of each other is
         zoomed until those gaps look like findings."""
         bounds = self.matrix()["bounds"]
-        self.assertGreaterEqual(bounds["x_max"], panels.MIN_X_SPAN)
-        self.assertGreaterEqual(bounds["y_max"], panels.MIN_Y_SPAN)
-        self.assertLessEqual(bounds["y_min"], -panels.MIN_Y_SPAN)
-        # And the median line reachable, or the chart draws a reference it
+        self.assertGreaterEqual(bounds["x_max"] - bounds["x_min"], panels.MIN_X_SPAN)
+        self.assertGreaterEqual(bounds["y_max"] - bounds["y_min"], panels.MIN_Y_SPAN)
+        # And both reference lines reachable, or the chart draws a median it
         # cannot show.
         self.assertGreaterEqual(bounds["x_max"], bounds["x_mid"])
+        self.assertLessEqual(bounds["x_min"], bounds["x_mid"])
+        self.assertLessEqual(bounds["y_min"], 0.0)
+        self.assertGreaterEqual(bounds["y_max"], 0.0)
 
     def test_every_spec_is_inside_the_frame(self) -> None:
         matrix = self.matrix()
@@ -955,6 +957,7 @@ class ComboMatrixTests(RenderTestCase):
             with self.subTest(point["key"]):
                 if point["shelf_pct"] is not None:
                     self.assertLessEqual(point["shelf_pct"], bounds["x_max"])
+                    self.assertGreaterEqual(point["shelf_pct"], bounds["x_min"])
                 if point["rating_gap"] is not None:
                     self.assertGreaterEqual(point["rating_gap"], bounds["y_min"])
                     self.assertLessEqual(point["rating_gap"], bounds["y_max"])
@@ -1016,6 +1019,109 @@ def seed_shelf(period: str, shelf: dict, node: str, tag: str) -> None:
                             "source_tool": "product_research"})
     store.upsert_products(rows)
     store.upsert_product_metrics(metrics)
+
+
+class ChartFrameTests(unittest.TestCase):
+    """How the spec chart's frame is fitted to the specs in it.
+
+    A fixed frame is what put every dot in the top-left corner of a real board:
+    x ran to five points of head revenue while the busiest spec held two, and
+    one spec rated a star and a half under the board owned five sixths of the
+    height. The frame follows the distribution now, and a reading it cannot
+    reach is pinned to the edge rather than dropped — so these tests are about
+    where the axis stops, and about what it takes to make it stop short.
+
+    Straight against the pure function: an outlier is a property of a
+    distribution, and seeding forty-five listings to produce one would be a test
+    of the fixture rather than of the frame.
+    """
+
+    @staticmethod
+    def frame(shelves, gaps, *, x_mid=None):
+        points = [{"shelf_pct": x, "rating_gap": y} for x, y in zip(shelves, gaps)]
+        mid = x_mid if x_mid is not None else scoring._median(list(shelves))
+        return panels._chart_bounds(points, mid, 4.5)
+
+    @staticmethod
+    def fill(lo, hi, values):
+        """What share of the axis the readings inside it actually use."""
+        inside = [v for v in values if lo <= v <= hi]
+        return (max(inside) - min(inside)) / (hi - lo)
+
+    def test_the_frame_follows_the_points_instead_of_a_fixed_span(self) -> None:
+        """The complaint this answers: a board of small shares drawn against a
+        five-point axis is mostly a picture of empty shelf."""
+        shelves = [0.1 + i * 0.05 for i in range(40)]
+        gaps = [round(-0.2 + i * 0.01, 2) for i in range(40)]
+        bounds = self.frame(shelves, gaps)
+
+        self.assertLess(bounds["x_max"], max(shelves) * 1.3)
+        self.assertGreater(self.fill(bounds["x_min"], bounds["x_max"], shelves), 0.8)
+        self.assertGreater(self.fill(bounds["y_min"], bounds["y_max"], gaps), 0.8)
+
+    def test_one_detached_reading_stops_setting_the_axis(self) -> None:
+        """A spec rated a star and a half under the board is a real reading and
+        a terrible axis: it squeezes the other thirty-nine into a band."""
+        gaps = [round(-0.2 + i * 0.01, 2) for i in range(40)]
+        gaps[0] = -1.45
+        bounds = self.frame([0.1 + i * 0.05 for i in range(40)], gaps)
+
+        self.assertGreater(bounds["y_min"], -0.5)
+        self.assertGreater(self.fill(bounds["y_min"], bounds["y_max"], gaps), 0.8)
+        # Outside the frame, which is what the chart pins to the edge and draws
+        # with an arrow — the point is not dropped, and the tick admits the cut.
+        self.assertLess(gaps[0], bounds["y_min"])
+
+    def test_an_even_tail_is_drawn_whole(self) -> None:
+        """Shelf shares are Pareto-shaped: every step down the tail is a large
+        fraction of what is left of it, and a frame that trims on that eats the
+        four biggest specs on the board — the four the chart exists to show."""
+        shelves = [0.15, 0.2, 0.25, 0.3, 0.4, 0.55, 0.7, 0.9, 1.2, 1.86]
+        bounds = self.frame(shelves, [0.0] * len(shelves))
+
+        self.assertGreaterEqual(bounds["x_max"], max(shelves))
+
+    def test_the_trim_never_takes_more_than_a_tenth_of_the_points(self) -> None:
+        """Otherwise a genuinely wide spread is drawn as its own middle."""
+        shelves = [0.2 * (3 ** i) for i in range(12)]
+        bounds = self.frame(shelves, [0.0] * len(shelves))
+
+        outside = [v for v in shelves if v > bounds["x_max"]]
+        self.assertLessEqual(len(outside),
+                             int(len(shelves) * panels.MAX_TRIMMED_SHARE))
+
+    def test_near_identical_specs_are_not_zoomed_into_weather(self) -> None:
+        shelves = [0.4 + i * 0.001 for i in range(20)]
+        bounds = self.frame(shelves, [round(i * 0.001, 3) for i in range(20)])
+
+        self.assertGreaterEqual(bounds["x_max"] - bounds["x_min"], panels.MIN_X_SPAN)
+        self.assertGreaterEqual(bounds["y_max"] - bounds["y_min"], panels.MIN_Y_SPAN)
+
+    def test_a_spec_that_owns_the_shelf_is_pinned_not_obeyed(self) -> None:
+        shelves = [0.2 + i * 0.05 for i in range(20)]
+        shelves[0] = 22.0
+        bounds = self.frame(shelves, [0.0] * 20)
+
+        self.assertLess(bounds["x_max"], 5.0)
+        self.assertGreater(self.fill(bounds["x_min"], bounds["x_max"], shelves), 0.6)
+
+    def test_a_share_axis_keeps_zero_while_a_spec_is_near_it(self) -> None:
+        """Holding none of the head is a real reading, so the frame does not cut
+        the axis to win a few pixels. It lifts off zero only when every spec on
+        the board sits well clear of it, and then the tick says where it
+        starts."""
+        near = self.frame([0.1 + i * 0.05 for i in range(20)], [0.0] * 20)
+        clear = self.frame([12.0 + i * 0.5 for i in range(20)], [0.0] * 20)
+
+        self.assertEqual(near["x_min"], 0.0)
+        self.assertGreater(clear["x_min"], 0.0)
+
+    def test_the_median_line_stays_inside_a_fitted_frame(self) -> None:
+        """The median is taken over every measured spec, including the ones past
+        the plot cap, so it can sit outside the points being drawn."""
+        bounds = self.frame([0.1, 0.2, 0.3], [0.0, 0.0, 0.0], x_mid=9.0)
+
+        self.assertGreaterEqual(bounds["x_max"], 9.0)
 
 
 def seed_product_lines() -> None:
