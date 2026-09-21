@@ -633,6 +633,78 @@ class PriceCurveTests(RenderTestCase):
         self.assertIn(800, prices)
 
 
+class PriceBandLadderTests(unittest.TestCase):
+    """The department chart's x-axis has to be a price axis.
+
+    Vendor bins belong to the node: one category comes back cut 0-50/50-100 and
+    the next 0-25/25-50/50-75. Summed by label they drew "0-100" beside "10-20",
+    which is neither ordered nor non-overlapping — the same dollar described
+    twice, with nothing on the chart saying so.
+    """
+
+    @staticmethod
+    def band(key: str, products: float, revenue: float) -> dict:
+        return {"bucket_key": key, "products": products, "units": products * 3,
+                "revenue": revenue}
+
+    def test_disagreeing_bins_are_recut_onto_one_ordered_ladder(self) -> None:
+        bands = panels._rebin_price_bands([
+            self.band("0-100", 10, 1_000.0), self.band("50-100", 40, 8_000.0),
+            self.band("0-25", 5, 200.0), self.band("100-200", 30, 9_000.0),
+            self.band("150-200", 20, 7_000.0),
+        ])
+        keys = [b["bucket_key"] for b in bands]
+        self.assertEqual(keys, sorted(keys, key=lambda k: float(k.split("-")[0])))
+        edges = [(float(k.split("-")[0]), float(k.split("-")[1])) for k in keys]
+        for (_low, high), (next_low, _next_high) in zip(edges, edges[1:]):
+            self.assertEqual(high, next_low, f"gap or overlap at {high}")
+
+    def test_no_listing_is_lost_or_counted_twice(self) -> None:
+        source = [self.band("0-100", 10, 1_000.0), self.band("50-150", 40, 8_000.0),
+                  self.band("100-200", 30, 9_000.0)]
+        bands = panels._rebin_price_bands(source)
+        self.assertAlmostEqual(sum(b["products"] for b in bands),
+                               sum(b["products"] for b in source), places=6)
+        self.assertAlmostEqual(sum(b["revenue"] for b in bands),
+                               sum(b["revenue"] for b in source), places=6)
+
+    def test_a_thin_premium_band_survives_the_fold(self) -> None:
+        """Ladder residue at the ends folds inward — but a top bin that is thin
+        on listings and fat on revenue is the pocket this chart exists to find."""
+        bands = panels._rebin_price_bands([
+            self.band("20-50", 200, 20_000.0), self.band("50-100", 400, 50_000.0),
+            self.band("100-200", 300, 60_000.0), self.band("800以上", 4, 30_000.0),
+        ])
+        self.assertEqual(bands[-1]["bucket_key"], "1000+",
+                         "the open top band was dropped or given a made-up ceiling")
+        self.assertGreater(bands[-1]["revenue"], 0)
+
+    def test_a_band_with_no_numbers_in_it_is_left_off_the_price_axis(self) -> None:
+        bands = panels._rebin_price_bands([
+            self.band("20-50", 200, 20_000.0), self.band("50-100", 400, 50_000.0),
+            self.band("100-200", 300, 60_000.0), self.band("unknown", 99, 99_000.0),
+        ])
+        self.assertAlmostEqual(sum(b["revenue"] for b in bands), 130_000.0, places=6)
+
+    def test_agreeing_bins_are_kept_rather_than_coarsened(self) -> None:
+        """Every node on the same binning is already an axis, and a finer one
+        than the ladder: 100-150 and 150-200 should not become 100-200."""
+        with mock.patch.object(panels.store, "get_distribution", return_value=[
+            {"bucket_key": "50-100", "bucket_order": 0, "products": 20,
+             "units": 60, "revenue": 1_000.0},
+            {"bucket_key": "100-150", "bucket_order": 1, "products": 30,
+             "units": 90, "revenue": 4_000.0},
+            {"bucket_key": "150-200", "bucket_order": 2, "products": 10,
+             "units": 30, "revenue": 5_000.0},
+        ]):
+            bands = panels._overview_price_bands(
+                "US", PERIOD, [{"node_key": "a"}, {"node_key": "b"}])
+        self.assertEqual([b["bucket_key"] for b in bands],
+                         ["50-100", "100-150", "150-200"])
+        self.assertEqual(bands[0]["products"], 40, "two nodes were not summed")
+        self.assertAlmostEqual(sum(b["listing_share_pct"] for b in bands), 100.0, places=1)
+
+
 class ElementNamingTests(RenderTestCase):
     """The model names and classifies mined terms; it computes and adds nothing."""
 

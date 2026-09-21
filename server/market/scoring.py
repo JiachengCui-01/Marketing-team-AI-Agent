@@ -100,16 +100,28 @@ _AOV_FALLBACK = ((0.0, 0.0), (120.0, 10.0), (200.0, 45.0), (300.0, 80.0),
                  (4_000.0, 10.0))
 
 _BAND_RANGE = re.compile(r"(\d+(?:\.\d+)?)\s*[-–~]\s*(\d+(?:\.\d+)?)")
-_BAND_OPEN = re.compile(r"(?:>|≥|over|above)?\s*(\d+(?:\.\d+)?)\s*\+?$")
+# The vendor writes the closed bins as "150-200" and the two open ones in
+# whichever locale the call was made in: "1000+" or "1000以上" at the top,
+# "<50" or "50以下" at the bottom. Only the ASCII forms were in the pattern, so
+# "800以上" fell through to None — and the band that holds the premium revenue
+# was dropped from the curve and from every chart built on these bounds. The
+# bottom form was worse than dropped: "<100" matched the open-top pattern on its
+# digits and came back as the band *above* 100.
+_BAND_UNDER = re.compile(r"^(?:<|≤|under|below)\s*(\d+(?:\.\d+)?)$"
+                         r"|^(\d+(?:\.\d+)?)\s*(?:及)?以下$")
+_BAND_OPEN = re.compile(r"(?:>|≥|over|above)?\s*(\d+(?:\.\d+)?)\s*"
+                        r"(?:\+|(?:及)?以上|and up|or more|or above)?$")
 
 
 def band_bounds(label: str) -> tuple[float, float] | None:
-    """``"150-200"`` → ``(150, 200)``; ``"1000+"`` → ``(1000, 2000)``.
+    """``"150-200"`` → ``(150, 200)``; ``"1000+"`` → ``(1000, 2000)``;
+    ``"50以下"`` → ``(0, 50)``.
 
     An open-ended top band is given a finite width so it has a midpoint like
     every other band. Doubling is arbitrary but bounded, and the alternative —
     dropping the band — throws away the one that usually holds the premium
-    revenue this business cares most about.
+    revenue this business cares most about. The open bottom band needs no such
+    invention: it starts at zero.
     """
     text = str(label or "").replace("$", "").replace(",", "").strip().lower()
     if not text:
@@ -118,6 +130,12 @@ def band_bounds(label: str) -> tuple[float, float] | None:
     if match:
         low, high = float(match.group(1)), float(match.group(2))
         return (low, high) if high > low else None
+    # Bottom before top: "<100" ends in digits too, so the open-top pattern
+    # matches it and answers with the band on the wrong side of the number.
+    match = _BAND_UNDER.search(text)
+    if match:
+        high = float(match.group(1) or match.group(2))
+        return (0.0, high) if high > 0 else None
     match = _BAND_OPEN.search(text)
     if match:
         low = float(match.group(1))

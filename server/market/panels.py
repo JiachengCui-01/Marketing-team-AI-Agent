@@ -1492,12 +1492,111 @@ def _physical_rows(board: Sequence[dict], snapshots: Mapping[str, dict]) -> list
     return rows
 
 
-def _overview_price_bands(marketplace: str, period: str,
-                          board: Sequence[dict]) -> list[dict]:
-    """Price bands summed across the tracked nodes, weighted by their revenue."""
+# A price ladder in 1/2/5 x 10^k steps - $20, $50, $100, $200 - which is how
+# prices are quoted and three cuts to a decade, the resolution a price lives at.
+# Bins are therefore equal in log space and unequal in dollars; that is the right
+# trade here because the chart plots each band's *share*, not a density, and
+# because price is read multiplicatively.
+_PRICE_LADDER = (1.0, 2.0, 5.0)
+# The ladder runs past where the market is at both ends: spreading a "0-20" band
+# evenly leaves slivers in $0-1 and $1-2 that exist because the ladder goes down
+# that far, not because anyone sells there. An end bin under this share folds
+# inward. It has to be small on *both* measures - a thin top bin carrying real
+# revenue is the premium pocket this chart exists to find.
+_END_FOLD_PCT = 1.0
+_MIN_PRICE_BINS = 4
+
+
+def _price_ladder_edges(low: float, high: float) -> list[float]:
+    """Ladder cuts spanning ``[low, high]``, both endpoints included."""
+    edges = [low]
+    for exponent in range(0, 10):
+        for mantissa in _PRICE_LADDER:
+            edge = mantissa * (10.0 ** exponent)
+            if edge >= high:
+                return edges + [high]
+            if edge > low:
+                edges.append(edge)
+    return edges + [high]
+
+
+def _band_key(low: float, high: float, open_top: bool) -> str:
+    """The axis label for one bin, in the vendor's own plain-number style."""
+    return f"{low:g}+" if open_top else f"{low:g}-{high:g}"
+
+
+def _fold_thin_ends(bins: list[dict]) -> list[dict]:
+    """Fold ladder residue at either end into the bin beside it."""
+    products = sum(b["products"] for b in bins) or 1.0
+    revenue = sum(b["revenue"] for b in bins) or 1.0
+
+    def thin(cell: dict) -> bool:
+        return (cell["products"] / products * 100.0 < _END_FOLD_PCT
+                and cell["revenue"] / revenue * 100.0 < _END_FOLD_PCT)
+
+    def absorb(into: dict, gone: dict) -> None:
+        for key in ("products", "units", "revenue"):
+            into[key] += gone[key]
+        into["low"] = min(into["low"], gone["low"])
+        into["high"] = max(into["high"], gone["high"])
+
+    while len(bins) > _MIN_PRICE_BINS and thin(bins[0]):
+        absorb(bins[1], bins.pop(0))
+    while len(bins) > _MIN_PRICE_BINS and thin(bins[-1]):
+        absorb(bins[-2], bins.pop())
+    return bins
+
+
+def _rebin_price_bands(bands: Sequence[Mapping[str, Any]]) -> list[dict]:
+    """Vendor bands from several nodes, re-cut onto one ladder.
+
+    Each source band is spread across the bins it covers in proportion to the
+    overlap. Nothing is known about where inside a band its listings sit, and
+    uniform is the only assumption that adds no information of its own.
+    """
+    placed = []
+    for band in bands:
+        bounds = scoring.band_bounds(band.get("bucket_key"))
+        # A band whose label carries no numbers cannot be put on a price axis at
+        # all. It is left out of the shares as well as the bars, so what is drawn
+        # still sums to the whole of what could be placed.
+        if bounds is not None and bounds[1] > bounds[0]:
+            placed.append((bounds, band))
+    if not placed:
+        return []
+    low = min(bounds[0] for bounds, _ in placed)
+    high = max(bounds[1] for bounds, _ in placed)
+    # An open top band was given a finite top by `band_bounds`; say so on the
+    # axis rather than printing a number the vendor never reported.
+    open_top = any(bounds[1] >= high and "-" not in str(band.get("bucket_key") or "")
+                   for bounds, band in placed)
+    edges = _price_ladder_edges(low, high)
+    bins = [{"low": edges[i], "high": edges[i + 1],
+             "products": 0.0, "units": 0.0, "revenue": 0.0}
+            for i in range(len(edges) - 1)]
+    for (band_low, band_high), band in placed:
+        width = band_high - band_low
+        for cell in bins:
+            overlap = min(band_high, cell["high"]) - max(band_low, cell["low"])
+            if overlap <= 0:
+                continue
+            share = overlap / width
+            for key in ("products", "units", "revenue"):
+                cell[key] += (scoring._num(band.get(key)) or 0.0) * share
+    bins = _fold_thin_ends(bins)
+    return [{"bucket_key": _band_key(cell["low"], cell["high"],
+                                     open_top and index == len(bins) - 1),
+             "products": cell["products"], "units": cell["units"],
+             "revenue": cell["revenue"], "order": index}
+            for index, cell in enumerate(bins)]
+
+
+def _sum_bands_by_key(
+        per_node: Sequence[Sequence[Mapping[str, Any]]]) -> list[dict]:
+    """One shared binning across every node: add them up as they are."""
     totals: dict[str, dict] = {}
-    for row in board:
-        for bucket in store.get_distribution(marketplace, row["node_key"], period, "price"):
+    for buckets in per_node:
+        for bucket in buckets:
             entry = totals.setdefault(bucket["bucket_key"],
                                       {"bucket_key": bucket["bucket_key"],
                                        "products": 0.0, "units": 0.0, "revenue": 0.0,
@@ -1505,7 +1604,33 @@ def _overview_price_bands(marketplace: str, period: str,
             entry["products"] += bucket.get("products") or 0.0
             entry["units"] += bucket.get("units") or 0.0
             entry["revenue"] += bucket.get("revenue") or 0.0
-    bands = sorted(totals.values(), key=lambda b: b["order"])
+    return sorted(totals.values(), key=lambda b: b["order"])
+
+
+def _overview_price_bands(marketplace: str, period: str,
+                          board: Sequence[dict]) -> list[dict]:
+    """Price bands summed across the tracked nodes, weighted by their revenue.
+
+    The vendor's bins belong to the node, not to the market: one category comes
+    back cut 0-50 / 50-100 / 100-200 and the next 0-25 / 25-50 / 50-75. Summing
+    those by label - which is what this did - drew "0-100" next to "10-20" and
+    called the result a price axis. It was neither ordered nor non-overlapping,
+    so two bars could describe the same dollar twice and nothing on the chart
+    said which. When the nodes disagree the department view re-cuts them onto
+    one ladder; when they already agree their own bins are kept, because those
+    are finer than any ladder and already line up.
+    """
+    per_node = []
+    for row in board:
+        buckets = store.get_distribution(marketplace, row["node_key"], period, "price")
+        if buckets:
+            per_node.append(buckets)
+    if not per_node:
+        return []
+    if len({tuple(b["bucket_key"] for b in buckets) for buckets in per_node}) == 1:
+        bands = _sum_bands_by_key(per_node)
+    else:
+        bands = _rebin_price_bands([b for buckets in per_node for b in buckets])
     revenue_total = sum(b["revenue"] for b in bands) or 1.0
     product_total = sum(b["products"] for b in bands) or 1.0
     for band in bands:

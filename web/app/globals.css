@@ -1578,17 +1578,85 @@ select.field:focus {
     background: rgb(var(--feature-selection) / 0.8);
     min-height: 2px;
   }
-  .bi-band-alt {
-    @apply w-2.5 rounded-t-[2px];
-    background: rgb(var(--feature-selection) / 0.32);
+  /* The revenue column of the price-band chart. One bar per band, not two: the
+     reading is this column against the rule drawn across it, and two tints of
+     one green standing side by side made that a colour-matching exercise. */
+  .bi-band-money {
+    @apply absolute bottom-0 left-1/2 w-full max-w-[64px] -translate-x-1/2 rounded-t-[4px];
+    /* Wide, and only a few pixels of air between neighbours: the x here is a
+       continuous price axis, so the columns have to read as one distribution
+       rather than as eight separate readings that happen to sit in a row. */
+    background: rgb(var(--feature-selection) / 0.42);
     min-height: 2px;
+  }
+  /* The bands that clear their own rule. Emphasis is a step *up* from the rest
+     of the series, not the rest of the series stepping down to grey — this
+     chart's subject is where the department's money is, and painting all but
+     one band as context said the opposite. */
+  .bi-band-money-lead {
+    background: rgb(var(--feature-selection) / 0.92);
+  }
+  /* Where the band's listings sit — the share it would take if price made no
+     difference to what sells. Same mark as the bullet benchmark and for the same
+     reason: it has to stay legible crossing a saturated fill. */
+  .bi-band-bench {
+    @apply absolute left-1/2 h-0.5 w-full max-w-[76px] -translate-x-1/2 translate-y-1/2
+           rounded-full;
+    background: rgb(var(--fg) / 0.7);
+    box-shadow: 0 0 0 1px rgb(var(--bg-elevated));
+  }
+  /* The same rule, legend-sized. A different shape from the column's swatch, so
+     the two series are told apart by form and not by hue alone. */
+  .bi-band-rule {
+    @apply inline-block h-0.5 w-3 rounded-full align-middle;
+    background: rgb(var(--fg) / 0.7);
+  }
+  /* One direct label, on the leading band. */
+  .bi-band-cap {
+    @apply absolute left-1/2 -translate-x-1/2 whitespace-nowrap text-[9px] font-medium
+           tabular-nums;
+    color: rgb(var(--fg));
+  }
+  .bi-band-grid {
+    @apply pointer-events-none absolute inset-x-0 h-px;
+    background: rgb(var(--border));
+  }
+  /* --- the price-fit curve. The path reuses the sparkline's area and line. --- */
+  .bi-fit-peak {
+    @apply absolute block h-2 w-2 -translate-x-1/2 translate-y-1/2 rounded-full;
+    background: rgb(var(--feature-selection));
+    box-shadow: 0 0 0 2px rgb(var(--bg-elevated));
+  }
+  /* Placed by an inline transform, so it carries no translate utilities of its
+     own — the peak sits at the top of the frame and the label goes beside it. */
+  .bi-fit-peak-label {
+    @apply absolute whitespace-nowrap text-[9px] font-medium tabular-nums;
+    color: rgb(var(--fg));
+  }
+  .bi-fit-peak-drop {
+    stroke: rgb(var(--feature-selection) / 0.4);
+    stroke-width: 1;
+  }
+  .bi-fit-y {
+    @apply absolute right-0 -translate-y-1/2 text-[9px] tabular-nums;
+    color: rgb(var(--fg-subtle));
+  }
+  /* One tracked category's average price, on the baseline. */
+  .bi-fit-rug {
+    @apply absolute block h-1.5 w-0.5 -translate-x-1/2 translate-y-1/2 rounded-full;
+    background: rgb(var(--fg) / 0.55);
+  }
+  .bi-fit-rug-key {
+    @apply inline-block h-1.5 w-0.5 rounded-full align-middle;
+    background: rgb(var(--fg) / 0.55);
+  }
+  .bi-fit-tick {
+    @apply absolute top-0 -translate-x-1/2 whitespace-nowrap text-[9px] tabular-nums;
+    color: rgb(var(--fg-subtle));
   }
   .bi-swatch {
     @apply inline-block h-2 w-2 rounded-[2px];
     background: rgb(var(--feature-selection) / 0.8);
-  }
-  .bi-swatch-alt {
-    background: rgb(var(--feature-selection) / 0.32);
   }
   .bi-swatch-empty {
     background: rgb(var(--border));
@@ -1612,12 +1680,6 @@ select.field:focus {
   .bi-swatch-unknown {
     background: rgb(var(--fg) / 0.06);
     border: 1px dashed rgb(var(--fg-subtle) / 0.7);
-  }
-  /* The band where revenue outruns listings — the one a price is set from. */
-  .bi-band-lead {
-    background: rgb(var(--feature-selection) / 0.62);
-    outline: 1px solid rgb(var(--feature-selection));
-    outline-offset: -1px;
   }
   .bi-spark-end {
     fill: rgb(var(--feature-selection));

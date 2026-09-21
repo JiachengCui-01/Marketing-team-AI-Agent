@@ -22,8 +22,8 @@ import {
   BandHistogram,
   Bullet,
   DeltaBullet,
-  DistributionBars,
   ElementComboChart,
+  PriceFitCurve,
   ScoreBar,
   Sparkline,
   StackedRows,
@@ -341,17 +341,26 @@ export function MarketOverviewPanel({
               <BandHistogram bands={dashboard?.price ?? []}
                              listingLabel={t.gmPriceListings}
                              revenueLabel={t.gmPriceRevenue}
-                             leadLabel={t.gmBandLead} />
+                             leadLabel={t.gmBandLead}
+                             readingLabel={t.gmPriceReading} />
               {/* The curve the price factor was scored against, shown because a
                   score nobody can inspect is a score nobody should trust. It is
-                  absent while the shipped fallback is in use, on purpose. */}
+                  absent while the shipped fallback is in use, on purpose. The
+                  tracked categories' own average prices ride on its baseline:
+                  the shape of the curve is not the question, where we sit on it
+                  is. */}
               <Block label={t.gmPriceFit} data={dashboard?.price_fit}>
                 <p className="mb-1 text-[10px] text-fg-subtle">{t.gmPriceFitHint}</p>
-                <DistributionBars
-                  buckets={(dashboard?.price_fit ?? []).map((row: any) => ({
-                    bucket_key: fmtMoney(row.price), products_pct: row.fit,
+                <PriceFitCurve
+                  points={(dashboard?.price_fit ?? []).map((row: any) => ({
+                    price: row.price, fit: row.fit,
                   }))}
-                  label={t.gmPriceFit}
+                  peakLabel={t.gmPriceFitPeak}
+                  markers={(dashboard?.physical ?? [])
+                    .filter((row: any) => row.avg_price != null)
+                    .map((row: any) => ({ label: row.label, price: row.avg_price }))}
+                  markerLabel={t.gmPriceFitMarks}
+                  moneyLabel={fmtMoney}
                 />
               </Block>
             </Section>

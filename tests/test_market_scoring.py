@@ -124,6 +124,20 @@ class PriceModelTests(unittest.TestCase):
         self.assertEqual(scoring.band_bounds("$1,000+"), (1000.0, 2000.0))
         self.assertIsNone(scoring.band_bounds("unknown"))
 
+    def test_the_open_bands_are_read_in_either_locale(self) -> None:
+        """The vendor writes the open bins in the locale of the call, and the
+        top one holds the premium revenue — dropping it is not an option."""
+        self.assertEqual(scoring.band_bounds("800以上"), (800.0, 1600.0))
+        self.assertEqual(scoring.band_bounds("1000及以上"), (1000.0, 2000.0))
+        self.assertEqual(scoring.band_bounds("over 300"), (300.0, 600.0))
+
+    def test_an_open_bottom_band_is_the_band_below_its_number(self) -> None:
+        """"<100" ends in digits, so the open-top pattern used to match it and
+        answer with (100, 200) — the band on the wrong side of the number."""
+        self.assertEqual(scoring.band_bounds("<100"), (0.0, 100.0))
+        self.assertEqual(scoring.band_bounds("50以下"), (0.0, 50.0))
+        self.assertEqual(scoring.band_bounds("under 25"), (0.0, 25.0))
+
     def test_the_band_curve_peaks_on_the_fattest_band(self) -> None:
         curve = scoring.price_model([
             {"bucket_key": "50-100", "revenue": 100_000.0},

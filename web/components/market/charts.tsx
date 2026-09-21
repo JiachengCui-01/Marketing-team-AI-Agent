@@ -261,18 +261,42 @@ function trim(value: number): string {
   return Number.isInteger(value) ? `${value}` : value.toFixed(1);
 }
 
-/** Where the listings are against where the money is.
+/** A band leads when its revenue share runs this far ahead of its listings. */
+const BAND_LEAD_PP = 3;
+
+/** The next round percentage above a reading, so the axis tick is a number a
+ *  reader recognises rather than whatever the tallest bar happened to be. */
+function niceCeilPct(value: number): number {
+  const step = value >= 10 ? 5 : value >= 4 ? 2 : 1;
+  return Math.max(step, Math.ceil(value / step) * step);
+}
+
+/** Where the money is against where the listings are.
  *
- * The gap between the two bars is the whole point of this chart — a band
- * holding more revenue than listings is the market saying it will pay up — so
- * the gap is now stated rather than left to be eyeballed: bands where revenue
- * leads are marked, and the leading band is called out underneath.
+ * This was two bars per band in two tints of one green, unlabelled except for a
+ * bare "20%" floating over the top right corner. Both series were the same hue
+ * and the same shape, so telling them apart was a colour-matching exercise
+ * against a legend, and the thing the chart exists to show — the gap between
+ * them — had to be eyeballed across a 2px trough with no scale behind it.
+ *
+ * One bar per band now, and it is the money: the column is the band's share of
+ * revenue. Its listing share is the rule drawn across it, which is the share
+ * the band would take if price made no difference to what sells. So the reading
+ * is a position, not a comparison of two lengths — a column standing above its
+ * own rule is a band that pays up, and those columns are painted a step
+ * stronger. Two marks of different *shape* also means the legend is not the
+ * only thing holding the two series apart.
+ *
+ * The axis is labelled and gridded at a round percentage, the columns are wide
+ * with only a few pixels between them because the x is a continuous price axis,
+ * and only the leading band carries a number.
  */
 export function BandHistogram({
   bands,
   listingLabel,
   revenueLabel,
   leadLabel,
+  readingLabel,
 }: {
   bands: { bucket_key: string; listing_share_pct?: number; revenue_share_pct?: number;
            units_ratio?: number | null }[];
@@ -280,6 +304,8 @@ export function BandHistogram({
   revenueLabel: string;
   /** e.g. "这个价格带愿意付钱" — names what the marked gap means. */
   leadLabel?: string;
+  /** One line naming what the column and the rule are, above the plot. */
+  readingLabel?: string;
 }) {
   const rows = bands.map((b) => ({
     key: b.bucket_key,
@@ -287,50 +313,76 @@ export function BandHistogram({
     revenue: b.revenue_share_pct ?? 0,
   }));
   if (!rows.length) return null;
-  const max = Math.max(1, ...rows.flatMap((r) => [r.listing, r.revenue]));
+  const axisMax = niceCeilPct(Math.max(1, ...rows.flatMap((r) => [r.listing, r.revenue])));
   const leader = rows.reduce((best, r) =>
     r.revenue - r.listing > best.revenue - best.listing ? r : best, rows[0]);
   const leads = leader.revenue - leader.listing;
+  const plot = 108;
+  // Room above the plot for the one direct label, so a tall leading column puts
+  // its number in the margin instead of over the top gridline.
+  const cap = 16;
 
   return (
     <div>
-      <div className="flex items-center gap-3 text-[10px] text-fg-subtle">
-        <span className="flex items-center gap-1"><i className="bi-swatch" />{listingLabel}</span>
-        <span className="flex items-center gap-1">
-          <i className="bi-swatch bi-swatch-alt" />{revenueLabel}
-        </span>
-        <span className="ml-auto tabular-nums">{max.toFixed(0)}%</span>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-fg-subtle">
+        <span className="flex items-center gap-1"><i className="bi-swatch" />{revenueLabel}</span>
+        <span className="flex items-center gap-1"><i className="bi-band-rule" />{listingLabel}</span>
       </div>
-      <div role="img"
-           aria-label={rows
-             .map((r) => `${r.key}: ${listingLabel} ${r.listing.toFixed(1)}%, `
-               + `${revenueLabel} ${r.revenue.toFixed(1)}%`)
-             .join("; ")}>
-        <div className="flex items-end gap-2 overflow-x-auto pb-1" style={{ height: 124 }}>
-          {rows.map((row) => {
-            const ahead = row.revenue - row.listing >= 3;
-            return (
-              <div key={row.key}
-                   className="flex min-w-[52px] flex-1 flex-col items-center justify-end gap-1">
-                <span className={`text-[9px] tabular-nums ${ahead ? "text-fg" : "text-fg-subtle"}`}>
-                  {ahead ? `+${(row.revenue - row.listing).toFixed(0)}` : ""}
-                </span>
-                <div className="flex h-[80px] w-full items-end justify-center gap-[2px]">
-                  <div className="bi-band" style={{ height: `${(row.listing / max) * 100}%` }}
-                       title={`${listingLabel} ${row.listing.toFixed(1)}%`} />
-                  <div className={ahead ? "bi-band-alt bi-band-lead" : "bi-band-alt"}
-                       style={{ height: `${(row.revenue / max) * 100}%` }}
-                       title={`${revenueLabel} ${row.revenue.toFixed(1)}%`} />
-                </div>
-                <span className="w-full truncate text-center text-[9px] text-fg-subtle"
-                      title={row.key}>{row.key}</span>
+      {readingLabel ? (
+        <p className="mt-0.5 text-[10px] text-fg-subtle">{readingLabel}</p>
+      ) : null}
+      <div className="mt-1.5 flex gap-1.5">
+        {/* The scale, so a column's height is a quantity rather than a mood. */}
+        <div className="flex shrink-0 flex-col justify-between text-[9px] tabular-nums
+                        text-fg-subtle"
+             style={{ height: plot + cap, paddingTop: cap }}>
+          <span>{axisMax}%</span>
+          <span>0</span>
+        </div>
+        <div className="min-w-0 flex-1 overflow-x-auto pb-0.5">
+          <div role="img"
+               aria-label={rows
+                 .map((r) => `${r.key}: ${revenueLabel} ${r.revenue.toFixed(1)}%, `
+                   + `${listingLabel} ${r.listing.toFixed(1)}%`)
+                 .join("; ")}>
+            <div className="relative" style={{ height: plot, marginTop: cap }}>
+              <div className="bi-band-grid" style={{ top: 0 }} />
+              <div className="bi-band-grid" style={{ bottom: 0 }} />
+              <div className="flex h-full items-end gap-[3px]">
+                {rows.map((row) => {
+                  const ahead = row.revenue - row.listing >= BAND_LEAD_PP;
+                  const top = `${(row.revenue / axisMax) * 100}%`;
+                  return (
+                    <div key={row.key} className="relative h-full min-w-[42px] flex-1"
+                         title={`${row.key} · ${revenueLabel} ${row.revenue.toFixed(1)}% · `
+                                + `${listingLabel} ${row.listing.toFixed(1)}%`}>
+                      <div className={`bi-band-money${ahead ? " bi-band-money-lead" : ""}`}
+                           style={{ height: top }} />
+                      <div className="bi-band-bench"
+                           style={{ bottom: `${(row.listing / axisMax) * 100}%` }} />
+                      {row === leader && leads >= BAND_LEAD_PP ? (
+                        <span className="bi-band-cap" style={{ bottom: `calc(${top} + 3px)` }}>
+                          +{leads.toFixed(0)}pp
+                        </span>
+                      ) : null}
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
+            </div>
+            <div className="mt-1 flex gap-[3px]">
+              {rows.map((row) => (
+                <span key={row.key}
+                      className="min-w-[42px] flex-1 truncate text-center text-[9px]
+                                 tabular-nums text-fg-subtle"
+                      title={row.key}>{row.key}</span>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
-      {leadLabel && leads >= 3 ? (
-        <p className="mt-1 text-[10px] text-fg-muted">
+      {leadLabel && leads >= BAND_LEAD_PP ? (
+        <p className="mt-1.5 text-[10px] text-fg-muted">
           <span className="font-medium text-fg">{leader.key}</span> · {leadLabel}
           <span className="ml-1 tabular-nums">
             ({revenueLabel} {leader.revenue.toFixed(0)}% / {listingLabel}{" "}
@@ -1864,6 +1916,150 @@ export function DistributionBars({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** The price-to-revenue curve the price-fit factor was scored against.
+ *
+ * This was eight disconnected bars with a percentage printed over every one of
+ * them — the one shape that cannot show what the panel underneath it claims the
+ * chart shows. The caption says "peak", and a row of bars has no peak; it says
+ * the score falls off with distance from that peak, and equally-spaced bars
+ * put $54 and $130 as far apart as $1.0K and $1.6K, so there is no distance to
+ * read either.
+ *
+ * So it is drawn as the curve it is called: price along x, the fit index up y,
+ * the peak marked and named. X is logarithmic because that is how price is
+ * read — a move from $50 to $100 is the same decision as $500 to $1,000 — and
+ * because on a linear axis the bins below $300, which is where this department
+ * mostly sells, collapse into the left eighth of the frame.
+ *
+ * `markers` puts the tracked categories' own average prices along the baseline,
+ * which is the question the curve is there to answer: not "what is the shape"
+ * but "where do we sit on it".
+ */
+export function PriceFitCurve({
+  points,
+  peakLabel,
+  markers = [],
+  markerLabel,
+  moneyLabel,
+}: {
+  points: { price: number; fit: number }[];
+  /** e.g. "峰值" — names the one labelled point. */
+  peakLabel: string;
+  /** Average price per tracked category, drawn as a rug on the baseline. */
+  markers?: { label: string; price: number }[];
+  markerLabel?: string;
+  moneyLabel: (value: number | null | undefined) => string;
+}) {
+  const rows = points
+    .filter((p) => Number.isFinite(p.price) && p.price > 0 && Number.isFinite(p.fit))
+    .sort((a, b) => a.price - b.price);
+  if (rows.length < 2) return null;
+
+  // A 0-100 viewBox with `preserveAspectRatio="none"`: the path stretches to the
+  // column, and every label and dot rides on top in HTML at the same
+  // percentages, so none of them is stretched with it.
+  const padX = 2;
+  const padTop = 14;
+  const padBottom = 4;
+  const lo = Math.log10(rows[0].price);
+  const span = Math.log10(rows[rows.length - 1].price) - lo || 1;
+  // Rounded, and not for tidiness: `Math.log10` is implementation-defined in
+  // its last digits, so Node and the browser disagree from about the fourteenth
+  // decimal — enough for React to call every position a hydration mismatch.
+  const round = (value: number) => Math.round(value * 1000) / 1000;
+  const atX = (price: number) =>
+    round(padX + ((Math.log10(price) - lo) / span) * (100 - padX * 2));
+  const atY = (fit: number) =>
+    round(padTop + (1 - clamp(fit, 0, 100) / 100) * (100 - padTop - padBottom));
+
+  const coords = rows.map((r) => [atX(r.price), atY(r.fit)] as const);
+  const line = coords
+    .map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`)
+    .join(" ");
+  const floor = 100 - padBottom;
+  const area = `${line} L${coords[coords.length - 1][0].toFixed(2)},${floor} `
+    + `L${coords[0][0].toFixed(2)},${floor} Z`;
+  const peak = rows.reduce((best, r) => (r.fit > best.fit ? r : best), rows[0]);
+
+  // Ticks: the ends and the peak always, then whatever else clears them. A price
+  // on every point is what made the bar version unreadable.
+  const ticks: typeof rows = [];
+  for (const row of [rows[0], rows[rows.length - 1], peak, ...rows]) {
+    if (!ticks.includes(row)
+        && ticks.every((t) => Math.abs(atX(t.price) - atX(row.price)) > 13)) {
+      ticks.push(row);
+    }
+  }
+  // A category priced outside the department's own bins has no place on this
+  // axis; pinning it to an end would state a fit the curve never computed.
+  const rug = markers.filter((m) => Number.isFinite(m.price)
+    && m.price >= rows[0].price && m.price <= rows[rows.length - 1].price);
+  const height = 104;
+  const peakX = atX(peak.price);
+  const peakY = atY(peak.fit);
+  // Beside the peak, not above it. Above needs a quarter of the frame reserved
+  // as headroom for one label, and the peak is by definition at the top of the
+  // curve — the side it goes on is whichever has the room.
+  // Sat on the dot's own line, the label was crossed by the curve falling away
+  // from the peak; a fifth of its height below centre clears it and still reads
+  // as attached to the dot.
+  const peakSide = peakX > 55 ? "translate(calc(-100% - 9px), 20%)" : "translate(9px, 20%)";
+
+  return (
+    <div>
+      <div className="flex items-start gap-1.5">
+        {/* Percentages of a height have to be placement, not padding: padding-%
+            resolves against the container's *width*, which put these two labels
+            a hundred pixels below the chart they scale. */}
+        <div className="relative w-[26px] shrink-0" style={{ height }}>
+          <span className="bi-fit-y" style={{ top: `${padTop}%` }}>100</span>
+          <span className="bi-fit-y" style={{ top: `${100 - padBottom}%` }}>0</span>
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="relative" style={{ height }} role="img"
+               aria-label={rows
+                 .map((r) => `${moneyLabel(r.price)}: ${r.fit.toFixed(0)}`).join(", ")}>
+            <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full"
+                 preserveAspectRatio="none" aria-hidden="true">
+              <line className="bi-grid-line" x1={padX} x2={100 - padX} y1={floor} y2={floor} />
+              <path className="bi-spark-area" d={area} />
+              {/* Drops the peak onto the axis, so "where the money is" is a
+                  price a reader can point at and not just a bump. */}
+              <line className="bi-fit-peak-drop" x1={peakX} x2={peakX} y1={peakY} y2={floor}
+                    vectorEffect="non-scaling-stroke" />
+              <path className="bi-spark-line" d={line} vectorEffect="non-scaling-stroke" />
+            </svg>
+            <span className="bi-fit-peak"
+                  style={{ left: `${peakX}%`, bottom: `${100 - peakY}%` }} />
+            <span className="bi-fit-peak-label"
+                  style={{ left: `${peakX}%`, bottom: `${100 - peakY}%`,
+                           transform: peakSide }}>
+              {peakLabel} {moneyLabel(peak.price)}
+            </span>
+            {rug.map((m) => (
+              <span key={`${m.label}-${m.price}`} className="bi-fit-rug"
+                    style={{ left: `${atX(m.price)}%`, bottom: `${padBottom}%` }}
+                    title={`${m.label} · ${moneyLabel(m.price)}`} />
+            ))}
+          </div>
+          <div className="relative mt-1 h-3">
+            {ticks.map((t) => (
+              <span key={t.price} className="bi-fit-tick" style={{ left: `${atX(t.price)}%` }}>
+                {moneyLabel(t.price)}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+      {markerLabel && rug.length ? (
+        <p className="ml-[30px] mt-1 flex items-center gap-1 text-[10px] text-fg-subtle">
+          <i className="bi-fit-rug-key" />{markerLabel} · {rug.length}
+        </p>
+      ) : null}
     </div>
   );
 }

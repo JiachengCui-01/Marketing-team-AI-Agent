@@ -381,7 +381,8 @@ export function MarketCategoryPanel({
                   <BandHistogram bands={dashboard?.structure?.price_bands ?? []}
                                  listingLabel={t.gmPriceListings}
                                  revenueLabel={t.gmPriceRevenue}
-                                 leadLabel={t.gmBandLead} />
+                                 leadLabel={t.gmBandLead}
+                                 readingLabel={t.gmPriceReading} />
                 </Block>
                 <Block label={t.cdBrands} data={dashboard?.structure?.brands}>
                   <ShareBar
