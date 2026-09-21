@@ -700,6 +700,73 @@ class JobExecutionTests(SweepTestCase):
         self.assertIn("category_brands", missing)
 
 
+class ManualCollectTests(SweepTestCase):
+    """「采集最新数据」 has to be able to collect on a day the scheduler owns.
+
+    It could not. `run_daily_sweep` claims the calendar day through a unique
+    index before doing anything, the scheduler claims that day within a minute
+    of midnight, and from then on every click returned `claimed_elsewhere`
+    having spent nothing — while the route dropped the status and re-rendered
+    the same data. The button looked like it worked and changed nothing, every
+    day, for as long as the scheduler had been running.
+    """
+
+    def vendor(self):
+        return mock.patch.object(sweep.sellersprite, "call_tool",
+                                 side_effect=fixture_vendor)
+
+    def test_it_collects_even_though_the_scheduler_owns_today(self) -> None:
+        with self.vendor():
+            first = sweep.run_daily_sweep("US", budget=6)
+            self.assertNotEqual(first["status"], "claimed_elsewhere")
+            self.assertFalse(sweep.is_due("US"), "the day should now be claimed")
+            manual = sweep.collect_now("US")
+        self.assertEqual(manual["mode"], "manual")
+        self.assertGreater(manual["calls_used"], 0,
+                           "the button spent nothing on a day the scheduler owned")
+        self.assertGreater(manual["jobs_done"], 0)
+
+    def test_it_spends_the_manual_wallet_not_the_sweep_one(self) -> None:
+        """Two wallets so a manual top-up cannot eat tomorrow's automatic run."""
+        day = gateway.run_date()
+        with self.vendor():
+            sweep.run_daily_sweep("US", budget=4)
+            before = store.calls_used("US", day, gateway.BUCKET_SWEEP)
+            sweep.collect_now("US")
+        self.assertEqual(store.calls_used("US", day, gateway.BUCKET_SWEEP), before)
+        self.assertGreater(store.calls_used("US", day, gateway.BUCKET_MANUAL), 0)
+
+    def test_the_first_run_of_a_free_day_still_gets_the_sweep_budget(self) -> None:
+        """A cold start needs the full sweep wallet, not the manual top-up."""
+        with self.vendor():
+            result = sweep.collect_now("US")
+        self.assertEqual(result["mode"], "sweep")
+        self.assertFalse(sweep.is_due("US"))
+
+    def test_an_empty_queue_says_so_instead_of_going_quiet(self) -> None:
+        """A button that does nothing and reports nothing is indistinguishable
+        from a broken one — which is how this one spent its whole life."""
+        gateway.DAILY_LIMITS[gateway.BUCKET_SWEEP] = 2000
+        gateway.DAILY_LIMITS[gateway.BUCKET_MANUAL] = 2000
+        with self.vendor():
+            sweep.run_daily_sweep("US")
+            # `due_jobs`, not `queue_depth`: the latter counts jobs backing off
+            # after a vendor refusal, which are pending but not collectable now.
+            self.assertEqual(store.due_jobs("US", limit=1), [], "queue did not drain")
+            result = sweep.collect_now("US")
+        self.assertEqual(result["status"], "nothing_due")
+        self.assertEqual(result["calls_used"], 0)
+
+    def test_a_manual_run_does_not_consume_the_scheduler_s_day(self) -> None:
+        """It writes no run row, so tomorrow's `is_due` is unaffected — and a
+        manual collection before the scheduler wakes must not skip it."""
+        gateway.DAILY_LIMITS[gateway.BUCKET_SWEEP] = 0
+        with self.vendor():
+            sweep.collect_now("US")
+        self.assertIsNone(store.latest_run("US"))
+        self.assertTrue(sweep.is_due("US"))
+
+
 class SweepTests(SweepTestCase):
     def test_the_cap_stops_the_sweep_and_leaves_the_rest_queued(self) -> None:
         gateway.DAILY_LIMITS[gateway.BUCKET_SWEEP] = 10

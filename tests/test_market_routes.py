@@ -152,8 +152,23 @@ class MarketRouteTests(unittest.TestCase):
         self.assertIn("SELLERSPRITE_SECRET_KEY", response.json()["detail"])
 
     def test_a_vendor_outage_during_collect_is_a_502(self) -> None:
+        """Both shapes: the raise, and the `aborted` the real one returns.
+
+        `collect_now` does not raise on a transport failure — it stops and
+        reports `aborted`. Only the mock ever raised, so the route's 502
+        branch was reachable from this test and from nothing else.
+        """
         with mock.patch.object(routes, "sellersprite_configured", return_value=True), \
-             mock.patch.object(routes.market_sweep, "run_daily_sweep",
+             mock.patch.object(routes.market_sweep, "collect_now",
+                               return_value={"status": "aborted",
+                                             "detail": "connection reset"}):
+            response = self.client.post("/api/market/overview/refresh",
+                                        headers=self.headers, json={"collect": True})
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("不会被覆盖", response.json()["detail"])
+
+        with mock.patch.object(routes, "sellersprite_configured", return_value=True), \
+             mock.patch.object(routes.market_sweep, "collect_now",
                                side_effect=McpUnavailable("connection reset")):
             response = self.client.post("/api/market/overview/refresh",
                                         headers=self.headers, json={"collect": True})

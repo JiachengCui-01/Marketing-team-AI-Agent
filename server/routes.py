@@ -660,22 +660,32 @@ async def refresh_market_overview(request: Request) -> dict:
         payload = {}
     language = _market_language(payload, config)
     period = str(payload.get("period") or "") or None
+    collected: dict | None = None
 
     if payload.get("collect"):
         if not sellersprite_configured():
             raise HTTPException(502, "卖家精灵（SellerSprite）未配置，无法采集市场数据。"
                                      "请在服务端设置 SELLERSPRITE_SECRET_KEY。")
         try:
-            await asyncio.to_thread(market_sweep.run_daily_sweep, "US")
+            collected = await asyncio.to_thread(market_sweep.collect_now, "US")
         except McpUnavailable as exc:
             raise HTTPException(
                 502, f"卖家精灵接口暂时不可用：{exc}。已有数据不会被覆盖。") from exc
+        # `collect_now` does not raise on a transport failure — it stops, leaves
+        # the due times untouched and reports `aborted`. Turning that into the
+        # 502 the contract already promised is what makes the promise true for
+        # the real function rather than only for a mock of it.
+        if collected.get("status") == "aborted":
+            raise HTTPException(
+                502, f"卖家精灵接口暂时不可用：{collected.get('detail') or '连接中断'}。"
+                     "已有数据不会被覆盖。")
 
     client = llm.get_client()
     record = await asyncio.to_thread(
         market_render.render_overview, marketplace="US", period=period,
         language=language, client=client)
-    return {"report": _with_current(record, language)}
+    return {"report": _with_current(record, language),
+            "collected": collected if payload.get("collect") else None}
 
 
 @router.get("/market/categories")
@@ -759,6 +769,36 @@ async def refresh_market_category(request: Request) -> dict:
     return {"report": _with_current(record, language, node)}
 
 
+def _collect_detail(result: dict) -> str:
+    """What a collection run actually did, for the trace and the response.
+
+    Reported rather than discarded: the button spent its whole life calling a
+    sweep that had already been claimed by the scheduler, returning without
+    spending anything, and then re-rendering the same data — which looks exactly
+    like a button that worked and found nothing new.
+    """
+    status = str(result.get("status") or "")
+    calls = int(result.get("calls_used") or 0)
+    jobs_done = int(result.get("jobs_done") or 0)
+    depth = int(result.get("queue_depth") or 0)
+    if status == "nothing_due":
+        waiting = f"，另有 {depth} 个任务在退避等待" if depth else ""
+        return f"当前没有到期的采集任务，本期数据已采齐{waiting}"
+    if status == "disabled":
+        return "采集已在服务端关闭"
+    if status == "unconfigured":
+        return "卖家精灵未配置"
+    if status == "no_budget":
+        return "手动采集额度为 0，无法采集"
+    if status == "aborted":
+        return f"厂商接口中断：{result.get('detail') or '未知原因'}。已有数据未被覆盖"
+    due = int(result.get("due_now") or 0)
+    tail = f"，还有 {due} 个待采" if due else "，已无到期任务"
+    if status == "budget_exhausted":
+        return f"今日额度用完：{calls} 次调用、{jobs_done} 个任务{tail}"
+    return f"{calls} 次调用、{jobs_done} 个任务{tail}"
+
+
 # ---------- automation: the same three refreshes, with a trace ----------
 #
 # GET rather than POST: `openEventStream` reads the body with `fetch` and cannot
@@ -794,8 +834,14 @@ async def stream_market_overview(request: Request) -> EventSourceResponse:
         emit("started", {"message": "开始生成全盘发现。"})
         if collect:
             steps.running("collect", "采集最新数据", "调用卖家精灵，会消耗调用额度")
-            market_sweep.run_daily_sweep("US")
-            steps.done("collect", "采集完成", "仓库已更新，下面的分析读的是新数据")
+            result = market_sweep.collect_now("US")
+            if result.get("status") == "aborted":
+                raise RuntimeError(
+                    f"卖家精灵接口暂时不可用：{result.get('detail') or '连接中断'}。"
+                    "已有数据不会被覆盖。")
+            steps.done("collect",
+                       "本期无需采集" if result.get("status") == "nothing_due" else "采集完成",
+                       _collect_detail(result))
         record = market_render.render_overview(
             marketplace="US", period=period, language=language, client=client,
             on_event=emit)
