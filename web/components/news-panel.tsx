@@ -6,19 +6,28 @@ import {
   getNewsConfig,
   getNewsSummary,
   saveNewsConfig,
-  refreshNews,
+  newsStreamUrl,
   cancelNews,
   type NewsConfig,
   type NewsSummary,
   type NewsSource,
 } from "@/lib/api";
 import { localizeError, useI18n } from "@/lib/i18n";
+import { runTracedStream, type StreamEvent } from "@/lib/sse";
 import { Modal } from "@/components/modal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LoadingCard, Spinner } from "@/components/ui/spinner";
 import { CitationCapsules, CitationMarkdown, faviconUrl, type CitationSource } from "@/components/citation-markdown";
 
-export function NewsPanel() {
+export function NewsPanel({
+  onTrace,
+  onTraceReset,
+}: {
+  /** Report this run's phases into the shared trace panel. */
+  onTrace?: (event: StreamEvent) => void;
+  /** Clear it when a new run starts, so two runs never interleave. */
+  onTraceReset?: () => void;
+} = {}) {
   const { locale, t } = useI18n();
   const [config, setConfig] = useState<NewsConfig | null>(null);
   const [summary, setSummary] = useState<NewsSummary | null>(null);
@@ -52,8 +61,10 @@ export function NewsPanel() {
   async function handleRefresh() {
     setRefreshing(true);
     setError(null);
+    onTraceReset?.();
     try {
-      const sum = await refreshNews(locale);
+      const payload = await runTracedStream(newsStreamUrl(locale), (e) => onTrace?.(e));
+      const sum = payload.summary as NewsSummary;
       setSummary(sum);
     } catch (e) {
       setError(localizeError(e, locale));

@@ -5,6 +5,43 @@ export type StreamEvent = {
   payload: Record<string, unknown>;
 };
 
+/** Run one traced job over SSE and resolve with its terminal payload.
+
+ * The automation refreshes are request/response as far as the caller is
+ * concerned — ask for a report, get a report — but the interesting part is the
+ * minute in between, which used to be a spinner. This keeps the awaitable shape
+ * and hands every event to `onEvent` on the way past, so the trace panel fills
+ * in while the promise is still pending.
+ */
+export function runTracedStream(
+  url: string,
+  onEvent: (e: StreamEvent) => void,
+): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      fn();
+    };
+    openEventStream(
+      url,
+      (e) => {
+        onEvent(e);
+        if (e.event === "result") finish(() => resolve(e.payload));
+        else if (e.event === "error" || e.event === "cancelled") {
+          finish(() => reject(new Error(String(e.payload.message ?? e.event))));
+        }
+      },
+      // A stream that ends without a terminal event is a broken run, not a
+      // finished one — surfacing it as an error is what stops the panel from
+      // quietly keeping the previous report and calling it fresh.
+      () => finish(() => reject(new Error("Stream ended without a result."))),
+      (err) => finish(() => reject(err)),
+    );
+  });
+}
+
 export function openEventStream(
   url: string,
   onEvent: (e: StreamEvent) => void,

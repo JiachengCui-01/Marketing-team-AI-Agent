@@ -8,7 +8,7 @@ import {
   getMarketBudget,
   getMarketConfig,
   getMarketOverview,
-  refreshMarketOverview,
+  marketOverviewStreamUrl,
   type MarketBoardRead,
   type MarketBoardRow,
   type MarketConfigResponse,
@@ -18,6 +18,7 @@ import {
 import { CitationMarkdown } from "@/components/citation-markdown";
 import { LoadingCard } from "@/components/ui/spinner";
 import { useI18n } from "@/lib/i18n";
+import { runTracedStream, type StreamEvent } from "@/lib/sse";
 import {
   BandHistogram,
   Bullet,
@@ -64,10 +65,16 @@ import {
 export function MarketOverviewPanel({
   onDrill,
   active = true,
+  onTrace,
+  onTraceReset,
 }: {
   onDrill: (node: { nodeKey: string; label: string }) => void;
   /** False while the shell is showing another tab. */
   active?: boolean;
+  /** Report this run's phases into the shared trace panel. */
+  onTrace?: (event: StreamEvent) => void;
+  /** Clear it when a new run starts, so two runs never interleave. */
+  onTraceReset?: () => void;
 }) {
   const { t, locale } = useI18n();
   const labels = useScoreLabels();
@@ -102,10 +109,17 @@ export function MarketOverviewPanel({
   async function refresh(collect: boolean) {
     setBusy(collect ? "collect" : "render");
     setError(null);
+    onTraceReset?.();
     try {
-      const next = await refreshMarketOverview({ collect, language: locale });
+      // The report still arrives as one value to await; the difference is that
+      // the minute before it is no longer a spinner.
+      const payload = await runTracedStream(
+        marketOverviewStreamUrl({ collect, language: locale }),
+        (e) => onTrace?.(e),
+      );
+      const next = payload.report as MarketReport;
       setReport(next);
-      setCurrent(next.dashboard?.current);
+      setCurrent(next?.dashboard?.current);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

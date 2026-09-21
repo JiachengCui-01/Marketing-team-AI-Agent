@@ -7,6 +7,7 @@ import { NewsPanel } from "@/components/news-panel";
 import { MarketOverviewPanel } from "@/components/market/overview-panel";
 import { MarketCategoryPanel } from "@/components/market/category-panel";
 import { useI18n } from "@/lib/i18n";
+import type { StreamEvent } from "@/lib/sse";
 
 type Tab = "news" | "discovery" | "category";
 type Drill = { nodeKey: string; label: string } | null;
@@ -27,7 +28,17 @@ type Drill = { nodeKey: string; label: string } | null;
  * switch, the report itself — and re-fetched it, dropping them back at the top
  * of a long report to scroll for the row they had just clicked.
  */
-export function AutomationPanel({ onBack }: { onBack: () => void }) {
+export function AutomationPanel({
+  onBack,
+  onTrace,
+  onTraceReset,
+}: {
+  onBack: () => void;
+  /** Every event the running analysis emits, for the shared trace panel. */
+  onTrace?: (event: StreamEvent) => void;
+  /** Clear the panel when a new run starts, so two runs never interleave. */
+  onTraceReset?: () => void;
+}) {
   const { t } = useI18n();
   const [tab, setTab] = useState<Tab>("news");
   const [drill, setDrill] = useState<Drill>(null);
@@ -106,17 +117,24 @@ export function AutomationPanel({ onBack }: { onBack: () => void }) {
             aria-hidden={tab !== id}
           >
             {id === "news" ? (
-              <NewsPanel />
+              <NewsPanel onTrace={onTrace} onTraceReset={onTraceReset} />
             ) : id === "discovery" ? (
               <MarketOverviewPanel
                 active={tab === id}
+                onTrace={onTrace}
+                onTraceReset={onTraceReset}
                 onDrill={(node) => {
                   setDrill(node);
                   setTab("category");
                 }}
               />
             ) : (
-              <MarketCategoryPanel initialNode={drill} active={tab === id} />
+              <MarketCategoryPanel
+                initialNode={drill}
+                active={tab === id}
+                onTrace={onTrace}
+                onTraceReset={onTraceReset}
+              />
             )}
           </div>
         ) : null,

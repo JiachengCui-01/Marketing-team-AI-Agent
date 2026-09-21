@@ -15,6 +15,7 @@ from unittest import mock
 from server import db
 from server.market import (elements, gateway, jobs, panels, render, scoring,
                            store, sweep, taxonomy)
+from server.market import evidence as ev_mod
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures" / "sellersprite"
 BUFFETS = "1055398:1063306:3733781:3733831"
@@ -631,6 +632,70 @@ class PriceCurveTests(RenderTestCase):
         prices = [round(price) for price, _fit in curve]
         self.assertNotEqual(prices, [75, 125], "still reading the vendor bands")
         self.assertIn(800, prices)
+
+
+class RenderTraceTests(RenderTestCase):
+    """The analyses report their phases the way a chat turn does.
+
+    A minute of spinner is indistinguishable from a minute of hang, and when it
+    finishes nobody can say which half was slow or which step found nothing.
+    The chat turn has had a step-by-step trace since the beginning; these run
+    the same kind of work and reported none of it.
+    """
+
+    def steps(self, **kwargs) -> list[dict]:
+        events: list[tuple[str, dict]] = []
+        client = FakeClient({"publish_market_overview": {"thesis": "x",
+                                                         "category_verdicts": [],
+                                                         "notes": []}})
+        render.render_overview(client=client, period=PERIOD, save=False,
+                               on_event=lambda name, payload: events.append((name, payload)),
+                               **kwargs)
+        self.events = events
+        return [payload for name, payload in events if name == "orchestrator_step"]
+
+    def test_every_phase_of_the_board_render_reports_itself(self) -> None:
+        stages = [step["stage"] for step in self.steps()]
+        for stage in ("read", "mine", "name", "panels", "evidence", "synthesis",
+                      "verify", "save"):
+            self.assertIn(stage, stages)
+
+    def test_the_slow_phases_say_they_started_and_the_fast_ones_do_not(self) -> None:
+        """A pair of cards for something that took 40ms is noise; a model call
+        with no opening card is a minute of nothing."""
+        steps = self.steps()
+        running = {s["stage"] for s in steps if s["status"] == "running"}
+        self.assertEqual(running, {"name", "synthesis"})
+        self.assertTrue(all(s["status"] in ("running", "done") for s in steps))
+
+    def test_every_step_carries_a_readable_title(self) -> None:
+        for step in self.steps():
+            self.assertTrue(step["title"].strip(), step)
+
+    def test_the_pipeline_does_not_close_the_stream(self) -> None:
+        """`result` is the transport's terminal event. A pipeline that sent its
+        own would cut the route off before it could attach the report — and two
+        of them would cut off the first."""
+        self.steps()
+        self.assertNotIn("result", [name for name, _payload in self.events])
+
+    def test_a_render_with_no_listener_is_the_render_it_always_was(self) -> None:
+        quiet = render.render_overview(client=FakeClient(
+            {"publish_market_overview": {"thesis": "x", "category_verdicts": [],
+                                         "notes": []}}), period=PERIOD, save=False)
+        self.assertEqual(quiet["status"], "ok")
+
+    def test_a_data_gap_still_reaches_a_final_step(self) -> None:
+        """A stream that stops without one reads as a dropped connection, and
+        "no data this period" is an answer rather than a failure."""
+        db.reset_for_tests()
+        taxonomy.ensure_nodes()
+        events: list[tuple[str, dict]] = []
+        render.render_overview(client=FakeClient({}), period=PERIOD, save=False,
+                               on_event=lambda name, payload: events.append((name, payload)))
+        last = [p for n, p in events if n == "orchestrator_step"][-1]
+        self.assertEqual(last["stage"], "save")
+        self.assertEqual(last["status"], "done")
 
 
 class PriceBandLadderTests(unittest.TestCase):
@@ -1515,6 +1580,73 @@ class SelectionBriefTests(RenderTestCase):
         self.assertIn("material", kinds)
         self.assertLess(max(i for i, k in enumerate(kinds) if k == "craft"),
                         min(i for i, k in enumerate(kinds) if k == "material"))
+
+    def test_every_number_the_brief_hands_over_carries_an_id(self) -> None:
+        """The brief tells the model to quote its server-computed figures and
+        the citation filter deletes every sentence that quotes one. Without an
+        id on the row those two rules cannot both be obeyed."""
+        prompt = self.prompt()
+        for heading, column in (("PRODUCT LINES ON THE SHELF", "ev_entry"),
+                                ("PRICE BANDS", "ev_revenue"),
+                                ("PHYSICAL ENVELOPE AND RETURN COST", "ev_lb")):
+            rows = self.table(heading, prompt)
+            self.assertTrue(rows, heading)
+            self.assertTrue(rows[0][column].startswith("ev_"),
+                            f"{heading} row has no id for {column}: {rows[0][column]}")
+
+    def test_a_computed_row_says_it_was_computed(self) -> None:
+        """Citable like a vendor metric, and never mistakable for one."""
+        sheet = self.prompt().split("证据索引")[1]
+        computed = [line for line in sheet.splitlines() if "服务端计算" in line]
+        self.assertTrue(computed, "no computed rows reached the evidence sheet")
+        self.assertTrue(any("实测" in line or "估算" in line
+                            for line in sheet.splitlines()),
+                        "the vendor rows lost their own basis")
+
+    def test_a_cited_number_survives_and_an_uncited_one_still_does_not(self) -> None:
+        """The whole point. The first half is new; the second half is the
+        guarantee that must not have been traded away to get it."""
+        prompt = self.prompt()
+        eid = self.table("PRODUCT LINES ON THE SHELF", prompt)[0]["ev_entry"]
+        kept, dropped = ev_mod.validate_citations(
+            f"可进入度 33，三大品牌没占满 [ev](evidence:{eid})。均重 86.0 lb。",
+            {eid})
+        self.assertIn(eid, kept)
+        self.assertIn("33", kept)
+        self.assertNotIn("86.0", kept)
+        self.assertTrue(any(d.endswith("uncited-number") for d in dropped))
+
+    def test_a_citation_the_model_copied_opens_on_something(self) -> None:
+        """The drawer resolves an id against the evidence ledger, so a computed
+        row that never reached it is a citation that opens on nothing."""
+        eid = self.table("PRODUCT LINES ON THE SHELF")[0]["ev_entry"]
+        row = store.get_evidence([eid])
+        self.assertEqual(len(row), 1, f"{eid} is not in the ledger")
+        self.assertEqual(row[0]["tool"], ev_mod.COMPUTED_TOOL)
+
+    def test_the_rows_we_computed_are_not_billed_as_vendor_calls(self) -> None:
+        client = FakeClient({"publish_market_overview": self.NARRATIVE})
+        record = render.render_overview(client=client, period=PERIOD, save=False)
+        self.assertNotIn(ev_mod.COMPUTED_TOOL, record.get("vendor_tools", []))
+
+    def test_what_the_read_lost_is_reported_on_the_read(self) -> None:
+        """A paragraph stripped of its numeric sentences looks like a paragraph
+        the model phoned in. The one line saying otherwise was filed under
+        "data gaps", most of a screen below it."""
+        # Multi-line on purpose: a short single-line string is treated as a
+        # label rather than prose and skips the filter entirely, which is why
+        # this only ever bites a real 250-400 word read.
+        narrative = {**self.NARRATIVE}
+        narrative["selection"] = {
+            **narrative["selection"],
+            "narrative": "本期主打两条结构优势线。\n\n均重 86.0 lb，运费定死了成本下限。"}
+        dashboard = self.render(narrative)
+        notes = dashboard["selection"].get("notes") or []
+        self.assertTrue(any("无出处" in note for note in notes), notes)
+        self.assertNotIn("86.0", dashboard["selection"]["narrative"])
+        # And not a second time at the foot of the board.
+        self.assertFalse([g for g in dashboard["gaps"] if "无出处" in g],
+                         "the same loss is reported twice")
 
     def test_the_signatures_say_which_elements_travel_together(self) -> None:
         """One look per line is what keeps a spec cell measurable, so a title

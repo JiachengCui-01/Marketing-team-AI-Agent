@@ -29,6 +29,7 @@ from marketing_agent.source_policy import data_gap_message
 
 from . import evidence as ev
 from . import elements, gateway, jobs, monitor, panels, scoring, store
+from ..streaming import Steps
 
 logger = logging.getLogger(__name__)
 
@@ -119,23 +120,17 @@ TOOL_OVERVIEW = {
                 # fit in a field, and the part a reader argues with.
                 "narrative": {"type": "string", "description":
                               "Markdown, 250-400 words, cited inline as "
-                              "[ev_xxxxxxxx](evidence:ev_xxxxxxxx). Name every "
+                              "[ev_xxxxxxxx](evidence:ev_xxxxxxxx). Any sentence "
+                              "here that contains a number and no inline "
+                              "citation is deleted before a reader sees it, so "
+                              "a figure you cannot cite is a figure to leave "
+                              "out — every table you were given carries an `ev` "
+                              "column holding the id for its own numbers, "
+                              "including the ones computed here. Name every "
                               "line you are recommending in full the first time "
-                              "it appears, in words and in this order — area, "
-                              "shelf, colour, look, e.g. 「卧室 · 床架 · 胡桃色 · "
-                              "中古风」. area and shelf are their own columns on "
-                              "the PRODUCT LINES row: copy both, a colour and a "
-                              "look with no shelf under them is not something "
-                              "anybody can draw. Prefer a line whose look_kind "
-                              "is craft, style or form; if you recommend one "
-                              "whose look is only a material, say in the same "
-                              "sentence why the material is the decision. Where "
-                              "a SPEC SIGNATURES row shows other appearance "
-                              "elements travelling with that look, name them "
-                              "too and mark them as department-wide — 「…· 木瘤"
-                              "纹，这组签名上它多和玻璃门、中古风一起出现」 — "
-                              "never attach a signature's element to the shelf "
-                              "as though its own row carried it. Then "
+                              "it appears — area, shelf, colour and look, all "
+                              "four copied off its PRODUCT LINES row, e.g. "
+                              "「卧室 · 床架 · 胡桃色 · 中古风」 — and "
                               "say why THAT colour and THAT look on THAT shelf: "
                               "what the market is doing with it, what it costs "
                               "to build, what would make you drop it. A reader "
@@ -553,6 +548,21 @@ _pct = panels.pct
 
 # -------------------------------------------------------------------- render ----
 
+#: What `_run_tool`'s `source` means, in a sentence. The trace is where a
+#: degraded model call becomes visible instead of silently thinning the report.
+_SOURCE_DETAIL = {
+    "llm": "模型正常返回",
+    "truncated": "输出被 token 预算截断，内容不完整",
+    "no_tool_call": "模型没有产出结构化结果",
+    "unavailable": "模型不可用，这次没有结论",
+    "error": "模型调用失败",
+}
+
+
+def _source_detail(source: str) -> str:
+    return _SOURCE_DETAIL.get(source, source)
+
+
 def _evidence_for_overview(marketplace: str, period: str, board: Sequence[dict]) -> list[dict]:
     subjects = [("node", row["node_key"]) for row in board]
     return store.evidence_for(marketplace, subjects, period)
@@ -585,10 +595,16 @@ def _data_gap(marketplace: str, period: str, scope: str, language: str,
 
 def render_overview(
     *, marketplace: str = "US", period: str | None = None, language: str = "zh",
-    client=None, save: bool = True,
+    client=None, save: bool = True, on_event=None,
 ) -> dict:
-    """Render 全局汇总 from stored data. Makes zero vendor calls."""
+    """Render 全局汇总 from stored data. Makes zero vendor calls.
+
+    ``on_event`` is the trace callback the chat turn uses; pass it and each
+    phase reports itself as it goes. Absent, the render is exactly what it was.
+    """
+    steps = Steps(on_event)
     period = period or store.latest_period(marketplace) or gateway.previous_period()
+    steps.done("read", "读取仓库", f"{marketplace} · {period} 期，全部来自已存数据，不调厂商接口")
     # Name any newly mined term before the panel is built, so the chart and the
     # brief use the same labels. Costs one model call the first time a term
     # appears and nothing afterwards.
@@ -596,11 +612,24 @@ def render_overview(
     # terms, the element chart aggregates them, and the spec chart reads them
     # back off the same listing titles.
     mining = panels.mining_inputs(marketplace, period)
+    steps.done("mine", "挖掘外观元素",
+               f"{len(mining.products):,} 条在售 listing 的标题")
     terms = panels.mined_terms(marketplace, period, inputs=mining)
+    if steps:
+        steps.running("name", "给新词归类", f"{len(terms)} 个词，未命名过的才调模型")
     name_elements(client, marketplace, period, language, terms=terms)
+    steps.done("name", "词表就绪", f"{len(terms)} 个元素词已分到材质/颜色/工艺/风格等类")
     payload = build_overview(marketplace, period, language, terms=terms,
                              inputs=mining)
+    steps.done("panels", "计算看板",
+               f"{len(payload.get('board') or ())} 个类目 · "
+               f"{len(((payload.get('spec_map') or {}).get('points')) or ())} 条产品线 · "
+               "分数与图表全部服务端算定")
     if not payload["board"]:
+        # A terminal event even here: the client treats a stream that stops
+        # without one as a broken connection, and "we have no data this period"
+        # is an answer, not a failure.
+        steps.done("save", "数据缺口", "本期没有任何类目快照，没有可分析的内容")
         record = _data_gap(marketplace, period, "overview", language, None,
                            "本期没有任何类目快照，请先运行一次采集。"
                            if language == "zh" else
@@ -613,25 +642,45 @@ def render_overview(
 
     index = ev.index_from_rows(_evidence_for_overview(marketplace, period, payload["board"]),
                                marketplace=marketplace, period=period)
+    steps.done("evidence", "建立证据索引", f"{len(index)} 条可引用的数字")
     user = "\n\n".join([part for part in [
         f"MARKETPLACE: {marketplace}   PERIOD: {period}",
         _board_brief(payload["board"], language),
         # Before the element lists and the alerts: the opening block is written
         # from these rows, and what leads the input is what leads the output.
-        _selection_brief(payload, language),
+        _selection_brief(payload, language, index),
         _direction_brief(payload, language),
         monitor.brief(payload["monitor"], language),
         index.sheet(language=language),
     ] if part])
+    _persist_computed(index)
+    steps.done("evidence", "补上服务端算的数字",
+               f"{len(index)} 条可引用，其中服务端计算的也能被引用了")
+    if steps:
+        steps.running("synthesis", "写选品结论", "把看板、产品线、价格带和证据交给模型")
     narrative, source = _run_tool(client, tool=TOOL_OVERVIEW, user=user, language=language)
+    steps.done("synthesis", "结论已返回", _source_detail(source))
     cleaned, dropped = ev.validate_citations(narrative, index.ids())
+    steps.done("verify", "校验引用",
+               f"移除 {len(dropped)} 处无出处的表述" if dropped else "每个数字都带着出处")
 
     payload["thesis"] = cleaned.get("thesis", "")
-    payload["selection"] = _clean_selection(cleaned.get("selection"), payload["board"])
+    # The selection block's own losses, reported on the selection block. They
+    # were going into `gaps` with everything else, which sits most of a screen
+    # below the paragraph they were cut out of — so a read that arrived with
+    # its numbers stripped looked like a read the model had phoned in, and the
+    # one line saying otherwise was filed under "data gaps".
+    payload["selection"] = _clean_selection(
+        cleaned.get("selection"), payload["board"],
+        notes=ev.citation_notes([d for d in dropped
+                                 if d.startswith("$.selection")], language))
     payload["verdicts"] = {v["node_key"]: v for v in cleaned.get("category_verdicts", [])
                            if v.get("node_key") in {r["node_key"] for r in payload["board"]}}
     payload["movers_reading"] = cleaned.get("movers_reading", [])
-    payload["gaps"] = list(cleaned.get("notes", [])) + ev.citation_notes(dropped, language)
+    # Minus the selection's own, which the selection block now carries: the
+    # same sentence in two places reads as two problems.
+    payload["gaps"] = list(cleaned.get("notes", [])) + ev.citation_notes(
+        [d for d in dropped if not d.startswith("$.selection")], language)
     payload["gaps"] += _missing_notes(payload["board"], language)
     payload["direction_reading"] = cleaned.get("direction_reading", "")
     payload["monitor_summary"] = cleaned.get("monitor_summary", "")
@@ -639,6 +688,7 @@ def render_overview(
     payload["narrative_source"] = source
 
     completeness = sum(r["completeness"] for r in payload["board"]) / len(payload["board"])
+    steps.done("save", "完成", f"覆盖度 {completeness:.0%}")
     if not save:
         return {"status": "ok", "scope": "overview", "period": period,
                 "dashboard": payload, "summary": payload["thesis"],
@@ -654,13 +704,21 @@ def render_overview(
 def render_category(
     *, node_id_path: str, marketplace: str = "US", period: str | None = None,
     language: str = "zh", client=None,
-    user_id: str | None = None, save: bool = True,
+    user_id: str | None = None, save: bool = True, on_event=None,
 ) -> dict:
-    """Render 品类深度 for one node from stored data. Makes zero vendor calls."""
+    """Render 品类深度 for one node from stored data. Makes zero vendor calls.
+
+    ``on_event`` traces the phases, as in :func:`render_overview`. This one has
+    three model calls in it rather than two, which is most of why it feels slow
+    and all of why a reader deserves to see which one they are waiting on.
+    """
+    steps = Steps(on_event)
     period = (period or store.latest_period(marketplace, node_id_path)
               or store.latest_period(marketplace) or gateway.previous_period())
+    steps.done("read", "读取仓库", f"{marketplace} · {period} 期 · {node_id_path}")
     snap = store.get_node_snapshot(marketplace, node_id_path, period)
     if not snap:
+        steps.done("save", "数据缺口", "该类目本期没有快照，没有可分析的内容")
         record = _data_gap(marketplace, period, "category", language, node_id_path,
                            "该类目本期没有快照，请先对它运行一次深度研究。"
                            if language == "zh" else
@@ -673,16 +731,24 @@ def render_category(
             completeness=0.0) if save else record
 
     payload = build_category(marketplace, node_id_path, period, language)
+    steps.done("panels", "计算面板",
+               f"{len(payload.get('keywords') or ())} 个关键词 · "
+               f"{len(payload.get('competitors') or ())} 个竞品 ASIN")
     index = ev.index_from_rows(
         _evidence_for_category(marketplace, node_id_path, period, payload),
         marketplace=marketplace, period=period)
+    steps.done("evidence", "建立证据索引", f"{len(index)} 条可引用的数字")
 
     notes: list[str] = []
     # Pain points first: their classification feeds the opportunity score, so the
     # arithmetic has to happen before the opportunities are written.
     themes = payload["pain"]
     if not themes:
+        if steps:
+            steps.running("pain", "归纳评论痛点", "本期还没有痛点分类，调一次模型")
         themes = _theme_reviews(client, marketplace, node_id_path, period, language, notes)
+        steps.done("pain", "痛点归纳完成",
+                   f"{len(themes)} 类痛点" if themes else "没有可用的评论，跳过")
         if themes:
             store.replace_review_themes(marketplace, node_id_path, period, themes)
             payload["pain"] = store.review_themes(marketplace, node_id_path, period)
@@ -694,15 +760,24 @@ def render_category(
         monitor.brief(payload["monitor"], language),
         index.sheet(language=language),
     ])
+    if steps:
+        steps.running("synthesis", "写类目解读", "关键词、竞品、痛点、流量结构一起交给模型")
     narrative, source = _run_tool(client, tool=TOOL_CATEGORY, user=user, language=language)
+    steps.done("synthesis", "解读已返回", _source_detail(source))
     cleaned, dropped = ev.validate_citations(narrative, index.ids())
     notes += ev.citation_notes(dropped, language)
 
+    if steps:
+        steps.running("opportunity", "写产品机会卡", "在解读之上再算一遍机会与代价")
     thesis, thesis_source = _run_tool(
         client, tool=TOOL_OPPORTUNITY,
         user="\n\n".join([user, _opportunity_brief(payload, language)]), language=language)
+    steps.done("opportunity", "机会卡已返回", _source_detail(thesis_source))
     thesis_clean, thesis_dropped = ev.validate_citations(thesis, index.ids())
     notes += ev.citation_notes(thesis_dropped, language)
+    steps.done("verify", "校验引用",
+               f"移除 {len(dropped) + len(thesis_dropped)} 处无出处的表述"
+               if (dropped or thesis_dropped) else "每个数字都带着出处")
     payload["opportunities"] = _merge_opportunities(
         payload["opportunities"], thesis_clean.get("opportunities", []))
 
@@ -723,6 +798,7 @@ def render_category(
     payload["evidence_index"] = index.all_rows()
 
     completeness = payload["header"]["completeness"]
+    steps.done("save", "完成", f"覆盖度 {completeness:.0%}")
     if not save:
         return {"status": "ok", "scope": "category", "period": period,
                 "dashboard": payload, "summary": payload["narrative"],
@@ -929,7 +1005,46 @@ def _num_text(value: float | None, digits: int = 0) -> str:
     return "—" if value is None else f"{value:,.{digits}f}"
 
 
-def _selection_brief(payload: dict, language: str) -> str:
+def _computed(index: ev.EvidenceIndex, *, subject_kind: str, subject_id: str,
+              metric: str, value: Any, unit: str = "", label: str = "",
+              digits: int = 2) -> str:
+    """Mint one server-computed figure and return its id, or ``—``.
+
+    Same mint as a vendor row, under `COMPUTED_TOOL`: the number was derived
+    here, it is printed on a panel, and a reader who wants to argue with it can
+    open it. Before this the brief handed the model a table of these and the
+    citation filter deleted every sentence that quoted one.
+
+    Rounded to the digits the brief prints, so the drawer agrees with the prose:
+    the table said 33 and the row behind it held 33.3, which is the kind of gap
+    a reader finds and stops trusting the rest over.
+    """
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        value = round(float(value), digits)
+    eid = index.mint(subject_kind=subject_kind, subject_id=subject_id,
+                     metric=metric, value=value, tool=ev.COMPUTED_TOOL,
+                     field_path="", unit=unit, observed=False,
+                     label=label or metric)
+    return eid or "—"
+
+
+def _vendor_id(index: ev.EvidenceIndex, subject_id: str, metric: str) -> str:
+    """The id already in the index for one node's vendor metric.
+
+    Read off the index rather than re-derived: ids are minted from the tool that
+    produced the number and this does not know which tool that was. The brief's
+    tables print these beside the computed ones so the model never has to match
+    a row to the sheet by eye — a number it cannot find an id for is a number it
+    will write uncited, and an uncited number is deleted.
+    """
+    for row in index.rows.values():
+        if row.get("subject_id") == subject_id and row.get("metric") == metric:
+            return str(row.get("id") or "—")
+    return "—"
+
+
+def _selection_brief(payload: dict, language: str,
+                     index: ev.EvidenceIndex) -> str:
     """What a selection meeting decides on: lines, price, weight, returns.
 
     The board tells the model which shelves are worth working. None of that
@@ -942,6 +1057,12 @@ def _selection_brief(payload: dict, language: str) -> str:
     from the evidence index, so it is labelled as such and the model is told to
     quote it rather than recompute it — the same contract the board scores and
     the FOLLOW/AVOID lists already run on.
+
+    Labelled as such *and minted into the index*, which it was not. Telling a
+    model to quote a number while the citation filter deletes every sentence
+    that quotes it is not a contract, it is a trap, and the selection read fell
+    into it every month: what reached the screen was the subset of sentences
+    with no digits in them.
     """
     blocks: list[str] = []
     points = ((payload.get("spec_map") or {}).get("points") or [])
@@ -978,22 +1099,26 @@ def _selection_brief(payload: dict, language: str) -> str:
             _LOOK_KIND_RANK.get(_look_kind(p), 9),
             -(p.get("revenue") or 0.0)))
         lines = [
+            "Every table in this brief ends in `ev_` columns, one per number "
+            "worth quoting, each holding that figure's evidence id: cite the "
+            "one whose name matches the number you just wrote. The rows behind "
+            "them are labelled 服务端计算 where this repo derived the figure "
+            "and 实测/估算 where a vendor reported it; both are citable the "
+            "same way. A number written without its id does not survive to the "
+            "page, and `—` means the figure was not measured — say so rather "
+            "than reaching for a neighbouring one.\n"
             "PRODUCT LINES ON THE SHELF (server-computed from listing titles; "
-            "the only combinations you may name — copy the area, shelf, colour "
-            "and element words exactly and never invent one; a row carrying "
-            "both a colour and a look is a brief, a row carrying one of them "
-            "is half of one). area is the part of the house the shelf sits in "
-            "and shelf is the category itself: name both, a colour and a look "
-            "with no shelf under them is not something anybody can draw. "
-            "look_kind says what sort of decision the look is — `craft` a "
-            "surface treatment or pattern, `style` a named style, `form` a "
-            "silhouette, `material` what it is made of. Rows are ordered with "
-            "craft, style and form above material, because nearly every title "
-            "names a material and almost none name a pattern: a material row "
-            "is usually the biggest line on its shelf and almost never the "
-            "decision worth recommending. Recommend a bare `material` line "
-            "only when you say in the same breath why the material itself is "
-            "the decision. "
+            "the only combinations you may name — copy the words exactly and "
+            "never invent one; a row carrying both a colour and a look is a "
+            "brief, a row carrying one of them is half of one). Name the area "
+            "and the shelf along with the colour and the look: a look with no "
+            "shelf under it is not something anybody can draw. look_kind is "
+            "what sort of decision the look is — `craft` a pattern or surface "
+            "treatment, `style` a named style, `form` a silhouette, `material` "
+            "what it is made of — and rows are ordered with material last, "
+            "because nearly every title names one and almost none name a "
+            "pattern, so a material row is the biggest line on its shelf and "
+            "rarely the decision. "
             "ease_of_entry = what the three largest brands inside the line have "
             f"NOT taken, 0-100, board median {mid:.0f}. share_shift = percentage "
             "points of its own category's head revenue against "
@@ -1004,12 +1129,19 @@ def _selection_brief(payload: dict, language: str) -> str:
             "is negative the whole department diluted and that is the story.",
             "node_key | area | shelf | colour | look | look_kind | corner | "
             "ease_of_entry | share% | share_shift_pp | head_revenue | asins | "
-            "brands | rating | avg_price",
+            "brands | rating | avg_price | ev_entry | ev_shift",
         ]
         for point in ordered[:MAX_SPEC_ROWS]:
             shift = point.get("share_shift_pp")
             rating = point.get("rating")
             price = point.get("avg_price")
+            name = f"{point['node_label']} · {point.get('look') or point.get('color') or ''}"
+            eid = _computed(index, subject_kind="line", subject_id=point["key"],
+                            metric="line_ease_of_entry", value=point["entry"],
+                            digits=0, label=f"{name} 可进入度")
+            shift_id = _computed(index, subject_kind="line", subject_id=point["key"],
+                                 metric="line_share_shift_pp", value=shift,
+                                 unit="pp", digits=2, label=f"{name} 份额变化")
             lines.append(
                 f"{point['node_key']} | {point.get('area') or '—'} | "
                 f"{point['node_label']} | {point.get('color') or '—'} | "
@@ -1018,7 +1150,7 @@ def _selection_brief(payload: dict, language: str) -> str:
                 f"{'—' if shift is None else f'{shift:+.2f}'} | "
                 f"{point['revenue']:,.0f} | {point['asins']} | {point['brands']} | "
                 f"{'—' if rating is None else f'{rating:.2f}'} | "
-                f"{'—' if price is None else f'{price:,.0f}'}")
+                f"{'—' if price is None else f'{price:,.0f}'} | {eid} | {shift_id}")
         blocks.append("\n".join(lines))
 
     # One look per line is what keeps a spec cell measurable — a listing naming
@@ -1033,18 +1165,14 @@ def _selection_brief(payload: dict, language: str) -> str:
     if signatures:
         lines = [
             "SPEC SIGNATURES (server-computed off listing titles, whole "
-            "department: each row is a combination the market has actually "
-            "built, read off real titles and never multiplied out of a word "
-            "list). There is no node here — a signature spans shelves — so it "
-            "is how you name which appearance elements travel together and at "
-            "what price, not where to build them. The shelf, the colour and "
-            "the pick itself still come from PRODUCT LINES: naming a signature "
-            "is not a licence to attach its elements to a shelf whose own row "
-            "does not carry them, and saying so is the difference between a "
-            "reading and an invention. rating_gap is the signature's "
-            "revenue-weighted rating against the median signature on the "
-            "board — well sold and badly rated is somebody making money doing "
-            "it badly, which is a brief.",
+            "department: combinations the market has actually built, read off "
+            "real titles rather than multiplied out of a word list). No node "
+            "here — a signature spans shelves — so it says which appearance "
+            "elements travel together, not where to build them: name one as a "
+            "department-wide pattern, never as though a shelf's own row "
+            "carried it. rating_gap is the signature's revenue-weighted rating "
+            "against the median signature — well sold and badly rated is "
+            "somebody making money doing it badly, which is a brief.",
             "signature | attrs | asins | head_revenue_share% | avg_price | rating_gap",
         ]
         for row in signatures[:MAX_SIGNATURE_ROWS]:
@@ -1060,10 +1188,19 @@ def _selection_brief(payload: dict, language: str) -> str:
         lines = ["PRICE BANDS (server-computed, whole department; a band whose "
                  "revenue share runs ahead of its listing share is where the "
                  "money is, not where the listings are)",
-                 "band | listings% | revenue%"]
+                 "band | listings% | revenue% | ev_listings | ev_revenue"]
         for band in bands:
+            listing_id = _computed(
+                index, subject_kind="band", subject_id=band["bucket_key"],
+                metric="band_listing_share", value=band.get("listing_share_pct"),
+                unit="%", digits=1, label=f"{band['bucket_key']} 在售占比")
+            revenue_id = _computed(
+                index, subject_kind="band", subject_id=band["bucket_key"],
+                metric="band_revenue_share", value=band.get("revenue_share_pct"),
+                unit="%", digits=1, label=f"{band['bucket_key']} 销售额占比")
             lines.append(f"{band['bucket_key']} | {band.get('listing_share_pct', 0):.1f} | "
-                         f"{band.get('revenue_share_pct', 0):.1f}")
+                         f"{band.get('revenue_share_pct', 0):.1f} | {listing_id} | "
+                         f"{revenue_id}")
         blocks.append("\n".join(lines))
 
     physical = payload.get("physical") or []
@@ -1072,8 +1209,14 @@ def _selection_brief(payload: dict, language: str) -> str:
                  "freight and the cost of a return scale with weight, the price "
                  "does not)",
                  "node_key | label | avg_weight_lb | avg_volume_in3 | avg_price | "
-                 "price_per_lb | return_rate% | peer_return_rate%"]
+                 "price_per_lb | return_rate% | peer_return_rate% | ev_lb | "
+                 "ev_weight | ev_return"]
         for row in physical[:MAX_PHYSICAL_ROWS]:
+            eid = _computed(index, subject_kind="node", subject_id=row["node_key"],
+                            metric="price_per_lb", value=row.get("price_per_lb"),
+                            unit="USD/lb", label=f"{row['label']} 每磅售价")
+            weight_id = _vendor_id(index, row["node_key"], "avg_weight")
+            return_id = _vendor_id(index, row["node_key"], "return_ratio")
             lines.append(
                 f"{row['node_key']} | {row['label']} | "
                 f"{_num_text(row.get('avg_weight'), 1)} | "
@@ -1081,12 +1224,14 @@ def _selection_brief(payload: dict, language: str) -> str:
                 f"{_num_text(row.get('avg_price'))} | "
                 f"{_num_text(row.get('price_per_lb'), 2)} | "
                 f"{_num_text(row.get('return_ratio_pct'), 2)} | "
-                f"{_num_text(row.get('return_ratio_avg_pct'), 2)}")
+                f"{_num_text(row.get('return_ratio_avg_pct'), 2)} | {eid} | "
+                f"{weight_id} | {return_id}")
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
 
 
-def _clean_selection(selection: Any, board: Sequence[dict]) -> dict:
+def _clean_selection(selection: Any, board: Sequence[dict],
+                     *, notes: Sequence[str] = ()) -> dict:
     """Keep the picks that name a shelf this board actually tracks.
 
     The same rule the category verdicts run on, for the same reason: a pick for
@@ -1106,6 +1251,7 @@ def _clean_selection(selection: Any, board: Sequence[dict]) -> dict:
         "narrative": str(selection.get("narrative") or ""),
         "picks": picks,
         "avoid": [row for row in (selection.get("avoid") or []) if isinstance(row, dict)],
+        "notes": list(notes),
     }
 
 
@@ -1186,7 +1332,23 @@ def _missing_notes(rows: Sequence[dict], language: str) -> list[str]:
 
 
 def _tools_used(index: ev.EvidenceIndex) -> list[str]:
-    return sorted({row.get("tool", "") for row in index.all_rows() if row.get("tool")})
+    """Which vendor tools paid for this report. Not the rows we computed."""
+    return sorted({row.get("tool", "") for row in index.all_rows()
+                   if row.get("tool") and row["tool"] != ev.COMPUTED_TOOL})
+
+
+def _persist_computed(index: ev.EvidenceIndex) -> None:
+    """Write the computed rows to the ledger the evidence drawer reads.
+
+    The drawer resolves an id against `market_evidence`, so a citation the model
+    copied out of the brief would open on nothing unless the row is there. Ids
+    are deterministic, so a re-render updates in place. Their subject kinds are
+    `line` and `band`, which `evidence_for` never asks for — they are readable
+    by id and they do not walk back into the next render's vendor index.
+    """
+    rows = [row for row in index.all_rows() if row.get("tool") == ev.COMPUTED_TOOL]
+    if rows:
+        store.record_evidence(rows)
 
 
 def _data_as_of(index: ev.EvidenceIndex) -> float | None:

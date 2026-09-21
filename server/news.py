@@ -20,6 +20,8 @@ from marketing_agent.source_scoring import (
 )
 
 from . import db, llm
+from .streaming import Steps
+from .market import render
 
 WINDOW_HOURS = 24
 
@@ -172,15 +174,21 @@ def build_task(
     return task, window_start.timestamp(), window_end.timestamp()
 
 
-def generate_summary(config: dict, client=None) -> dict:
+def generate_summary(config: dict, client=None, on_event=None) -> dict:
     """Generate and persist a news summary for the given news config row.
 
     ``client`` is optional so the background scheduler in ``main.py`` can call this
     with just a config; it then reuses the shared process-level client rather than
     building a new connection pool per run.
 
+    ``on_event`` is the trace callback the chat turn uses. This run is one long
+    search-and-write with nothing to show for minutes; traced, a reader can see
+    which window it is covering and whether the sources came back before the
+    model started writing about them.
+
     Returns the persisted summary record.
     """
+    steps = Steps(on_event)
     client = client or llm.get_client()
     if client is None:
         raise NewsGenerationError(
@@ -197,21 +205,30 @@ def generate_summary(config: dict, client=None) -> dict:
         config.get("language") or "zh",
     )
     language = config.get("language") or "zh"
+    steps.done("read", "确定检索窗口",
+               f"{industry} · {window_start} 至 {window_end} · {config['detail_level']}")
+    if steps:
+        steps.running("search", "检索并撰写", "研究专家联网取材，再按详略要求写成简报")
     summary = research_agent.run(
         client,
         task=task,
         topics=[industry],
         response_language=language,
     )
+    steps.done("search", "简报已返回", f"{len(summary):,} 字")
     summary = _trim_search_preamble(summary, language)
     summary = annotate_markdown_with_source_tiers(summary, language=language)
     if _research_failed(summary):
+        # Terminal, and said out loud: the client treats a stream that stops
+        # without one as a broken connection rather than a refusal to guess.
+        steps.done("save", "检索没有可用来源", "上一份有效摘要不会被覆盖")
         raise NewsGenerationError(
             "新闻检索未返回可用来源，请稍后重试。上一份有效摘要不会被覆盖。"
         )
 
     sources = score_sources(summary)
     source_summary = summarize_sources(sources)
+    steps.done("sources", "给来源分级", f"{len(sources)} 个来源已按可信度分档")
 
     record = db.add_news_summary(
         user_id=config["user_id"],
@@ -224,4 +241,5 @@ def generate_summary(config: dict, client=None) -> dict:
         **source_summary,
     )
     db.set_news_config_last_run(config["user_id"], record["generated_at"])
+    steps.done("save", "完成", "简报已保存")
     return record

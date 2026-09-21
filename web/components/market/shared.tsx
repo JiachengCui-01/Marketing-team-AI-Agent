@@ -439,9 +439,19 @@ export function SelectionBrief({
           for the second one to follow — the part of a selection decision that
           does not fit in a field, and the part a reader argues with. */}
       {selection?.narrative ? (
-        <div className="mb-3 text-sm leading-relaxed">
+        <div className="mb-1 text-sm leading-relaxed">
           <CitationMarkdown content={selection.narrative} />
         </div>
+      ) : null}
+      {/* What this read lost on the way here. Beside the hole rather than in
+          the gap list at the foot of the board: a paragraph whose numeric
+          sentences were stripped for want of a citation reads as a thin
+          paragraph, and nothing on it said otherwise. */}
+      {(selection?.notes ?? []).length ? (
+        <p className="mb-3 flex gap-1.5 text-[11px] text-fg-subtle">
+          <WarningCircle size={13} className="mt-0.5 shrink-0 text-warn" weight="duotone" />
+          <span>{(selection?.notes ?? []).join(" ")}</span>
+        </p>
       ) : null}
       <div className="space-y-2">
         {picks.map((pick, index) => (

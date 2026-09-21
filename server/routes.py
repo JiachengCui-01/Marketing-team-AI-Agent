@@ -35,7 +35,8 @@ from marketing_agent.tools import image_gen
 from marketing_agent.tools.pdf_tool import generate_pdf
 
 from . import auth, clarify, db, im_hub, image_processing, image_serve, kb_retrieval, llm, marketing_skills, memory, news, selection, sessions, uploads
-from .streaming import HEARTBEAT_INTERVAL_SECONDS, orchestrator_event_stream, to_sse
+from .streaming import (HEARTBEAT_INTERVAL_SECONDS, Steps, event_stream,
+                        orchestrator_event_stream, to_sse)
 
 logger = logging.getLogger(__name__)
 
@@ -756,6 +757,123 @@ async def refresh_market_category(request: Request) -> dict:
         period=period, language=language, client=client,
         user_id=user["id"])
     return {"report": _with_current(record, language, node)}
+
+
+# ---------- automation: the same three refreshes, with a trace ----------
+#
+# GET rather than POST: `openEventStream` reads the body with `fetch` and cannot
+# send one, and the token rides in the query string the way every other stream
+# in here does. The POST variants above stay — they are what the scheduler and
+# any older client call, and they are the same code path minus the emitter.
+#
+# The terminal `result` carries the rendered report so the panel needs no second
+# fetch, which also closes the window where a re-GET could read a *newer* render
+# than the one it just watched.
+
+
+def _automation_stream(request: Request, work) -> EventSourceResponse:
+    return EventSourceResponse(to_sse(event_stream(work, request=request)))
+
+
+@router.get("/market/overview/refresh/stream")
+async def stream_market_overview(request: Request) -> EventSourceResponse:
+    """Re-render the board, reporting each phase as it happens."""
+    user = auth.require_user(request)
+    config = _resolved_selection_config(user["id"])
+    params = dict(request.query_params)
+    language = _market_language(params, config)
+    period = str(params.get("period") or "") or None
+    collect = str(params.get("collect") or "").lower() in {"1", "true", "yes"}
+    if collect and not sellersprite_configured():
+        raise HTTPException(502, "卖家精灵（SellerSprite）未配置，无法采集市场数据。"
+                                 "请在服务端设置 SELLERSPRITE_SECRET_KEY。")
+    client = llm.get_client()
+
+    def work(emit) -> None:
+        steps = Steps(emit)
+        emit("started", {"message": "开始生成全盘发现。"})
+        if collect:
+            steps.running("collect", "采集最新数据", "调用卖家精灵，会消耗调用额度")
+            market_sweep.run_daily_sweep("US")
+            steps.done("collect", "采集完成", "仓库已更新，下面的分析读的是新数据")
+        record = market_render.render_overview(
+            marketplace="US", period=period, language=language, client=client,
+            on_event=emit)
+        steps.result({"report": _with_current(record, language)})
+
+    return _automation_stream(request, work)
+
+
+@router.get("/market/category/refresh/stream")
+async def stream_market_category(request: Request) -> EventSourceResponse:
+    """Run (or reuse) a deep dive for one node and render it, phase by phase."""
+    user = auth.require_user(request)
+    config = _resolved_selection_config(user["id"])
+    params = dict(request.query_params)
+    node = str(params.get("node") or "").strip()
+    if not node:
+        raise HTTPException(400, "缺少类目节点参数。")
+    language = _market_language(params, config)
+    period = str(params.get("period") or "") or None
+    # Defaults to collecting, like the POST: a deep dive on a node nobody has
+    # pulled yet has nothing to render.
+    collect = str(params.get("collect") or "1").lower() in {"1", "true", "yes"}
+    force = str(params.get("force") or "").lower() in {"1", "true", "yes"}
+    if collect and not sellersprite_configured():
+        raise HTTPException(502, "卖家精灵（SellerSprite）未配置，无法采集品类数据。"
+                                 "请在服务端设置 SELLERSPRITE_SECRET_KEY。")
+    client = llm.get_client()
+
+    def work(emit) -> None:
+        steps = Steps(emit)
+        emit("started", {"message": "开始生成品类深度。"})
+        if collect:
+            steps.running("collect", "采集类目数据", "调用卖家精灵，会消耗调用额度")
+            try:
+                market_deepdive.run_deepdive(node_id_path=node, period=period,
+                                             user_id=user["id"], force=force)
+            except ValueError as exc:
+                raise RuntimeError(str(exc)) from exc
+            except McpUnavailable as exc:
+                raise RuntimeError(
+                    f"卖家精灵接口暂时不可用：{exc}。已有数据不会被覆盖。") from exc
+            steps.done("collect", "采集完成", "关键词、竞品与评论已入库")
+        record = market_render.render_category(
+            node_id_path=node, marketplace="US", period=period, language=language,
+            client=client, user_id=user["id"], on_event=emit)
+        steps.result({"report": _with_current(record, language, node)})
+
+    return _automation_stream(request, work)
+
+
+@router.get("/news/refresh/stream")
+async def stream_news_refresh(request: Request) -> EventSourceResponse:
+    """Regenerate the industry briefing, reporting the search and the write."""
+    user = auth.require_user(request)
+    config = _resolved_news_config(user["id"])
+    if config is None:
+        raise HTTPException(400, "请先设置新闻总结任务。")
+    if news.is_cancelled(config):
+        raise HTTPException(409, "自动总结任务已中断，请先设置新任务。")
+    language = str(request.query_params.get("language")
+                   or config.get("language") or "zh").lower()
+    if language not in {"zh", "en"}:
+        language = "zh"
+    if language != config.get("language"):
+        db.set_news_config_language(user["id"], language)
+    resolved = {**config, "language": language}
+    client = _client()
+
+    def work(emit) -> None:
+        steps = Steps(emit)
+        emit("started", {"message": "开始生成行业简报。"})
+        try:
+            record = news.generate_summary(resolved, client, on_event=emit)
+        except news.NewsGenerationError as exc:
+            raise RuntimeError(str(exc)) from exc
+        steps.result({"summary": record})
+
+    return _automation_stream(request, work)
 
 
 @router.get("/market/evidence")

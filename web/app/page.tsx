@@ -82,6 +82,9 @@ async function saveArtifactToWorkspace(
   }
 }
 
+/** Trace bucket for the automation analyses, kept apart from chat sessions. */
+const AUTOMATION_TRACE = "__automation__";
+
 export default function HomePage() {
   const { t, setLocale } = useI18n();
   const { setTheme } = useTheme();
@@ -126,7 +129,15 @@ export default function HomePage() {
   const workspaceHandleRef = useRef<DirectoryHandle | null>(null);
 
   const messages = activeId ? messagesBySession[activeId] ?? [] : [];
-  const trace = activeId ? traceBySession[activeId] ?? [] : [];
+  // The automation analyses report into the same panel the chat turn does,
+  // under a key of their own: they are not a chat session, and their trace
+  // should neither land in one nor be wiped when the user switches session.
+  const trace =
+    view === "automation"
+      ? traceBySession[AUTOMATION_TRACE] ?? []
+      : activeId
+        ? traceBySession[activeId] ?? []
+        : [];
   const busy = activeId ? !!runningSessions[activeId] : false;
   const isCollab = view === "messages" || view === "contacts";
 
@@ -904,7 +915,17 @@ export default function HomePage() {
         ) : view === "calendar" ? (
           <CalendarPanel key={user.id} onBack={() => setView("chat")} />
         ) : view === "automation" ? (
-          <AutomationPanel key={user.id} onBack={() => setView("chat")} />
+          <AutomationPanel
+            key={user.id}
+            onBack={() => setView("chat")}
+            onTrace={(e) =>
+              setSessionTrace(AUTOMATION_TRACE, (events) => [
+                ...events,
+                { ...e, ts: Date.now() } as TraceEvent,
+              ])
+            }
+            onTraceReset={() => setSessionTrace(AUTOMATION_TRACE, () => [])}
+          />
         ) : view === "image" ? (
           <MarketingImagePanel
             key={user.id}

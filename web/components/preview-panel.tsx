@@ -671,6 +671,22 @@ function traceView(event: TraceEvent, t: ReturnType<typeof useI18n>["t"]): Trace
 }
 
 function orchestratorMethod(stage: string) {
+  // The automation analyses report into this same panel. Their phases are not
+  // the chat turn's, so they get their own line here rather than falling
+  // through to the generic one — a step whose explanation says "records the
+  // current stage" explains nothing.
+  if (stage === "collect") return "调用卖家精灵抓取本期数据并写入仓库。这一步会消耗厂商调用额度，其余步骤都不会。";
+  if (stage === "read") return "确定期间与范围，全部读已存数据，不产生任何厂商调用。";
+  if (stage === "mine") return "从在售 listing 的标题里挖出外观元素词，而不是套一张预设词表。";
+  if (stage === "name") return "把新出现的元素词分到材质、颜色、工艺、风格等类别；只有没命名过的词才会调模型。";
+  if (stage === "panels") return "服务端把分数、看板和每张图算定。模型不参与计算，只负责挑选和说明。";
+  if (stage === "evidence") return "为每个可引用的数字建立索引。带数字却引不到出处的句子会在写完后被删掉，所以这一步决定了结论能说多细。";
+  if (stage === "pain") return "把评论聚成痛点类别，它的分类结果会进入机会分的计算。";
+  if (stage === "opportunity") return "在类目解读之上再算一遍机会与代价，生成产品机会卡。";
+  if (stage === "search") return "研究专家联网取材，再按配置的详略程度写成简报。";
+  if (stage === "sources") return "给引用到的来源按可信度分档，原文里标注出来。";
+  if (stage === "verify") return "逐句核对引用：带数字而没有出处的表述会被移除，并在结论旁说明移除了几处。";
+  if (stage === "save") return "结果写入报告表。下次打开面板读的就是这一份，直到再次重新生成。";
   if (stage === "intake") return "读取用户请求、附件和已选 skill，判断任务需要哪些能力。";
   if (stage === "planning") return "规划下一步执行路径：继续分派专家、等待结果，或进入最终汇总。";
   if (stage === "dispatch") return "把任务拆给合适的专家代理，让不同能力并行或分步处理。";

@@ -1668,6 +1668,8 @@ export type MarketSelection = {
   narrative?: string;
   picks?: MarketSelectionPick[];
   avoid?: { label: string; why: string; evidence_ids?: string[] }[];
+  /** What the citation filter took out of `narrative`, reported beside it. */
+  notes?: string[];
 };
 
 export type MarketMonitor = {
@@ -2232,6 +2234,46 @@ export async function refreshMarketOverview(payload: {
   });
   if (!res.ok) throw new Error(await parseJsonError(res));
   return (await res.json()).report;
+}
+
+/** Stream URLs for the automation refreshes.
+ *
+ * GET with the token in the query string, because `openEventStream` reads the
+ * body with `fetch` and cannot send one — the same shape the chat stream uses.
+ * The POST helpers above still work and still return the report in one go; these
+ * return the same report on the terminal `result` event, having narrated the way
+ * there.
+ */
+export function marketOverviewStreamUrl(payload: {
+  language?: "zh" | "en";
+  collect?: boolean;
+  period?: string;
+}): string {
+  const params = new URLSearchParams();
+  if (payload.language) params.set("language", payload.language);
+  if (payload.collect) params.set("collect", "1");
+  if (payload.period) params.set("period", payload.period);
+  return withToken(`${API_BASE}/api/market/overview/refresh/stream?${params}`);
+}
+
+export function marketCategoryStreamUrl(payload: {
+  node: string;
+  language?: "zh" | "en";
+  collect?: boolean;
+  force?: boolean;
+  period?: string;
+}): string {
+  const params = new URLSearchParams({ node: payload.node });
+  if (payload.language) params.set("language", payload.language);
+  params.set("collect", payload.collect === false ? "0" : "1");
+  if (payload.force) params.set("force", "1");
+  if (payload.period) params.set("period", payload.period);
+  return withToken(`${API_BASE}/api/market/category/refresh/stream?${params}`);
+}
+
+export function newsStreamUrl(language: "zh" | "en"): string {
+  const params = new URLSearchParams({ language });
+  return withToken(`${API_BASE}/api/news/refresh/stream?${params}`);
 }
 
 export async function getMarketCategories(): Promise<MarketCategoryRow[]> {

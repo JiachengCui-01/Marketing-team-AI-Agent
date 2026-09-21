@@ -11,6 +11,16 @@ is mechanical, in three parts:
    claim whose ids are unknown, and any *sentence containing a digit* that carries
    no citation. Digits are the failure mode that matters: an unsourced adjective is
    noise, an unsourced number is a lie.
+
+   The rule only works if everything the model is told to quote has an id to cite.
+   It did not: the briefs grew tables of server-computed figures — a spec line's
+   ease of entry, a band's share, a shelf's price per pound — labelled
+   "quote this rather than recompute it", and none of them was citable, because
+   only vendor payloads minted rows. So every sentence carrying one was deleted
+   on the way to the screen, which is why the selection read arrived with its
+   numbers gone and its argument with them. :data:`COMPUTED_TOOL` rows close
+   that: computed here, cited like anything else, and labelled as computed so
+   nobody mistakes one for a vendor reading.
 3. **Quality travels with the number.** :func:`assess` labels thin samples, outliers
    and stale periods, and the sheet shows the label, so "the market says" cannot be
    written on top of a sample of 17.
@@ -35,6 +45,18 @@ ESTIMATED_METRICS = frozenset({
     "monthly_units", "monthly_revenue", "sales", "amount", "amz_units",
     "predicted_units", "predicted_revenue", "purchases", "impressions", "clicks",
 })
+
+# Rows minted by this repo rather than read off a vendor payload: the board
+# scores, the spec lines, the price ladder, the freight ratios. They are as
+# citable as a vendor metric and they are not the same kind of fact, so they
+# carry their own `tool` rather than a vendor's — which is also what keeps them
+# out of `vendor_tools` and out of `evidence_for`, whose subjects are nodes.
+#
+# The `tool` column and not a new one: a schema change here would have to be
+# tested against a warehouse written before it, and this needs no new column.
+# `observed` stays False for them, so any reader that does not know about this
+# basis degrades to "estimate" — conservative, and never the wrong direction.
+COMPUTED_TOOL = "server"
 
 SMALL_SAMPLE = 30            # below this an aggregate is indicative, not evidence
 SMALL_REVIEW_SAMPLE = 20
@@ -204,8 +226,11 @@ class EvidenceIndex:
         lines = [header]
         for row in list(self.rows.values())[:max_rows]:
             value, unit = _display(row["value_num"], row["value_text"], row["unit"])
-            basis = ("实测" if row["observed"] else "估算") if language == "zh" else (
-                "observed" if row["observed"] else "ESTIMATE")
+            if row.get("tool") == COMPUTED_TOOL:
+                basis = "服务端计算" if language == "zh" else "computed"
+            else:
+                basis = ("实测" if row["observed"] else "估算") if language == "zh" else (
+                    "observed" if row["observed"] else "ESTIMATE")
             quality = row["quality"]
             if row.get("sample_size"):
                 quality = f"{quality} n={row['sample_size']}"

@@ -8,7 +8,7 @@ import {
   getMarketCategories,
   getMarketCategory,
   getMarketConfig,
-  refreshMarketCategory,
+  marketCategoryStreamUrl,
   type MarketCategoryRow,
   type MarketConfigResponse,
   type MarketCurrent,
@@ -19,6 +19,7 @@ import {
 import { CitationMarkdown } from "@/components/citation-markdown";
 import { LoadingCard } from "@/components/ui/spinner";
 import { useI18n } from "@/lib/i18n";
+import { runTracedStream, type StreamEvent } from "@/lib/sse";
 import {
   BandHistogram,
   DistributionBars,
@@ -60,11 +61,17 @@ import { PrdView } from "@/components/market/prd-view";
 export function MarketCategoryPanel({
   initialNode,
   active = true,
+  onTrace,
+  onTraceReset,
 }: {
   initialNode?: { nodeKey: string; label: string } | null;
   /** False while the shell is showing another tab: a hidden container must not
    *  have its remembered offset overwritten. */
   active?: boolean;
+  /** Report this run's phases into the shared trace panel. */
+  onTrace?: (event: StreamEvent) => void;
+  /** Clear it when a new run starts, so two runs never interleave. */
+  onTraceReset?: () => void;
 }) {
   const { t, locale } = useI18n();
   const labels = useScoreLabels();
@@ -132,10 +139,15 @@ export function MarketCategoryPanel({
     if (!node) return;
     setBusy(collect ? "collect" : "render");
     setError(null);
+    onTraceReset?.();
     try {
-      const next = await refreshMarketCategory({ node, collect, language: locale });
+      const payload = await runTracedStream(
+        marketCategoryStreamUrl({ node, collect, language: locale }),
+        (e) => onTrace?.(e),
+      );
+      const next = payload.report as MarketReport;
       setReport(next);
-      setCurrent(next.dashboard?.current);
+      setCurrent(next?.dashboard?.current);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
