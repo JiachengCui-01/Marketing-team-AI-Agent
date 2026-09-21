@@ -26,7 +26,6 @@ import {
   ElementComboChart,
   ScoreBar,
   Sparkline,
-  SpecQuadrant,
   StackedRows,
   Treemap,
   fmtMoney,
@@ -278,52 +277,16 @@ export function MarketOverviewPanel({
               </div>
             </Section>
 
-            {/* One point per product line rather than per category. The
-                category version of this chart restated thirteen rows of the
-                board above it, and drew only the categories whose growth was
-                measurable — so it was both a duplicate and an incomplete one. */}
-            <Section title={t.gmMap} hint={t.gmMapHint}
-                     data={dashboard?.spec_map?.points ?? null}
-                     right={dashboard?.spec_map?.window?.from ? (
-                       <span className="text-[10px] text-fg-subtle tabular-nums">
-                         {t.gmMapWindow} {dashboard.spec_map.window.from}
-                         &nbsp;→&nbsp;{dashboard.spec_map.window.to}
-                       </span>
-                     ) : null}>
-              <SpecQuadrant
-                points={dashboard?.spec_map?.points ?? []}
-                bounds={dashboard?.spec_map?.bounds ?? undefined}
-                scale={dashboard?.spec_map?.scale ?? undefined}
-                areas={dashboard?.spec_map?.areas ?? []}
-                total={dashboard?.spec_map?.total}
-                onPick={pick}
-                xLabel={t.gmMapX}
-                yLabel={t.gmMapY}
-                medianLabel={t.gmElementMedian}
-                quadrants={[t.gmQuadEnter, t.gmQuadCrowdedUp,
-                            t.gmQuadCrowdedDown, t.gmQuadOpenDown]}
-                railLabel={t.gmMapRail}
-                allLabel={t.gmMapAll}
-                countLabel={t.gmComboCount}
-                moreLabel={t.gmComboMore}
-                tipLabels={{ share: t.gmMapTipShare, was: t.gmMapTipWas,
-                             shift: t.gmMapTipShift,
-                             revenue: t.gmMapTipRevenue, asins: t.gmMapTipAsins,
-                             brands: t.gmMapTipBrands, rating: t.gmElementTipRating,
-                             reviews: t.gmElementTipReviews, price: t.gmElementTipPrice,
-                             returnRisk: t.gmMapTipReturn,
-                             unmeasured: t.gmElementTipUnmeasured }}
-                notes={[
-                  t.gmMapOrigin,
-                  t.gmMapEntryNote,
-                  t.gmMapShiftNote,
-                  t.gmMapMedianNote,
-                  t.gmMapSizeNote,
-                  t.gmMapRailNote,
-                  t.gmMapReturnNote,
-                  t.gmElementHover,
-                ]} />
-            </Section>
+            {/* 机会象限 is off the board. It came back from a re-render with
+                every one of its ninety-six specs on the rail — no node had a
+                stored comparison month, so no spec had a y at all — and a
+                quadrant drawn with an empty field is a caption and a tint
+                claiming to be a reading.
+
+                The payload behind it is still computed and still handed to the
+                model: `spec_map` is where the PRODUCT LINES sheet comes from,
+                and the 选品建议 at the top of this board is written off those
+                rows. What is gone is the drawing of it, not the reading. */}
 
             <Section title={t.gmPhysical} hint={t.gmPhysicalHint}
                      data={dashboard?.physical}>
