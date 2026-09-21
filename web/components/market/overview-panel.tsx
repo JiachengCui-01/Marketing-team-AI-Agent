@@ -307,6 +307,7 @@ export function MarketOverviewPanel({
                 countLabel={t.gmComboCount}
                 moreLabel={t.gmComboMore}
                 tipLabels={{ share: t.gmMapTipShare, was: t.gmMapTipWas,
+                             shift: t.gmMapTipShift,
                              revenue: t.gmMapTipRevenue, asins: t.gmMapTipAsins,
                              brands: t.gmMapTipBrands, rating: t.gmElementTipRating,
                              reviews: t.gmElementTipReviews, price: t.gmElementTipPrice,
@@ -316,6 +317,7 @@ export function MarketOverviewPanel({
                   t.gmMapOrigin,
                   t.gmMapEntryNote,
                   t.gmMapShiftNote,
+                  t.gmMapMedianNote,
                   t.gmMapSizeNote,
                   t.gmMapRailNote,
                   t.gmMapReturnNote,

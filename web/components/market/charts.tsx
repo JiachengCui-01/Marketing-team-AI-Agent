@@ -23,6 +23,34 @@ function clamp(value: number, lo: number, hi: number): number {
   return Math.min(Math.max(value, lo), hi);
 }
 
+/** Which wall of a fitted frame a reading fell outside of. */
+type Wall = "top" | "bottom" | "left" | "right";
+
+/** The mark on a dot pinned to that wall: a triangle standing on the frame
+ *  edge, apex pointing at the reading the chart stops short of. `cx`/`cy` are
+ *  the clamped position, so the arrow sits on the edge while the disc rests
+ *  just inside it. Shared by both quadrants — the same claim in both, and two
+ *  copies of it drifted apart the moment one frame gained a rail. */
+function pinArrow(wall: Wall, cx: number, cy: number,
+                  frame: { left: number; right: number;
+                           top: number; bottom: number }): string {
+  const [back, half] = [6.5, 4.5];
+  if (wall === "bottom") {
+    return `M${cx - half},${frame.bottom - back} L${cx + half},`
+           + `${frame.bottom - back} L${cx},${frame.bottom} Z`;
+  }
+  if (wall === "top") {
+    return `M${cx - half},${frame.top + back} L${cx + half},${frame.top + back} `
+           + `L${cx},${frame.top} Z`;
+  }
+  if (wall === "right") {
+    return `M${frame.right - back},${cy - half} L${frame.right - back},`
+           + `${cy + half} L${frame.right},${cy} Z`;
+  }
+  return `M${frame.left + back},${cy - half} L${frame.left + back},${cy + half} `
+         + `L${frame.left},${cy} Z`;
+}
+
 /** Fit a label to a character budget, with an ellipsis rather than a hard cut. */
 function truncate(text: string, budget: number): string {
   if (budget < 3) return "";
@@ -539,30 +567,11 @@ export function ElementMatrix({
   // pinned to the frame rather than dropped, and drawn with an arrow against
   // the wall it is pressed to, so nobody reads the pinned position as the
   // measurement. Which wall, if any:
-  type Wall = "top" | "bottom" | "left" | "right";
   const pinnedAt = (point: ElementFieldPoint): Wall | null =>
     point.rating_gap < yMin ? "bottom" : point.rating_gap > yMax ? "top"
     : point.shelf_pct > xMax ? "right" : point.shelf_pct < xMin ? "left" : null;
-  /** The arrow itself: a triangle at the frame edge, apex pointing at the
-   *  reading the chart stops short of. `cx`/`cy` are the clamped position, so
-   *  the arrow sits on the edge while the disc rests just inside it. */
-  const pinArrow = (wall: Wall, cx: number, cy: number): string => {
-    const [back, half] = [6.5, 4.5];
-    if (wall === "bottom") {
-      const y = height - fieldB;
-      return `M${cx - half},${y - back} L${cx + half},${y - back} L${cx},${y} Z`;
-    }
-    if (wall === "top") {
-      return `M${cx - half},${padT + back} L${cx + half},${padT + back} `
-             + `L${cx},${padT} Z`;
-    }
-    if (wall === "right") {
-      const x = width - padR;
-      return `M${x - back},${cy - half} L${x - back},${cy + half} L${x},${cy} Z`;
-    }
-    return `M${fieldL + back},${cy - half} L${fieldL + back},${cy + half} `
-           + `L${fieldL},${cy} Z`;
-  };
+  const frame = { left: fieldL, right: width - padR,
+                  top: padT, bottom: height - fieldB };
   // And whether either end of either axis has one, which is what the tick value
   // there has to admit to: "-0.3" and "at most -0.3" are different claims.
   const cut = {
@@ -818,7 +827,7 @@ export function ElementMatrix({
               {wall ? (
                 <path className={`bi-dot-pin${opening ? "" : crowded
                                    ? " bi-dot-pin-risk" : " bi-dot-pin-flat"}`}
-                      d={pinArrow(wall, edgeX, edgeY)} />
+                      d={pinArrow(wall, edgeX, edgeY, frame)} />
               ) : null}
               {!clash ? (
                 <text className="bi-point-label" x={cx} y={cy - r - 5} textAnchor="middle">
@@ -1017,6 +1026,10 @@ export type SpecPoint = {
   /** Percentage points of its own shelf, against last month. Null when that
    *  shelf has no comparison month: a rail mark, never a zero. */
   share_shift_pp: number | null;
+  /** The same movement, signed against the median spec on the chart — the
+   *  position on y. Absent on a dashboard stored before the axis was
+   *  re-centred, whose frame was drawn against zero. */
+  shift_gap_pp?: number | null;
   share_pct: number;
   share_before_pct: number | null;
   revenue: number;
@@ -1040,6 +1053,10 @@ export type SpecBounds = {
   x_mid: number;
   y_min: number;
   y_max: number;
+  /** The movement the y zero line stands for: the median spec's own share
+   *  shift, in percentage points. Absent on an older payload, where the line
+   *  was an absolute zero and this is therefore 0. */
+  y_mid?: number;
 };
 
 export type SpecTipLabels = {
@@ -1052,6 +1069,9 @@ export type SpecTipLabels = {
   reviews: string;
   price: string;
   returnRisk: string;
+  /** Names the raw movement in the hover card, e.g. 份额变化, as opposed to the
+   *  axis, which carries the same number signed against the median. */
+  shift: string;
   /** Stands in for a number that was never measured, e.g. 未测到. */
   unmeasured: string;
 };
@@ -1125,8 +1145,8 @@ export function SpecQuadrant({
   if (!points.length || !bounds || !scale) return null;
 
   const shown = room ? points.filter((p) => p.area === room) : points;
-  const field = shown.filter((p) => p.share_shift_pp != null);
-  const rail = shown.filter((p) => p.share_shift_pp == null);
+  const field = shown.filter((p) => gapOf(p) != null);
+  const rail = shown.filter((p) => gapOf(p) == null);
   const hidden = Math.max(0, (total ?? points.length) - points.length);
 
   const padL = 46;
@@ -1139,15 +1159,45 @@ export function SpecQuadrant({
   // picking a room whose shelves all have a comparison month would give the
   // field 24 more pixels and move every remaining dot, which is exactly what a
   // filter must not do.
-  const railed = points.some((p) => p.share_shift_pp == null);
+  const railed = points.some((p) => gapOf(p) == null);
   const railH = railed ? 24 : 0;
   const fieldB = padB + railH;
   const { x_min: xMin, x_max: xMax, x_mid: xMid, y_min: yMin, y_max: yMax } = bounds;
+  // What y = 0 stands for: the median spec's own movement. Zero on an older
+  // payload, which is exactly what it meant there.
+  const shiftMid = bounds.y_mid ?? 0;
   const maxRevenue = Math.max(1, scale.max_revenue);
   const px = (v: number) =>
-    padL + ((v - xMin) / (xMax - xMin || 1)) * (width - padL - padR);
+    padL + ((clamp(v, xMin, xMax) - xMin) / (xMax - xMin || 1))
+           * (width - padL - padR);
   const py = (v: number) =>
-    height - fieldB - ((v - yMin) / (yMax - yMin || 1)) * (height - padT - fieldB);
+    height - fieldB
+    - ((clamp(v, yMin, yMax) - yMin) / (yMax - yMin || 1)) * (height - padT - fieldB);
+
+  // The frame is fitted to the points, so a reading far enough clear of the
+  // rest can fall outside it. Pinned to the wall it is pressed to and drawn
+  // with an arrow, never dropped and never drawn as if it were measured there.
+  const pinnedAt = (point: SpecPoint): Wall | null => {
+    const gap = gapOf(point);
+    if (gap == null) return null;
+    return gap < yMin ? "bottom" : gap > yMax ? "top"
+      : point.entry > xMax ? "right" : point.entry < xMin ? "left" : null;
+  };
+  const frame = { left: padL, right: width - padR,
+                  top: padT, bottom: height - fieldB };
+  // Which ends of which axis stop short of a reading, so the tick there can say
+  // so rather than print a number a pinned dot would make into a lie.
+  const cut = {
+    xMax: field.some((p) => p.entry > xMax),
+    xMin: field.some((p) => p.entry < xMin),
+    yMax: field.some((p) => (gapOf(p) as number) > yMax),
+    yMin: field.some((p) => (gapOf(p) as number) < yMin),
+  };
+  const yTick = (v: number) => v.toFixed(yMax - yMin < 5 ? 1 : 0);
+  // Where "held exactly its share" lands once y is a gap: a real line, drawn
+  // only while the fitted frame reaches it.
+  const zero = -shiftMid;
+  const zeroInFrame = Math.abs(shiftMid) > 0.005 && zero > yMin && zero < yMax;
 
   /** Which corner a spec is in, which is also what colours it.
    *
@@ -1156,9 +1206,9 @@ export function SpecQuadrant({
    * are readings rather than verdicts, and a third hue would say there was a
    * third thing to do. */
   const verdict = (point: SpecPoint) => {
-    const shift = point.share_shift_pp ?? 0;
-    if (point.entry >= xMid && shift > 0) return "open";
-    if (point.entry < xMid && shift < 0) return "trap";
+    const gap = gapOf(point) ?? 0;
+    if (point.entry >= xMid && gap > 0) return "open";
+    if (point.entry < xMid && gap < 0) return "trap";
     return "flat";
   };
 
@@ -1173,7 +1223,7 @@ export function SpecQuadrant({
   for (const point of ordered) {
     if (labelled.size >= labelCap) break;
     const cx = px(point.entry);
-    const cy = py(point.share_shift_pp as number);
+    const cy = py(gapOf(point) as number);
     // A seat the size of the name it holds: two lines, each of them a phrase
     // rather than a word. A seat cut to one short term's width lets two names
     // clear each other by the numbers and still read as one smudge.
@@ -1250,12 +1300,25 @@ export function SpecQuadrant({
               width={Math.max(0, px(xMid) - padL)}
               height={Math.max(0, height - fieldB - py(0))} />
 
-        {/* Zero is a real line here — a spec that held exactly its share — so it
-            is solid. The median is a property of this board, so it is dashed. */}
-        <line className="bi-axis-solid" x1={padL} x2={width - padR}
+        {/* Both medians are properties of this board rather than of the market,
+            and both are dashed for it: the vertical one at the median 可进入度,
+            the horizontal one at the median spec's own share movement. */}
+        <line className="bi-axis-dashed" x1={padL} x2={width - padR}
               y1={py(0)} y2={py(0)} />
         <line className="bi-axis-dashed" x1={px(xMid)} x2={px(xMid)}
               y1={padT} y2={height - fieldB} />
+        {/* And where holding exactly its share lands, which is a real line —
+            solid, quiet, and only while the frame reaches it. A department that
+            diluted this month shows it as a line above the median, which is the
+            fact the median alone would hide. */}
+        {zeroInFrame ? (
+          <>
+            <line className="bi-axis-solid" x1={padL} x2={width - padR}
+                  y1={py(zero)} y2={py(zero)} />
+            <text className="bi-axis-tick" x={padL - 6} y={py(zero) + 3}
+                  textAnchor="end">0</text>
+          </>
+        ) : null}
 
         {railed ? (
           <>
@@ -1266,19 +1329,26 @@ export function SpecQuadrant({
           </>
         ) : null}
 
-        <text className="bi-axis-tick" x={padL - 6} y={py(0) + 3} textAnchor="end">0</text>
+        {/* The median line carries the movement it stands for: a bare 0 would
+            leave the reader to guess whether the board grew or diluted. */}
+        <text className="bi-axis-tick" x={padL - 6} y={py(0) - 3} textAnchor="end">
+          {medianLabel}
+        </text>
+        <text className="bi-axis-tick" x={padL - 6} y={py(0) + 9} textAnchor="end">
+          {shiftMid >= 0 ? "+" : ""}{shiftMid.toFixed(1)}
+        </text>
         <text className="bi-axis-tick" x={padL - 6} y={padT + 4} textAnchor="end">
-          +{yMax.toFixed(1)}
+          {cut.yMax ? "≥" : "+"}{yTick(yMax)}
         </text>
         <text className="bi-axis-tick" x={padL - 6} y={height - fieldB} textAnchor="end">
-          {yMin.toFixed(1)}
+          {cut.yMin ? "≤" : ""}{yTick(yMin)}
         </text>
         <text className="bi-axis-tick" x={px(xMid)} y={height - padB + 13}
               textAnchor="middle">{medianLabel} {xMid.toFixed(0)}</text>
         <text className="bi-axis-tick" x={padL} y={height - padB + 13}
-              textAnchor="start">{xMin.toFixed(0)}</text>
+              textAnchor="start">{cut.xMin ? "≤" : ""}{xMin.toFixed(0)}</text>
         <text className="bi-axis-tick" x={width - padR} y={height - padB + 13}
-              textAnchor="end">{xMax.toFixed(0)}</text>
+              textAnchor="end">{cut.xMax ? "≥" : ""}{xMax.toFixed(0)}</text>
         {/* Both axis names on one line under the plot. A rotated y title reads
             badly for Chinese — rotating CJK turns each glyph on its side rather
             than stacking them — and the arrow is what ties a name to its axis. */}
@@ -1332,8 +1402,14 @@ export function SpecQuadrant({
         {ordered.map((point) => {
           const corner = verdict(point);
           const r = 4 + Math.sqrt(point.revenue / maxRevenue) * 13;
-          const cx = px(point.entry);
-          const cy = py(point.share_shift_pp as number);
+          // A pinned dot rests just inside the wall it is pressed to; half a
+          // disc hanging over the axis would land in the rail strip and read as
+          // a rail mark, which is a different claim again.
+          const wall = pinnedAt(point);
+          const edgeX = px(point.entry);
+          const edgeY = py(gapOf(point) as number);
+          const cx = edgeX + (wall === "left" ? r : wall === "right" ? -r : 0);
+          const cy = edgeY + (wall === "top" ? r : wall === "bottom" ? -r : 0);
           const name = nameAt(cx);
           const hot = hover?.point.key === point.key;
           return (
@@ -1354,6 +1430,14 @@ export function SpecQuadrant({
               <circle className={`bi-dot-core${corner === "open" ? "" : corner === "trap"
                                    ? " bi-dot-core-risk" : " bi-dot-core-flat"}`}
                       cx={cx} cy={cy} r={Math.min(3, r / 3)} />
+              {/* Off the fitted frame: the arrow, and the reading itself in the
+                  card. Dropping it would be a claim about the shelf; drawing it
+                  at the edge unmarked would be a claim about its position. */}
+              {wall ? (
+                <path className={`bi-dot-pin${corner === "open" ? "" : corner === "trap"
+                                   ? " bi-dot-pin-risk" : " bi-dot-pin-flat"}`}
+                      d={pinArrow(wall, edgeX, edgeY, frame)} />
+              ) : null}
               {labelled.has(point.key) ? (
                 /* Two lines: the shelf, then the two decisions. One line of the
                    three joined by dots is 160 units wide — six of those is the
@@ -1383,10 +1467,15 @@ export function SpecQuadrant({
               <TipRow key={part.kind} label={part.kind_label} value={part.label} />
             ))}
           </div>
+          {/* The position first, then the movement it was signed against: the
+              axis says "ahead of the board", the row under it says by how much
+              the spec itself actually moved. */}
           <TipRow label={yLabel}
-                  value={shiftText(hover.point.share_shift_pp, tipLabels.unmeasured)}
-                  tone={!hover.point.share_shift_pp ? undefined
-                        : hover.point.share_shift_pp > 0 ? "up" : "down"} />
+                  value={shiftText(gapOf(hover.point), tipLabels.unmeasured)}
+                  tone={!gapOf(hover.point) ? undefined
+                        : (gapOf(hover.point) as number) > 0 ? "up" : "down"} />
+          <TipRow label={tipLabels.shift}
+                  value={shiftText(hover.point.share_shift_pp, tipLabels.unmeasured)} />
           <TipRow label={xLabel} value={hover.point.entry.toFixed(0)} />
           <TipRow label={tipLabels.share}
                   value={hover.point.share_before_pct == null
@@ -1433,6 +1522,14 @@ export function SpecQuadrant({
 }
 
 /** A signed movement in percentage points, or the word for a reading nobody took. */
+/** Where a spec sits on y: its share movement signed against the median spec
+ *  on the chart. A dashboard stored before the axis was re-centred carries no
+ *  gap, and there the raw movement *is* the gap — that frame was drawn against
+ *  zero, so reading it this way draws the old payload exactly as it was. */
+function gapOf(point: SpecPoint): number | null {
+  return point.shift_gap_pp ?? point.share_shift_pp;
+}
+
 function shiftText(value: number | null, unmeasured: string): string {
   if (value == null || !Number.isFinite(value)) return unmeasured;
   return `${value >= 0 ? "+" : ""}${value.toFixed(2)}pp`;
@@ -1441,7 +1538,8 @@ function shiftText(value: number | null, unmeasured: string): string {
 /** The card's contents as one string, for the reader who cannot hover. */
 function describeSpec(point: SpecPoint, xLabel: string, yLabel: string,
                       tipLabels: SpecTipLabels): string {
-  return `${point.label} · ${yLabel} ${shiftText(point.share_shift_pp, tipLabels.unmeasured)}`
+  return `${point.label} · ${yLabel} ${shiftText(gapOf(point), tipLabels.unmeasured)}`
+    + ` · ${tipLabels.shift} ${shiftText(point.share_shift_pp, tipLabels.unmeasured)}`
     + ` · ${xLabel} ${point.entry.toFixed(0)}`
     + ` · ${tipLabels.share} ${fmtPct(point.share_pct)}`
     + ` · ${tipLabels.revenue} ${fmtMoney(point.revenue)}`

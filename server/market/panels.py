@@ -477,6 +477,26 @@ def _padded(lo: float, hi: float, min_span: float) -> tuple[float, float]:
     return lo, hi
 
 
+def _axis(values: Sequence[float], *, min_span: float,
+          include: Sequence[float] = (), zero_anchored: bool = False,
+          cap: float | None = None) -> tuple[float, float]:
+    """One axis, fitted to its readings.
+
+    `include` are the reference lines drawn off this axis: a chart that draws a
+    median it cannot show is worse than one with slack in it. `zero_anchored`
+    keeps a scale whose zero is a real reading — no head revenue, a look nobody
+    owns — starting at zero unless every point sits well clear of it, rather
+    than cutting the axis to win a few pixels.
+    """
+    lo, hi = _fitted(values) if values else (0.0, min_span)
+    for value in include:
+        lo, hi = min(lo, value), max(hi, value)
+    lo, hi = _padded(lo, hi, min_span)
+    if zero_anchored:
+        lo = 0.0 if lo <= (hi - lo) * 0.25 else max(0.0, lo)
+    return (lo, hi if cap is None else min(hi, cap))
+
+
 def _chart_bounds(points: Sequence[dict], x_mid: float, y_mid: float) -> dict:
     """Axis bounds, fitted to the points actually being drawn.
 
@@ -489,18 +509,12 @@ def _chart_bounds(points: Sequence[dict], x_mid: float, y_mid: float) -> dict:
     """
     shelves = [p["shelf_pct"] for p in points if p["shelf_pct"] is not None]
     gaps = [p["rating_gap"] for p in points if p["rating_gap"] is not None]
-    x_lo, x_hi = _fitted(shelves) if shelves else (0.0, MIN_X_SPAN)
-    y_lo, y_hi = _fitted(gaps) if gaps else (-MIN_Y_SPAN, MIN_Y_SPAN)
     # The two dashed lines are drawn off these bounds, so both have to be
     # reachable: the vertical one at the median share, the horizontal one at the
     # board median rating, which is a gap of zero.
-    x_lo, x_hi = _padded(min(x_lo, x_mid), max(x_hi, x_mid), MIN_X_SPAN)
-    y_lo, y_hi = _padded(min(y_lo, 0.0), max(y_hi, 0.0), MIN_Y_SPAN)
-    # Zero is a real reading on a share axis — it means "holds none of the head"
-    # — so the frame keeps it whenever the smallest spec is anywhere near it,
-    # rather than cutting the axis to win a few pixels. A share is never
-    # negative either way.
-    x_lo = 0.0 if x_lo <= (x_hi - x_lo) * 0.25 else max(0.0, x_lo)
+    x_lo, x_hi = _axis(shelves, min_span=MIN_X_SPAN, include=(x_mid,),
+                       zero_anchored=True)
+    y_lo, y_hi = _axis(gaps, min_span=MIN_Y_SPAN, include=(0.0,))
     return {
         "x_min": round(x_lo, 2),
         "x_max": round(x_hi, 2),
@@ -525,10 +539,13 @@ def _dot_scale(points: Sequence[dict]) -> dict | None:
 # shelves with half a dozen live openings each is the reading, and a cap of
 # forty-five is what leaves a reader asking where their category went.
 MAX_SPEC_POINTS = 96
-# Floor for the quadrant's y axis, in percentage points of a node's head
-# revenue. A look that moved a tenth of a point did not move, and without a
-# floor a board of flat months would be zoomed until it looked like weather.
+# Floors for the quadrant's two axes, in percentage points of a node's head
+# revenue and in points of 可进入度. A look that moved a tenth of a point did
+# not move, and without a floor a board of flat months would be zoomed until it
+# looked like weather. Both are floors on the span; the frame is otherwise
+# fitted to the points, the same way the spec chart's is.
 MIN_SHIFT_SPAN = 1.5
+MIN_ENTRY_SPAN = 20.0
 
 
 def _every_shelf_first(points: Sequence[dict], cap: int) -> list[dict]:
@@ -564,10 +581,23 @@ def _spec_map(specs: Sequence[dict], board: Sequence[dict], zh: bool,
 
     x is 可进入度, what is left of the cell after its three largest brands.
     y is the cell's share of its own shelf against last month, in percentage
-    points. Both are read off the listings; neither is modelled. A cell whose
+    points — **measured against the median spec on this chart**, not against
+    zero. Both are read off the listings; neither is modelled. A cell whose
     node has no comparison month keeps its x and loses its y — it goes to the
     chart's rail rather than being drawn at zero or dropped, which is what the
     category map did to every category whose growth we could not measure.
+
+    y against the median rather than against zero, because against zero the
+    chart sank: a month where the walk collects more listings per node dilutes
+    every cell's share at once, and a board where the whole department drifts
+    down puts all ninety dots below the line and leaves two of the four corners
+    empty. A quadrant with two empty corners is a scatter plot wearing a
+    quadrant's caption. The median moves with the board, so the question the
+    chart answers is the one worth asking of a spec — is this one taking shelf
+    *faster than the rest of the board* — and the line carries the median's own
+    value, so a department that is diluting says so out loud instead of hiding
+    inside the axis. x is a median for the same reason, and has been since this
+    chart replaced the category map.
     """
     rows = {row["node_key"]: row for row in board}
     # What the card calls the two category rows. Named apart from
@@ -618,6 +648,23 @@ def _spec_map(specs: Sequence[dict], board: Sequence[dict], zh: bool,
                 "total": 0, "window": {"from": window[0], "to": window[1]}}
     shifts = [p["share_shift_pp"] for p in shown if p["share_shift_pp"] is not None]
     entries = [p["entry"] for p in shown]
+    # The median of the specs actually drawn, like the x median beside it: half
+    # the dots above the line and half below, whatever the department did this
+    # month. Taken over every measured spec instead, the tail of small cells
+    # would set a line the drawn ones could sit entirely on one side of, which
+    # is the failure this axis exists to fix.
+    shift_mid = round(scoring._median(shifts) or 0.0, 2)
+    for point in shown:
+        # Signed against that median. The raw movement stays on the point for
+        # the hover card and the evidence sheet — this is a second reading of
+        # the same number, not a replacement for it.
+        point["shift_gap_pp"] = (round(point["share_shift_pp"] - shift_mid, 2)
+                                 if point["share_shift_pp"] is not None else None)
+    gaps = [p["shift_gap_pp"] for p in shown if p["shift_gap_pp"] is not None]
+    entry_mid = round(scoring._median(entries) or 0.0, 1)
+    x_lo, x_hi = _axis(entries, min_span=MIN_ENTRY_SPAN, include=(entry_mid,),
+                       zero_anchored=True, cap=100.0)
+    y_lo, y_hi = _axis(gaps, min_span=MIN_SHIFT_SPAN, include=(0.0,))
     areas: dict[str, dict] = {}
     for point in shown:
         bucket = areas.setdefault(point["area"],
@@ -628,19 +675,23 @@ def _spec_map(specs: Sequence[dict], board: Sequence[dict], zh: bool,
         "points": shown,
         "bounds": {
             # 0 and 100 mean something on this axis — owned outright, and owned
-            # by nobody — so the frame starts at zero rather than at the
-            # smallest reading. The top end follows the points, because at this
-            # grain nothing reaches 100 and a fixed frame would spend half its
-            # width on empty shelf.
-            "x_min": 0.0,
-            "x_max": round(min(100.0, max(65.0, max(entries) * 1.08)), 1),
+            # by nobody — so the frame keeps zero unless every spec sits well
+            # clear of it. Neither end is fixed: at this grain nothing reaches
+            # 100, and the old floor of 65 spent a third of the width on shelf
+            # no spec was standing on.
+            "x_min": round(x_lo, 1),
+            "x_max": round(x_hi, 1),
             # The median of what is drawn, not a fixed 50: three brands inside
             # one colour of one shelf are not comparable to five brands across
             # a whole category, so the line has to say "more open than the
             # typical spec on this board" rather than pretend to an absolute.
-            "x_mid": round(scoring._median(entries) or 0.0, 1),
-            "y_min": round(min([-MIN_SHIFT_SPAN] + shifts) * 1.15, 2),
-            "y_max": round(max([MIN_SHIFT_SPAN] + shifts) * 1.15, 2),
+            "x_mid": entry_mid,
+            "y_min": round(y_lo, 2),
+            "y_max": round(y_hi, 2),
+            # What the horizontal line stands for: the median spec's own
+            # movement, so "0 is the median" can be printed as the number it
+            # actually is instead of being left as an unexplained zero.
+            "y_mid": shift_mid,
         },
         "scale": _dot_scale(shown),
         "areas": sorted(areas.values(), key=lambda a: a["revenue"], reverse=True),

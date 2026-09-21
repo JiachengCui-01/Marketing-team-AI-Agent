@@ -1124,6 +1124,106 @@ class ChartFrameTests(unittest.TestCase):
         self.assertGreaterEqual(bounds["x_max"], 9.0)
 
 
+class QuadrantAxisTests(unittest.TestCase):
+    """The opportunity quadrant's two axes.
+
+    The quadrant sank: y was the spec's share movement against a plain zero, and
+    a month whose walk collects more listings dilutes every spec at once, so all
+    ninety dots dropped below the line and two of the four corners emptied. A
+    quadrant with two empty corners is a scatter plot wearing a quadrant's
+    caption. y is now signed against the median spec on the chart — the same
+    thing x has always been — and the line carries the median's own value so a
+    diluting department is stated rather than hidden.
+
+    Straight against `_spec_map`: a board that all moved one way is a property
+    of a month, and seeding two months of listings to manufacture one would be a
+    test of the fixture rather than of the axis.
+    """
+
+    @staticmethod
+    def chart(shifts, entries=None, *, revenue=None):
+        entries = entries or [50.0 + i for i in range(len(shifts))]
+        board = [{"node_key": "n", "label": "Buffets",
+                  "node_label_path": "Home & Kitchen:Furniture:Buffets",
+                  "return_risk": 0.0}]
+        specs = [{"key": f"n|c{i}|l{i}", "node_key": "n",
+                  "spec": [{"kind": "color", "kind_label": "颜色",
+                            "label": f"c{i}"}],
+                  "color": f"c{i}", "look": f"l{i}", "entry": entries[i],
+                  "share_shift_pp": shift, "share_pct": 3.0,
+                  "share_before_pct": None,
+                  "revenue": (revenue or [1_000.0] * len(shifts))[i],
+                  "asins": 9, "brands": 3, "avg_price": 200.0,
+                  "rating": 4.2, "reviews": 80}
+                 for i, shift in enumerate(shifts)]
+        return panels._spec_map(specs, board, True, window=("202607", "202608"))
+
+    def test_a_board_that_all_diluted_still_fills_both_halves(self) -> None:
+        """The failure this axis replaces: every spec below the line, two
+        corners empty, and a chart that cannot be read as a quadrant."""
+        chart = self.chart([-2.4, -1.8, -1.1, -0.9, -0.4, -0.2, -0.1])
+        gaps = [p["shift_gap_pp"] for p in chart["points"]]
+
+        self.assertTrue(any(gap > 0 for gap in gaps), "nothing above the line")
+        self.assertTrue(any(gap < 0 for gap in gaps), "nothing below it")
+        # And the chart says out loud that the whole board diluted, instead of
+        # letting the re-centring quietly turn a loss into an opening.
+        self.assertLess(chart["bounds"]["y_mid"], 0)
+
+    def test_the_line_carries_the_median_it_stands_for(self) -> None:
+        shifts = [-2.4, -1.8, -1.1, -0.9, -0.4]
+        chart = self.chart(shifts)
+
+        self.assertEqual(chart["bounds"]["y_mid"], scoring._median(shifts))
+
+    def test_the_raw_movement_survives_beside_the_gap(self) -> None:
+        """The hover card and the model's sheet both quote the spec's own
+        movement; the gap is a second reading of it, not a replacement."""
+        chart = self.chart([-2.4, -1.8, 0.6])
+        point = next(p for p in chart["points"] if p["share_shift_pp"] == 0.6)
+
+        self.assertEqual(point["share_shift_pp"], 0.6)
+        self.assertEqual(point["shift_gap_pp"],
+                         round(0.6 - chart["bounds"]["y_mid"], 2))
+
+    def test_a_shelf_with_no_comparison_month_has_no_gap_either(self) -> None:
+        """Unmeasured is not zero on either reading of the number."""
+        chart = self.chart([-1.0, None, 0.5])
+        railed = next(p for p in chart["points"] if p["share_shift_pp"] is None)
+
+        self.assertIsNone(railed["shift_gap_pp"])
+
+    def test_the_entry_axis_follows_the_specs_not_a_floor(self) -> None:
+        """It used to run to 65 whatever the board looked like, so a board of
+        tight shelves spent a third of its width on nothing."""
+        chart = self.chart([0.1] * 6, entries=[18.0, 22.0, 25.0, 28.0, 31.0, 34.0])
+        bounds = chart["bounds"]
+
+        self.assertLess(bounds["x_max"], 50.0)
+        self.assertGreaterEqual(bounds["x_max"], 34.0)
+
+    def test_the_entry_axis_stays_inside_nought_to_a_hundred(self) -> None:
+        """0 and 100 are the ends of this scale: owned outright, and owned by
+        nobody. Padding may not invent a shelf past either."""
+        chart = self.chart([0.1] * 4, entries=[62.0, 78.0, 91.0, 99.0])
+
+        self.assertLessEqual(chart["bounds"]["x_max"], 100.0)
+        self.assertGreaterEqual(chart["bounds"]["x_min"], 0.0)
+
+    def test_one_runaway_spec_does_not_flatten_the_rest(self) -> None:
+        """Same fence as the spec chart: a spec that took eight points of its
+        shelf is pinned to the top edge rather than owning the whole axis."""
+        shifts = [-0.4, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 8.0]
+        chart = self.chart(shifts)
+        bounds = chart["bounds"]
+        gaps = sorted(p["shift_gap_pp"] for p in chart["points"])
+        inside = [gap for gap in gaps if bounds["y_min"] <= gap <= bounds["y_max"]]
+
+        self.assertEqual(len(inside), len(gaps) - 1)
+        self.assertGreater((max(inside) - min(inside))
+                           / (bounds["y_max"] - bounds["y_min"]), 0.5)
+
+
 def seed_product_lines() -> None:
     """Two months of shelves plus the naming the looks are read through.
 
@@ -1308,8 +1408,11 @@ class SelectionBriefTests(RenderTestCase):
         rows = [line for line in block.splitlines() if line.startswith(BUFFETS)
                 or line.startswith(self.NIGHTSTANDS)]
         corners = [row.split("|")[3].strip() for row in rows]
-        self.assertIn("OPEN+RISING", corners)
-        self.assertEqual(corners[0], "OPEN+RISING")
+        # AHEAD rather than RISING: the corner is read against the same median
+        # line the chart draws, so a line that diluted less than the board still
+        # qualifies — and the header tells the model to say which it means.
+        self.assertIn("OPEN+AHEAD", corners)
+        self.assertEqual(corners[0], "OPEN+AHEAD")
 
     def test_the_model_is_shown_the_price_band_and_the_freight_envelope(self) -> None:
         """A pick states a price band and a weight. Both have to come off the

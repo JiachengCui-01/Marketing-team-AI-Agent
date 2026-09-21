@@ -912,16 +912,24 @@ def _selection_brief(payload: dict, language: str) -> str:
     bounds = (payload.get("spec_map") or {}).get("bounds") or {}
     if points:
         mid = bounds.get("x_mid") or 0.0
+        # What the chart's horizontal line stands for: the median spec's own
+        # share movement. The corner has to be read against the same line the
+        # reader sees, or the brief recommends an opening the chart does not
+        # show. Older payloads have no median and were drawn against zero.
+        shift_mid = bounds.get("y_mid") or 0.0
         window = (payload.get("spec_map") or {}).get("window") or {}
 
         def corner(point: dict) -> str:
             shift = point.get("share_shift_pp")
             if shift is None:
                 return "no-comparison-month"
-            if point["entry"] >= mid and shift > 0:
-                return "OPEN+RISING"
-            if point["entry"] < mid and shift < 0:
-                return "crowded+falling"
+            gap = point.get("shift_gap_pp")
+            if gap is None:
+                gap = shift - shift_mid
+            if point["entry"] >= mid and gap > 0:
+                return "OPEN+AHEAD"
+            if point["entry"] < mid and gap < 0:
+                return "crowded+behind"
             return "-"
 
         # Openings first, and a whole line before a half one: the model reads
@@ -930,7 +938,7 @@ def _selection_brief(payload: dict, language: str) -> str:
         # first. A cell that names only a colour is a real reading and a poor
         # brief; it stays on the list, further down.
         ordered = sorted(points, key=lambda p: (
-            corner(p) != "OPEN+RISING",
+            corner(p) != "OPEN+AHEAD",
             not (p.get("color") and p.get("look")),
             -(p.get("revenue") or 0.0)))
         lines = [
@@ -941,7 +949,11 @@ def _selection_brief(payload: dict, language: str) -> str:
             "ease_of_entry = what the three largest brands inside the line have "
             f"NOT taken, 0-100, board median {mid:.0f}. share_shift = percentage "
             "points of its own category's head revenue against "
-            f"{window.get('from') or 'the comparison month'}.",
+            f"{window.get('from') or 'the comparison month'}; the median line on "
+            f"this chart is {shift_mid:+.2f} pp, so AHEAD means the line is "
+            "taking shelf faster than the typical spec on the board and not "
+            "necessarily that it grew — say which you mean, and if the median "
+            "is negative the whole department diluted and that is the story.",
             "node_key | shelf | colour · look | corner | ease_of_entry | share% | "
             "share_shift_pp | head_revenue | asins | brands | rating | avg_price",
         ]
