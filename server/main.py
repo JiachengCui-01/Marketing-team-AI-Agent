@@ -14,7 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
-from . import db, news, selection  # noqa: E402 - must load env first
+from . import db, llm, news, selection  # noqa: E402 - must load env first
+from .market import render as market_render  # noqa: E402
 from .market import store as market_store  # noqa: E402
 from .market import sweep as market_sweep  # noqa: E402
 from .routes import router  # noqa: E402 - must load env first
@@ -102,6 +103,14 @@ async def _automation_scheduler() -> None:
             await asyncio.to_thread(market_store.prune_market_history)
         except Exception as exc:  # noqa: BLE001 - never let the loop die
             logger.warning("Market sweep tick failed: %s", exc)
+        try:
+            # Before the per-user reports, which read whatever board exists: once
+            # the new month is collected, move the board onto it. Costs one model
+            # call per language per month and no vendor credits.
+            await asyncio.to_thread(market_render.refresh_stale_overviews, "US",
+                                    llm.get_client())
+        except Exception as exc:  # noqa: BLE001 - never let the loop die
+            logger.warning("Board turnover tick failed: %s", exc)
         try:
             for config in db.list_enabled_selection_configs():
                 if selection.is_due(config, datetime.now(_config_timezone(config))):

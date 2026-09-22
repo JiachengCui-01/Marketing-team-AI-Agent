@@ -1349,6 +1349,21 @@ def latest_dashboard(
     return _dashboard_row(row) if row else None
 
 
+def dashboard_languages(marketplace: str, scope: str) -> list[str]:
+    """Which languages this scope has ever been rendered in.
+
+    The turnover only refreshes languages somebody has already asked for: a
+    workspace that has only ever read the board in Chinese should not start
+    paying for an English render every month because the table allows one.
+    """
+    db._ensure()
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT language FROM market_dashboards "
+            "WHERE marketplace = ? AND scope = ?", (marketplace, scope)).fetchall()
+    return sorted(str(row["language"]) for row in rows if row["language"])
+
+
 def _dashboard_row(row: sqlite3.Row) -> dict:
     out = dict(row)
     out["dashboard"] = _json_load(out.pop("dashboard_json", "{}"), {})

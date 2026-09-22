@@ -290,8 +290,13 @@ def generate_report(config_row: dict, client=None) -> dict:
     """Persist one legacy-shaped report, projected from the market warehouse.
 
     Zero vendor calls by construction — collection is the sweep's job and it is
-    global. A board already rendered for this period and language is reused, so
-    the Nth user of the day costs nothing at all rather than another model call.
+    global. Whatever board exists for this language is reused, so the Nth user
+    of the day costs nothing at all rather than another model call.
+
+    Deliberately not filtered by period: moving the board to a new month is
+    :func:`market_render.refresh_stale_overviews`'s job, and it waits until that
+    month has actually been collected. Filtering here instead would render a
+    fresh board on the 1st, against a month whose collection has barely started.
     """
     marketplace = str(config_row.get("marketplace") or DEFAULT_MARKETPLACE).upper()
     language = str(config_row.get("language") or "zh")

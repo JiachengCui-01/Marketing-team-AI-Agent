@@ -701,6 +701,62 @@ def render_overview(
         completeness=completeness)
 
 
+def overview_turnover_due(marketplace: str = "US") -> tuple[str, list[str]]:
+    """``(period, languages)`` the board should be re-rendered for. Empty if not.
+
+    Two conditions, and the second is the one that matters.
+
+    **The warehouse has moved past the board.** `latest_period` is already the
+    "newest month worth rendering" rather than `MAX(period)`, so it will not
+    point at a half-collected open month.
+
+    **Nothing is due to be collected.** On the 1st the sweep re-targets the
+    newly-closed month and enqueues the whole catalog; at 150 calls a day that
+    drains over about three and a half days. Rendering on the 1st would replace
+    a complete board with an almost empty one and then never try again, because
+    the board's period would already match. So the turnover waits for the
+    queue, which puts it around the 5th — a date nobody has to configure and
+    that moves on its own if a month collects slowly.
+    """
+    target = store.latest_period(marketplace)
+    if not target:
+        return "", []
+    if store.due_jobs(marketplace, limit=1):
+        return "", []
+    behind = []
+    for language in store.dashboard_languages(marketplace, "overview"):
+        record = store.latest_dashboard(marketplace=marketplace, scope="overview",
+                                        language=language)
+        if record and str(record.get("period") or "") >= target:
+            continue
+        behind.append(language)
+    return (target, behind) if behind else ("", [])
+
+
+def refresh_stale_overviews(marketplace: str = "US", client=None) -> list[dict]:
+    """Re-render every board the warehouse has moved past. One model call each.
+
+    Nothing re-rendered the board on a schedule before this. The only scheduled
+    path called `latest_dashboard()` without a period and rendered only when
+    it came back empty, so the first board ever rendered was served for
+    every month after it — an August board still answering in October, its
+    monthly half frozen until somebody pressed the button. The live half
+    refreshed on every read, which is what made it look alive.
+
+    Free of vendor credits by construction: this is a render, and renders read
+    the warehouse.
+    """
+    period, languages = overview_turnover_due(marketplace)
+    if not languages:
+        return []
+    out = []
+    for language in languages:
+        logger.info("market board turnover: rendering %s for %s", language, period)
+        out.append(render_overview(marketplace=marketplace, period=period,
+                                   language=language, client=client))
+    return out
+
+
 def render_category(
     *, node_id_path: str, marketplace: str = "US", period: str | None = None,
     language: str = "zh", client=None,

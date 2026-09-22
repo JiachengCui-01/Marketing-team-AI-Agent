@@ -634,6 +634,75 @@ class PriceCurveTests(RenderTestCase):
         self.assertIn(800, prices)
 
 
+class BoardTurnoverTests(RenderTestCase):
+    """The board has to reach a new month without anyone pressing anything.
+
+    Nothing re-rendered it on a schedule. The only scheduled path asked for the
+    latest board of any period and rendered only when there was none, so
+    the first board ever rendered answered for every month after it — an August
+    board still serving in October, its monthly half frozen while its live half
+    refreshed on every read, which is exactly what made it look alive.
+    """
+
+    def board(self, period: str, language: str = "zh") -> None:
+        store.save_dashboard(
+            user_id=None, marketplace="US", scope="overview", node_id_path=None,
+            period=period, language=language, status="ok", dashboard={"board": []},
+            summary="", evidence=[], vendor_tools=[], data_as_of=None, completeness=1.0)
+
+    def test_a_board_behind_the_warehouse_is_due(self) -> None:
+        self.board("202607")
+        period, languages = render.overview_turnover_due("US")
+        self.assertEqual(period, PERIOD)
+        self.assertEqual(languages, ["zh"])
+
+    def test_a_board_on_the_current_month_is_not(self) -> None:
+        self.board(PERIOD)
+        self.assertEqual(render.overview_turnover_due("US"), ("", []))
+
+    def test_it_waits_until_the_new_month_is_collected(self) -> None:
+        """On the 1st the sweep re-targets the newly closed month and enqueues
+        the whole catalog. Rendering then would swap a complete board for an
+        almost empty one and never retry, because the period would match."""
+        self.board("202607")
+        store.enqueue_job(marketplace="US", job_kind="category_structure",
+                          subject_kind="node", subject_id=BUFFETS, period=PERIOD,
+                          priority=30, est_calls=2)
+        self.assertEqual(render.overview_turnover_due("US"), ("", []),
+                         "rendered while the month was still being collected")
+
+    def test_only_languages_somebody_has_asked_for(self) -> None:
+        """A workspace that only reads Chinese should not start paying for an
+        English render every month because the table permits one."""
+        self.board("202607", language="zh")
+        self.board("202607", language="en")
+        _period, languages = render.overview_turnover_due("US")
+        self.assertEqual(languages, ["en", "zh"])
+        store.save_dashboard(
+            user_id=None, marketplace="US", scope="overview", node_id_path=None,
+            period=PERIOD, language="en", status="ok", dashboard={"board": []},
+            summary="", evidence=[], vendor_tools=[], data_as_of=None, completeness=1.0)
+        _period, languages = render.overview_turnover_due("US")
+        self.assertEqual(languages, ["zh"], "re-rendered a language already current")
+
+    def test_a_workspace_with_no_board_yet_is_left_alone(self) -> None:
+        """Nothing to turn over. The first board is rendered on demand."""
+        self.assertEqual(render.overview_turnover_due("US"), ("", []))
+
+    def test_the_refresh_renders_and_moves_the_board_forward(self) -> None:
+        self.board("202607")
+        client = FakeClient({"publish_market_overview": {"thesis": "x",
+                                                         "category_verdicts": [],
+                                                         "notes": []}})
+        done = render.refresh_stale_overviews("US", client)
+        self.assertEqual(len(done), 1)
+        current = store.latest_dashboard(marketplace="US", scope="overview",
+                                         language="zh")
+        self.assertEqual(current["period"], PERIOD)
+        # And now it is a no-op, so the scheduler can call it every minute.
+        self.assertEqual(render.refresh_stale_overviews("US", client), [])
+
+
 class RenderTraceTests(RenderTestCase):
     """The analyses report their phases the way a chat turn does.
 
