@@ -190,6 +190,40 @@ class _FakeVendor:
         return self._payload
 
 
+class _Clock:
+    """Stand-in for ``sellersprite.time`` so a test can move the clock by hand.
+
+    The vendor clock has to be driven, not waited on: the bug these tests cover is
+    about *which* elapsed seconds count against it, and a real sleep can only prove
+    that slowly and flakily.
+    """
+
+    def __init__(self, start: float = 1_000.0) -> None:
+        self.now = start
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def time(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+class _HangingVendor(_FakeVendor):
+    """A vendor that takes ``seconds`` on the clock to answer every call."""
+
+    def __init__(self, tools, clock: _Clock, seconds: float, **kwargs) -> None:
+        super().__init__(tools, **kwargs)
+        self._clock = clock
+        self._seconds = seconds
+
+    def call_tool(self, name, arguments=None):
+        self._clock.advance(self._seconds)
+        return super().call_tool(name, arguments)
+
+
 _TOOLS = [
     McpTool(
         name="product_research",
@@ -294,6 +328,45 @@ class SellerSpriteToolTests(unittest.TestCase):
         # Credit-metered vendor: a chatty model must not be able to drain it.
         self.assertIn("budget for this request is used up", blocked)
         self.assertEqual(len(vendor.calls), 2)
+
+    def test_the_clock_counts_vendor_seconds_not_the_models_thinking_time(self) -> None:
+        clock = _Clock()
+        vendor = _FakeVendor(_TOOLS, payload='{"price": 899}')
+        with mock.patch.object(sellersprite, "time", clock):
+            budget = sellersprite.CallBudget(max_calls=6, time_budget_seconds=90)
+            _, handlers, _ = self._build(vendor, budget=budget)
+            handler = handlers["sellersprite_product_research"]
+            self.assertIn("BEGIN SELLERSPRITE DATA", handler({"category": "beds"}))
+            # The model now spends four minutes reasoning over that payload while the
+            # vendor sits idle. As an elapsed-time deadline the clock counted this and
+            # refused every later call, so a chat answer came back with one call made,
+            # five refused, and no numbers in it — the regression this guards.
+            clock.advance(240)
+            second = handler({"category": "sofas"})
+        self.assertIn("BEGIN SELLERSPRITE DATA", second)
+        self.assertEqual(len(vendor.calls), 2)
+        self.assertFalse(budget.out_of_time)
+        self.assertFalse(budget.stalled)
+
+    def test_a_hanging_vendor_spends_the_clock_and_the_next_call_is_not_sent(self) -> None:
+        clock = _Clock()
+        with mock.patch.object(sellersprite, "time", clock):
+            vendor = _HangingVendor(_TOOLS, clock, 60, payload='{"price": 899}')
+            budget = sellersprite.CallBudget(max_calls=6, time_budget_seconds=90)
+            _, handlers, _ = self._build(vendor, budget=budget)
+            handler = handlers["sellersprite_product_research"]
+            handler({"n": 1})
+            handler({"n": 2})
+            refused = handler({"n": 3})
+        # Two hung round trips are the wait the clock exists to stop; a third is not
+        # sent even though four calls of credit are left.
+        self.assertEqual(len(vendor.calls), 2)
+        self.assertIn("not sent", refused)
+        # And it must not read as an outage: the model relayed the old wording to
+        # users as "the vendor timed out", sending them to look for a dead endpoint.
+        self.assertIn("is not down", refused)
+        # A vendor this slow is a stalled path, which is what reopens web search.
+        self.assertTrue(budget.stalled)
 
     def test_an_identical_repeat_call_is_not_paid_for_twice(self) -> None:
         vendor = _FakeVendor(_TOOLS, payload='{"price": 899}')

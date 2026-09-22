@@ -349,13 +349,22 @@ class CallBudget:
 
     Three jobs, all of them about not spending time the user is watching tick by:
 
-    - **Cap the spend.** A hard call ceiling and an optional wall-clock deadline.
+    - **Cap the spend.** A hard call ceiling and an optional ceiling on the seconds
+      spent waiting on the vendor.
     - **Kill repeat calls.** Identical arguments against the same vendor tool return
       the first payload from cache: no credit, no round trip.
     - **Say when the vendor path has stopped paying off.** ``stalled`` goes true once
       the budget, the clock, or a run of empty/rejected answers says more calls are
       unlikely to add anything. The research agent watches it to decide when to open
       its slower web fallbacks — see ``agents/research_agent``.
+
+    The clock counts **vendor** seconds, not elapsed seconds, and that distinction is
+    the whole point of it. It used to be a deadline set at construction, which meant
+    the model's own reasoning ran it down: a chat turn spent ~150s writing tokens
+    around a single 0.9s vendor call, tripped the 90s deadline, and had its next five
+    calls refused locally — so the user waited the full time *and* got an answer with
+    no data in it, which is the worst of both. Refusing a call because the model was
+    slow saves nobody anything; refusing one because the vendor is hanging does.
     """
 
     def __init__(
@@ -369,9 +378,9 @@ class CallBudget:
         self.max_consecutive_misses = int(
             MAX_CONSECUTIVE_MISSES if max_consecutive_misses is None else max_consecutive_misses
         )
-        self.deadline: float | None = (
-            time.monotonic() + time_budget_seconds if time_budget_seconds else None
-        )
+        # None disables the clock; the analytics agent runs without one.
+        self.time_budget: float | None = float(time_budget_seconds) if time_budget_seconds else None
+        self.vendor_seconds = 0.0
         self.calls = 0
         self.hits = 0
         self.misses = 0
@@ -390,7 +399,8 @@ class CallBudget:
 
     @property
     def out_of_time(self) -> bool:
-        return self.deadline is not None and time.monotonic() >= self.deadline
+        """True once the vendor itself has eaten the wait — see the class docstring."""
+        return self.time_budget is not None and self.vendor_seconds >= self.time_budget
 
     @property
     def stalled(self) -> bool:
@@ -424,6 +434,10 @@ class CallBudget:
     def record_miss(self) -> None:
         self.misses += 1
         self.consecutive_misses += 1
+
+    def spend_time(self, seconds: float) -> None:
+        """Charge the clock for one vendor round trip, however it ended."""
+        self.vendor_seconds += max(0.0, seconds)
 
 
 # --------------------------------------------------------------------------
@@ -496,9 +510,16 @@ def build_tools(
                     "Do not ask for it a third time — use the data you already have.]"
                 )
             if spend.out_of_time:
+                # Phrased so the model cannot report this as a vendor timeout. The
+                # first version said "the time budget is used up", and the model
+                # relayed that to the user as "the vendor's endpoints timed out" —
+                # sending them to look for an outage that was never there.
                 return (
-                    "Error: the time budget for this research request is used up. Stop "
-                    "collecting and write the report from the data already gathered."
+                    "Error: SellerSprite calls have already cost "
+                    f"{spend.vendor_seconds:.0f}s of waiting this request, over the "
+                    f"{spend.time_budget:.0f}s allowed, so this call was not sent — the "
+                    "vendor did not time out and is not down. Write the report from the "
+                    "data already gathered and name the fields you could not fetch."
                 )
             if spend.exhausted:
                 return (
@@ -507,6 +528,7 @@ def build_tools(
                     "fallback web tools for anything still missing."
                 )
             spend.calls += 1
+            started = time.monotonic()
             try:
                 result = _client().call_tool(vendor_tool, arguments)
             except McpToolError as exc:
@@ -532,6 +554,10 @@ def build_tools(
                 spend.record_miss()
                 logger.exception("SellerSprite tool call failed")
                 return f"Error: the SellerSprite call failed — {exc}"
+            finally:
+                # Charged however the round trip ended: a call that hangs and then
+                # raises still cost the user the wait, and the next call has to know.
+                spend.spend_time(time.monotonic() - started)
             if not result.strip() or (reject_empty_payloads and not _has_data(result)):
                 # An empty result is not data. Crediting the vendor here would make
                 # the answer's footer claim a source that supplied nothing.

@@ -205,11 +205,23 @@ def needs_web(task: str, topics: list[str] | None = None) -> bool:
     return any(marker in haystack for marker in _WEB_ONLY_MARKERS)
 
 
-# Enough rounds for a planned handful of vendor calls plus the synthesis turn. The
+# Enough rounds for a planned batch of vendor calls plus the synthesis turn. The
 # global cap of 12 let the model keep exploring long after it had what it needed.
-RESEARCH_MAX_ROUNDS = 8
-# Wall-clock ceiling on the vendor phase. Credits are one cost; the user watching a
-# spinner is the other, and only a clock bounds that.
+#
+# Raise it together with MARKETING_AGENT_SELLERSPRITE_MAX_CALLS, never alone or
+# behind it: the calls are spent a batch per round, so a call ceiling the rounds
+# cannot reach is credit the model is not allowed to use. Observed shape of a real
+# run is one scoping call, then two batched collection rounds, then synthesis.
+RESEARCH_MAX_ROUNDS = int(os.environ.get("MARKETING_AGENT_RESEARCH_MAX_ROUNDS", "10"))
+# Ceiling on the seconds this run may spend *waiting on the vendor* — not on how
+# long the run takes. Credits are one cost; a hanging vendor stacking six 60s
+# transport timeouts is the other, and only a clock bounds that.
+#
+# It is deliberately not an elapsed-time deadline. As one it starved the thing it
+# was supposed to protect: the model's own reasoning ran the 90s down between the
+# first vendor call and the second, so a category question came back with one call
+# made, five refused, and no numbers in the answer. See ``CallBudget`` in
+# ``tools/sellersprite`` for the accounting.
 VENDOR_TIME_BUDGET_SECONDS = float(
     os.environ.get("MARKETING_AGENT_RESEARCH_VENDOR_SECONDS", "90")
 )

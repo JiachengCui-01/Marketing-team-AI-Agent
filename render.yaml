@@ -41,9 +41,18 @@ services:
       # Only needed if the vendor moves the endpoint.
       - key: SELLERSPRITE_MCP_URL
         value: https://mcp.sellersprite.com/mcp
-      # Vendor calls are credit-metered — cap what one request can spend.
+      # Vendor calls are credit-metered — cap what one request can spend. Measured
+      # on real chat questions: a category go/no-go used its whole allowance at 6,
+      # so 8 was the binding constraint on how complete an answer could be. 12
+      # leaves headroom for the price-band + concentration + keyword + top-ASIN set
+      # a selection question actually needs.
       - key: MARKETING_AGENT_SELLERSPRITE_MAX_CALLS
-        value: "8"
+        value: "12"
+      # Reasoning rounds the research agent gets. Raise it with the call cap above,
+      # never alone: calls are spent a batch per round, so a ceiling the rounds
+      # cannot reach is credit the model is not allowed to use.
+      - key: MARKETING_AGENT_RESEARCH_MAX_ROUNDS
+        value: "10"
       # Does double duty: product-image generation, and FALLBACK web search for
       # the research agent and daily briefing via Google Search grounding
       # (DeepSeek has no built-in search).
