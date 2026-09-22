@@ -359,7 +359,7 @@ def _category_pulse(*, marketplace: str, period: str, subject_id: str,
     freight profile — a run-rate, not a total. It lands at ``grain='pulse'`` so
     nothing can mistake it for the month's finished numbers.
 
-    ``period`` here is the *job's* week stamp; the row is written against the
+    ``period`` here is the *job's* slot stamp; the row is written against the
     calendar month the reading falls in.
     """
     month = gateway.current_period()
@@ -722,7 +722,7 @@ CATALOG: tuple[JobSpec, ...] = (
     # The pulse runs first: it is one cheap call and it is the only thing on the
     # board that can describe today rather than last month.
     JobSpec("category_pulse", "node", 15, 1, _category_pulse,
-            targets_open_month=True),
+            targets_open_month=True),      # twice a week — see `pulse_stamp`
     # Two per root in the worst case: the gateway retries an empty reply once
     # without returnFields, and a department can legitimately answer empty.
     JobSpec("department_roll", "department", 20, len(taxonomy.AREA_ROOTS) * 2,
@@ -782,22 +782,36 @@ NODE_PACK = ("category_structure", "category_demand", "category_price_bands",
              "product_newcomers", "keyword_demand")
 
 
-def week_stamp(now=None) -> str:
-    """The ISO week a pulse job belongs to, e.g. ``2026-W37``.
+# Which day of the ISO week opens the second half. Mon-Wed then Thu-Sun, so the
+# two readings sit three and four days apart rather than bunching.
+PULSE_SECOND_HALF_FROM = 4
 
-    The queue's unique key ends in ``period``, so a weekly job needs a period
-    that changes weekly or the second week's run silently collides with the
-    first's completed row.
+
+def pulse_stamp(now=None) -> str:
+    """The slot a pulse job belongs to, e.g. ``2026-W37b``.
+
+    The queue's unique key ends in ``period``, so a job that should run twice a
+    week needs a period that changes twice a week, or the second run silently
+    collides with the first's completed row.
+
+    Two readings rather than one, which is what this used to be. The pulse is
+    the only thing on the board that can describe the month in flight — the
+    monthly aggregates do not exist until the month closes — and at one reading
+    a week a shelf that moved on Monday was six days stale before it appeared.
+    Twice a week halves that for twelve extra calls a week, against a catalog
+    that already spends about 520 a month.
     """
-    return (now or gateway.sweep_now()).strftime("%G-W%V")
+    moment = now or gateway.sweep_now()
+    half = "b" if moment.isoweekday() >= PULSE_SECOND_HALF_FROM else "a"
+    return f"{moment.strftime('%G-W%V')}{half}"
 
 
 def plan_pulse(marketplace: str, now=None) -> int:
-    """Enqueue this week's live reading for every tracked node."""
+    """Enqueue this slot's live reading for every tracked node. Twice a week."""
     taxonomy.ensure_nodes(marketplace)
     before = store.queue_depth(marketplace)
     spec = BY_KIND["category_pulse"]
-    stamp = week_stamp(now)
+    stamp = pulse_stamp(now)
     for node in taxonomy.leaf_nodes(marketplace):
         store.enqueue_job(marketplace=marketplace, job_kind=spec.kind,
                           subject_kind="node", subject_id=node["node_id_path"],

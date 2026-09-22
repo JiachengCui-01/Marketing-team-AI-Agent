@@ -91,13 +91,34 @@ class PlanningTests(SweepTestCase):
         self.assertEqual([j for j in store.due_jobs("US", limit=500)
                           if j["job_kind"] in jobs.PULSE_KINDS], [])
 
-    def test_the_pulse_is_planned_once_per_week_per_node(self) -> None:
+    def test_the_pulse_is_planned_once_per_slot_per_node(self) -> None:
         added = jobs.plan_pulse("US")
         self.assertEqual(added, len(taxonomy.leaf_nodes()))
-        self.assertEqual(jobs.plan_pulse("US"), 0)      # same week, idempotent
+        self.assertEqual(jobs.plan_pulse("US"), 0)      # same slot, idempotent
         queued = [j for j in store.due_jobs("US", limit=500)
                   if j["job_kind"] == "category_pulse"]
-        self.assertEqual({j["period"] for j in queued}, {jobs.week_stamp()})
+        self.assertEqual({j["period"] for j in queued}, {jobs.pulse_stamp()})
+
+    def test_the_week_has_two_pulse_slots_three_and_four_days_apart(self) -> None:
+        """One reading a week meant a shelf that moved on Monday was six days
+        stale before it showed up. The queue keys on the stamp, so two runs a
+        week is exactly a stamp that changes twice a week."""
+        from datetime import datetime
+
+        week = [datetime(2026, 9, 21 + offset) for offset in range(7)]   # Mon-Sun
+        stamps = [jobs.pulse_stamp(day) for day in week]
+        self.assertEqual(len(set(stamps)), 2, stamps)
+        self.assertEqual(stamps, ["2026-W39a"] * 3 + ["2026-W39b"] * 4)
+        # And the next week is a different pair, or run four would collide.
+        self.assertNotIn(jobs.pulse_stamp(datetime(2026, 9, 28)), stamps)
+
+    def test_a_second_slot_in_the_same_week_enqueues_again(self) -> None:
+        from datetime import datetime
+
+        monday, thursday = datetime(2026, 9, 21), datetime(2026, 9, 24)
+        self.assertEqual(jobs.plan_pulse("US", monday), len(taxonomy.leaf_nodes()))
+        self.assertEqual(jobs.plan_pulse("US", monday), 0)
+        self.assertEqual(jobs.plan_pulse("US", thursday), len(taxonomy.leaf_nodes()))
 
     def test_a_new_week_reopens_the_pulse(self) -> None:
         from datetime import datetime, timedelta

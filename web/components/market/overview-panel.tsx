@@ -37,7 +37,9 @@ import {
   ConfidenceNote,
   CoverageStrip,
   Block,
+  BoardBasis,
   CurrentPanel,
+  DivergenceBanner,
   DataGapCard,
   EvidenceChip,
   GapList,
@@ -178,6 +180,14 @@ export function MarketOverviewPanel({
           <DataGapCard summary={report.summary} onRetry={() => refresh(true)} />
         ) : (
           <>
+            {/* Which month this is, how old the live half is, and whether that
+                live half disagrees — before any of the conclusions it qualifies. */}
+            <BoardBasis period={report.period} observedAt={current?.observed_at} />
+            <DivergenceBanner
+              count={(current?.monitor?.risks?.length ?? 0)
+                     + (current?.monitor?.opportunities?.length ?? 0)}
+              onOpen={() => setHalf("current")}
+            />
             {/* A report with no narrative has to say so. Every model-written
                 block hides itself when empty, which is right for one missing
                 section and wrong for all of them at once: the reader is left

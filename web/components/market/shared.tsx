@@ -183,6 +183,80 @@ export function VerdictChip({ verdict }: { verdict?: string }) {
   return <span className={`bi-chip bi-verdict-${verdict}`}>{label[verdict] ?? verdict}</span>;
 }
 
+/** How long ago, in the coarsest unit that is still true. */
+function ago(seconds: number | null | undefined, t: ReturnType<typeof useI18n>["t"]) {
+  if (!seconds) return null;
+  const mins = Math.max(0, (Date.now() - seconds * 1000) / 60000);
+  if (mins < 90) return t.gmJustNow;
+  const hours = mins / 60;
+  if (hours < 36) return `${Math.round(hours)} ${t.gmHoursAgo}`;
+  return `${Math.round(hours / 24)} ${t.gmDaysAgo}`;
+}
+
+/** Which month the conclusions are from, and how old the live half is.
+ *
+ * The board has always been two layers — a closed month that carries the money
+ * and a live reading that carries the shelf — and it never said so anywhere a
+ * reader could see. Both halves just rendered, one of them frozen since
+ * whenever it was last rendered, and working out which month you were looking
+ * at meant knowing how the collector schedules itself.
+ */
+export function BoardBasis({ period, observedAt }: {
+  period?: string | null;
+  observedAt?: number | null;
+}) {
+  const { t } = useI18n();
+  if (!period) return null;
+  const age = ago(observedAt, t);
+  return (
+    <p className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-fg-subtle">
+      <span>{t.gmBasis} <span className="font-medium tabular-nums text-fg-muted">{period}</span></span>
+      <span aria-hidden>·</span>
+      <span>{age ? `${t.gmPulseAge} ${age}` : t.gmPulseNever}</span>
+    </p>
+  );
+}
+
+/** The live reading disagreeing with the conclusion above it.
+ *
+ * `scan_pulse` has compared the pulse against the last closed month, metric by
+ * metric, since it was written — and its alerts only rendered inside the other
+ * tab. Reading the conclusion told you nothing about them, so noticing the
+ * contradiction meant switching tabs and holding both in your head. The count
+ * belongs on the conclusion; the detail stays where it was.
+ */
+export function DivergenceBanner({ count, onOpen }: {
+  count: number;
+  onOpen?: () => void;
+}) {
+  const { t } = useI18n();
+  if (count <= 0) return null;
+  return (
+    <div className="mb-3 flex flex-wrap items-start gap-2 rounded-lg border border-warn/40
+                    bg-warn/10 px-3 py-2">
+      <WarningCircle size={14} className="mt-0.5 shrink-0 text-warn" weight="duotone" />
+      <div className="min-w-0 flex-1">
+        {/* Split on the placeholder rather than prefixing the count: Chinese
+            wants it mid-sentence and English wants it first, and a number
+            glued to the front reads as a bullet in one of them. */}
+        <p className="text-xs">
+          {t.gmDivergence.split("{n}").flatMap((part, i) =>
+            i === 0
+              ? [part]
+              : [<span key={i} className="font-medium tabular-nums">{count}</span>, part],
+          )}
+        </p>
+        <p className="mt-0.5 text-[10px] text-fg-subtle">{t.gmDivergenceHint}</p>
+      </div>
+      {onOpen ? (
+        <button onClick={onOpen} className="btn-ghost h-6 shrink-0 px-2 text-[11px]">
+          {t.gmDivergenceOpen}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export function GapList({ gaps }: { gaps?: string[] }) {
   const { t } = useI18n();
   if (!gaps || gaps.length === 0) return null;
