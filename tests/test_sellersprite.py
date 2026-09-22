@@ -636,6 +636,40 @@ class ResearchAgentSourceOrderTests(unittest.TestCase):
         # Once the vendor stops producing, the user still deserves an answer.
         self.assertIn("https://example.com/a", recovered)
 
+    def test_a_long_research_run_reports_each_step_instead_of_going_silent(self) -> None:
+        """Twelve vendor calls and three reasoning rounds can run eight minutes.
+        The panel used to get nothing at all between ``specialist_start`` and
+        ``specialist_done``, which reads exactly like a hang."""
+        captured: dict = {}
+        events: list[tuple[str, dict]] = []
+
+        def fake_run_agent(**kwargs):
+            captured.update(kwargs)
+            return "## Summary\nFinding."
+
+        vendor = _FakeVendor(_TOOLS, payload='{"price": 899}')
+        with mock.patch.dict("os.environ", {"SELLERSPRITE_SECRET_KEY": "k"}, clear=False), \
+                mock.patch.object(sellersprite, "_client", return_value=vendor), \
+                mock.patch.object(web_search, "is_available", return_value=False), \
+                mock.patch.object(research_agent, "run_agent", side_effect=fake_run_agent):
+            research_agent.run(
+                mock.Mock(), task="Compare sofas on Amazon", topics=["sofas"],
+                response_language="en",
+                on_event=lambda name, payload: events.append((name, payload)),
+            )
+            captured["client_tool_handlers"]["sellersprite_product_research"]({"category": "sofas"})
+
+        self.assertEqual(len(events), 1)
+        name, payload = events[0]
+        self.assertEqual(name, "orchestrator_step")
+        self.assertEqual(payload["stage"], "vendor")
+        self.assertEqual(payload["status"], "running")
+        # The n-of-N counter is the part a tool name cannot give: it says how
+        # much further the run can still go.
+        self.assertIn(f"1/{sellersprite.MAX_CALLS_PER_RUN}", payload["title"])
+        self.assertIn("product_research", payload["detail"])
+        self.assertIn("category=sofas", payload["detail"])
+
     def test_the_browser_returns_only_when_the_vendor_is_down(self) -> None:
         captured: dict = {}
 

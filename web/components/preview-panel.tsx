@@ -676,6 +676,10 @@ function orchestratorMethod(stage: string) {
   // through to the generic one — a step whose explanation says "records the
   // current stage" explains nothing.
   if (stage === "collect") return "调用卖家精灵抓取本期数据并写入仓库。这一步会消耗厂商调用额度，其余步骤都不会。";
+  // The chat research agent spends the same vendor credit but writes nothing
+  // to the warehouse, so it cannot share "collect" without saying something
+  // false about where the data went.
+  if (stage === "vendor") return "研究专家为这一问直接向卖家精灵取数，不写入仓库。按次计费，额度用完就只能用已取到的数据作答。";
   if (stage === "read") return "确定期间与范围，全部读已存数据，不产生任何厂商调用。";
   if (stage === "mine") return "从在售 listing 的标题里挖出外观元素词，而不是套一张预设词表。";
   if (stage === "name") return "把新出现的元素词分到材质、颜色、工艺、风格等类别；只有没命名过的词才会调模型。";

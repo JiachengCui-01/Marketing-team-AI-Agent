@@ -18,6 +18,7 @@ answer's data-source footer is appended from the tools actually called.
 from __future__ import annotations
 
 import os
+from typing import Callable
 
 from marketing_agent import provenance
 from marketing_agent.source_scoring import annotate_markdown_with_source_tiers
@@ -264,6 +265,50 @@ def _sources_unconfigured() -> str:
 
 
 
+# Arguments worth showing in a trace line: the ones that say what a call is
+# *about*. The vendor nests half its calls under ``request``, so both shapes
+# are read.
+_TRACE_ARG_KEYS = (
+    "query_type", "category", "keyword", "keywords", "asin", "asins",
+    "nodeIdPath", "departmentKeyword", "month", "query", "url",
+)
+
+
+def _arg_summary(payload: dict) -> str:
+    inner = payload.get("request") if isinstance(payload.get("request"), dict) else payload
+    if not isinstance(inner, dict):
+        return ""
+    bits = [f"{key}={inner[key]}" for key in _TRACE_ARG_KEYS
+            if inner.get(key) not in (None, "", [], {})]
+    return " · ".join(bit[:70] for bit in bits[:3])
+
+
+def _trace_step(name: str, payload: dict, budget: sellersprite.CallBudget) -> dict:
+    """One tool call as the trace panel's ``orchestrator_step`` shape."""
+    detail = _arg_summary(payload)
+    if name.startswith(sellersprite.TOOL_PREFIX):
+        vendor = name[len(sellersprite.TOOL_PREFIX):]
+        # The counter is the point: over an eight-minute run "3/12" tells the
+        # reader how much further this can go, which a tool name cannot.
+        title = f"卖家精灵取数 {min(budget.calls + 1, budget.max_calls)}/{budget.max_calls}"
+        return {"stage": "vendor", "title": title,
+                "detail": f"{vendor}{' · ' + detail if detail else ''}"}
+    if name == "web_search":
+        return {"stage": "search", "title": "网页搜索", "detail": detail}
+    if name == "browse_product_page":
+        return {"stage": "search", "title": "打开商品页", "detail": detail}
+    return {"stage": "read", "title": "读取本地仓库", "detail": detail}
+
+
+def _traced(on_event, name: str, handler, budget: sellersprite.CallBudget):
+    """Announce a tool call before making it, then make it."""
+    def run_with_trace(payload: dict) -> str:
+        arguments = payload if isinstance(payload, dict) else {}
+        on_event("orchestrator_step", {**_trace_step(name, arguments, budget), "status": "running"})
+        return handler(payload)
+    return run_with_trace
+
+
 def _warehouse_tool():
     """The local market warehouse, when this process has one.
 
@@ -290,6 +335,7 @@ def run(
     response_language: str | None = None,
     sellersprite_only: bool = False,
     evidence_ledger: provenance.SourceLedger | None = None,
+    on_event: Callable[[str, dict], None] | None = None,
 ) -> str:
     ledger = provenance.SourceLedger()
     # Shared with the vendor handlers so this function can see when the vendor path
@@ -451,6 +497,16 @@ def run(
         tools.extend(FALLBACK_TOOLS)
         handlers["web_search"] = handle_search
         handlers["browse_product_page"] = handle_product_page
+
+    # A research turn is the longest silence in a chat turn — twelve vendor calls
+    # and three reasoning rounds can run eight minutes, and it used to emit nothing
+    # at all between ``specialist_start`` and ``specialist_done``, which is
+    # indistinguishable from a hang. Wrapped here rather than inside each tool:
+    # one place covers warehouse, vendor, search and browser, and the vendor
+    # module stays free of the panel's vocabulary.
+    if on_event:
+        handlers = {name: _traced(on_event, name, handler, budget)
+                    for name, handler in handlers.items()}
 
     try:
         text = run_agent(

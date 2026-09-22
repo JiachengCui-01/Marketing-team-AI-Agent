@@ -94,7 +94,7 @@ def _dispatch(client: llm_client.DeepSeek, name: str, payload: dict, on_event=No
     if name == "delegate_to_analytics_agent":
         return analytics_agent.run(client, **payload)
     if name == "delegate_to_research_agent":
-        return research_agent.run(client, **payload)
+        return research_agent.run(client, on_event=on_event, **payload)
     return f"Error: unknown specialist '{name}'."
 
 
