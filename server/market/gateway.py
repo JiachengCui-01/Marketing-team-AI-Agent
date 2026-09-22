@@ -48,9 +48,20 @@ MARKETPLACE = "US"
 SWEEP_TZ = os.environ.get("MARKETING_AGENT_MARKET_TZ", "America/Los_Angeles")
 
 # Wallets. Separate ledgers, separate caps, checked before every call.
+#
+# Every wallet here must have a caller that passes it as ``bucket=``. There was a
+# ``chat`` one for a long time with none: the chat path reaches the vendor through
+# ``sellersprite.build_tools``, not through this module, so the wallet could never
+# be spent — and ``budget_status`` renders one row per wallet, so the BI panel
+# showed a chat budget resting at 0-of-60 while chat was in fact spending a dozen
+# unlogged, unbudgeted calls per question. A wallet nothing draws on is not spare
+# capacity, it is a false readout. Re-add one only together with its spender.
+#
+# Removing a name is safe: ``DAILY_LIMITS.get`` returns 0 for an unknown bucket and
+# ``remaining`` then reports 0, so a stray caller raises ``BudgetExhausted`` rather
+# than spending off the books.
 BUCKET_SWEEP = "sweep"
 BUCKET_DEEPDIVE = "deepdive"
-BUCKET_CHAT = "chat"
 BUCKET_MANUAL = "manual"
 
 # The sweep cap governs how fast a month fills, not how much a month costs —
@@ -69,7 +80,6 @@ BUCKET_MANUAL = "manual"
 DAILY_LIMITS = {
     BUCKET_SWEEP: int(os.environ.get("MARKETING_AGENT_MARKET_DAILY_CALLS", "150")),
     BUCKET_DEEPDIVE: int(os.environ.get("MARKETING_AGENT_MARKET_DEEPDIVE_DAILY", "120")),
-    BUCKET_CHAT: int(os.environ.get("MARKETING_AGENT_MARKET_CHAT_DAILY", "60")),
     BUCKET_MANUAL: int(os.environ.get("MARKETING_AGENT_MARKET_MANUAL_DAILY", "40")),
 }
 

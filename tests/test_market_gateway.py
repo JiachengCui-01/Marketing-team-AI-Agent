@@ -98,6 +98,17 @@ class BudgetTests(GatewayTestCase):
                 gateway.call("product_research", {"request": {}})
         vendor.assert_not_called()
 
+    def test_every_advertised_wallet_has_a_caller(self) -> None:
+        """``budget_status`` renders one row per wallet in the BI panel, so a wallet
+        nothing spends from reads 0-of-N used forever. ``chat`` was exactly that:
+        the chat path reaches the vendor outside this module, so an operator saw an
+        untouched chat budget while chat spent a dozen unlogged calls per question.
+        Adding a wallet means adding the ``bucket=`` caller in the same change."""
+        self.assertEqual(
+            set(gateway.DAILY_LIMITS),
+            {gateway.BUCKET_SWEEP, gateway.BUCKET_DEEPDIVE, gateway.BUCKET_MANUAL},
+        )
+
     def test_budget_status_reports_every_wallet(self) -> None:
         with mock.patch.object(gateway.sellersprite, "call_tool", return_value=_REPLY):
             gateway.call("product_research", {"request": {}})
