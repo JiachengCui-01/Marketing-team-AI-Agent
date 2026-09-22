@@ -36,7 +36,13 @@ TOOL = {
         "ALWAYS call this before any sellersprite_* tool: it is free and instant, "
         "while every sellersprite_* call is metered and slow. The reply ends with a "
         "GAPS line naming what the warehouse does not hold — only those fields justify "
-        "a metered vendor call."
+        "a metered vendor call. "
+        "For an open 'which categories are doing well' question this tool IS the answer: "
+        "query_type='category_overview' ranks EVERY tracked category by a server-computed "
+        "0-100 score. The tracked set is discovered monthly, not hand-listed, so it already "
+        "contains categories the brand does not sell. It returns the top 10 by default — "
+        "pass limit up to 50 to see the whole board, and do not narrow it to the categories "
+        "we already sell unless the user asked for that."
     ),
     "input_schema": {
         "type": "object",

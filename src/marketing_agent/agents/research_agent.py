@@ -95,6 +95,15 @@ SellerSprite returns two kinds of number and they must not be blurred together:
 
 - Start by identifying which facts the task needs, then pull each from the highest
   source in the hierarchy that can supply it.
+- For an open category-discovery question ("which categories/products are selling
+  best", 选品, 机会品类), do NOT reduce it to the brand's current product lines.
+  Start from `market_data_lookup{{query_type:"category_overview", limit:50}}`: that
+  board already ranks every tracked category by a server-computed score, it is free,
+  and its tracked set is discovered from the marketplace rather than hand-listed.
+  Report the top performers as the board ranks them, and keep the categories the
+  brand does not sell yet — an opportunity filtered out for not being in the current
+  catalogue is precisely the finding the question was asking for. Narrow to named
+  categories only when the user named them.
 - Gather 3-5 distinct, reputable sources for anything web-sourced.
 - Prioritize Tier 1 and Tier 2 sources:
   * Tier 1: official/regulatory/primary authority sources.
