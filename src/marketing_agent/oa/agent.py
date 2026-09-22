@@ -122,7 +122,7 @@ def run_oa_copilot(
             {
                 "stage": "intake",
                 "title": "理解任务",
-                "detail": "读取你的请求，判断需要办公能力（任务/日程/知识库）还是营销专家。",
+                "detail": "读取你的请求，判断需要办公能力（任务/日程/知识库）还是专家。",
                 "status": "running",
             },
         )
