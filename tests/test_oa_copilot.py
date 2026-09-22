@@ -4,6 +4,7 @@ import unittest
 
 from fastapi.testclient import TestClient
 
+from marketing_agent.oa.agent import SYSTEM_TEMPLATE
 from marketing_agent.oa.tools import OA_TOOLS, build_oa_handlers
 from server import db, sessions
 from server.main import app
@@ -44,6 +45,19 @@ class OaHandlerTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
         return {"Authorization": f"Bearer {response.json()['token']}"}
+
+    def test_an_ambiguous_data_question_is_told_to_fetch_rather_than_ask(self) -> None:
+        """「销量最好的产品是什么」 is ambiguous between our own sales and the
+        market's. The copilot used to stop and ask which one — but with no data
+        file attached, ``delegate_to_analytics_agent`` cannot be called at all, so
+        the answer could only ever have been the market half. Asking bought
+        nothing and cost the user a round trip."""
+        rule = SYSTEM_TEMPLATE[SYSTEM_TEMPLATE.index("3.2"):SYSTEM_TEMPLATE.index("4. 尺寸")]
+        self.assertIn("不要反问", rule)
+        # The attachment is what decides, and the reason must survive edits: the
+        # required data_path simply does not exist without an uploaded file.
+        self.assertIn("data_path", rule)
+        self.assertIn("delegate_to_research_agent", rule)
 
     def test_tool_schemas_present(self) -> None:
         names = {t["name"] for t in OA_TOOLS}

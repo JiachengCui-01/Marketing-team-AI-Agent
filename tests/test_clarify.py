@@ -93,6 +93,16 @@ class ClarifyTests(unittest.TestCase):
         self.assertIn("Product image already supplied: YES", sent)
         self.assertIn("NEVER ask", clarify._SYSTEM)
 
+    def test_the_planner_knows_market_data_is_retrievable(self) -> None:
+        """The planner is told to subtract every fact the executing agent can
+        retrieve, but was never told what that is — so it asked users for market
+        figures the research agent pulls from SellerSprite in seconds, and that
+        most users cannot answer at all."""
+        self.assertIn("SellerSprite", clarify._SYSTEM)
+        self.assertIn("NEVER ask the user for a market figure", clarify._SYSTEM)
+        # Our own numbers stay askable: no tool can supply them without a file.
+        self.assertIn("OWN operating data", clarify._SYSTEM)
+
     def test_conversation_memory_and_knowledge_are_combined(self) -> None:
         client = _client_with({"needs_clarification": False, "questions": []})
         knowledge = [{"title": "品牌手册", "text": "目标渠道为 Amazon US，价格带 399 美元。"}]
