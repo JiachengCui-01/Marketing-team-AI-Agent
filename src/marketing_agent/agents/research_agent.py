@@ -227,9 +227,6 @@ VENDOR_TIME_BUDGET_SECONDS = float(
     os.environ.get("MARKETING_AGENT_RESEARCH_VENDOR_SECONDS", "90")
 )
 
-# Three searches is a reasonable low-latency cap; the loop needs a couple of extra
-# rounds on top for the synthesis turn.
-MAX_SEARCH_ROUNDS = 6
 MAX_BROWSED_PAGES = 4
 
 

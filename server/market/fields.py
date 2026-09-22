@@ -15,8 +15,9 @@ The field names below are **observed**, not guessed: they were captured from liv
 replies for one furniture node and checked in under ``tests/fixtures/sellersprite/``.
 Anything absent from a fixture is absent here too.
 
-Field names are a vendor contract this repo does not own. ``on_empty_retry_args``
-exists because a rename would otherwise turn every call into a silent empty and the
+Field names are a vendor contract this repo does not own. :func:`strip` exists for
+that reason: ``gateway.call`` retries a pruned call unpruned when it comes back with
+no rows, because a rename would otherwise turn every call into a silent empty and the
 warehouse would record a month of gaps instead of an error.
 """
 from __future__ import annotations

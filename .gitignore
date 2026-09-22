@@ -18,6 +18,7 @@ web/node_modules/
 web/.next/
 web/.turbo/
 web/tsconfig.tsbuildinfo
+web/tsconfig.typecheck.tsbuildinfo
 
 .vercel
 

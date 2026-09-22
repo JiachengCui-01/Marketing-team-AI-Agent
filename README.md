@@ -169,13 +169,14 @@ IM 消息（人↔人 / 群聊、未读数、已读回执、文件消息，基�
 - **代码执行边界**：迁移到 DeepSeek 后没有了远程代码沙箱，分析 Agent 改为在服务端子进程里执行模型写的 pandas（`tools/code_exec.py`）：一次性临时工作目录、只放当次数据文件、120s 墙钟超时、输出截断，进程退出即清理。这不是沙箱——生产部署应把 API 服务本身放进容器（只读根文件系统、禁出网），或用 `MARKETING_AGENT_LOCAL_CODE_EXEC=0` 关闭该能力（分析 Agent 会明确返回不可用）。
 - **不编造来源**：主数据源与兜底搜索**都**没配置时，研究 Agent 直接返回「研究不可用」并分别说明两者各自要设置哪个环境变量，而不是凭记忆生成看起来像真的 URL。
 - **数据来源分层与可追溯**：卖家精灵为主、搜索/浏览器为兜底；主源不可用时会把这一事实写进给模型的 brief，要求它在 Source Notes 里说明。回答末尾的「数据来源」段由代码按**实际调用过的工具**生成 —— 空结果不算数据源，被厂商拒绝的查询也不算，所以脚注不会谎报来源。
-- **计费边界**：卖家精灵按次扣积分，单次请求的调用次数有硬上限（默认 8 次，数据 Agent 4 次，选品分析 16 次），与浏览器 4 页上限同源。选品分析的模型归一化跑在采集**之后**，所以模型侧的 5xx 会重试 3 次，且采集结果按 15 分钟缓存 —— 用户看到「模型过载」后手动重试不会二次扣额度。测试套件用 `tests/conftest.py` 强制清空厂商密钥，避免一次 `pytest` 就把积分刷掉。
+- **计费边界**：卖家精灵按次扣积分，单次请求的调用次数有硬上限（研究 Agent 代码默认 6 次、线上部署设为 12 次，数据 Agent 4 次，类目深挖 40 次），与浏览器 4 页上限同源。「选品分析」报告本身一次厂商调用也不花：它只读仓库与看板，花钱的是在它之前跑的每日扫描。选品分析的模型归一化跑在采集**之后**，所以模型侧的 5xx 会重试 3 次，且采集结果按 15 分钟缓存 —— 用户看到「模型过载」后手动重试不会二次扣额度。测试套件用 `tests/conftest.py` 强制清空厂商密钥，避免一次 `pytest` 就把积分刷掉。
 - **浏览边界**：商品页浏览器拒绝内网/本机地址和跨站跳转，屏蔽下载及图片/视频等非必要资源，并把网页文字视为不可信证据；研究结论必须给出采集时间、来源链接、实际观察到的价格/评分/评论量和样本数，至少两条不同评论支持后才称为重复痛点。
 
 ## 9. 测试与评测
 
-- **后端**：`pytest`，608 个用例覆盖 API、会话/记忆、任务/日历、IM/组织/通讯录、图像、新闻、**自动化选品分析**、KB 检索、来源评分、卖家精灵 MCP 与数据来源标注、OA 工具与 copilot、澄清、记忆抽取、PDF。
-  - 代表：`test_routes.py`(52) · `test_sellersprite.py`(39) · `test_image.py`(37) · `test_selection.py`(36) · `test_market_store.py`(33) · `test_market_scoring.py`(33) · `test_market_extract.py`(30) · `test_market_routes.py`(25) · `test_market_sweep.py`(24) · `test_news.py`(23) · `test_market_prd.py`(23) · `test_market_evidence.py`(23) · `test_market_gateway.py`(21) · `test_market_render.py`(19) · `test_market_lookup.py`(16) · `test_market_taxonomy.py`(16)。
+- **后端**：`pytest`，939 个用例覆盖 API、会话/记忆、任务/日历、IM/组织/通讯录、图像、新闻、**自动化选品分析**、KB 检索、来源评分、卖家精灵 MCP 与数据来源标注、OA 工具与 copilot、澄清、记忆抽取、PDF。
+  - 代表：`test_market_render.py`(155) · `test_market_sweep.py`(67) · `test_market_elements.py`(67) · `test_market_monitor.py`(60) · `test_routes.py`(52) · `test_market_store.py`(44) · `test_sellersprite.py`(42) · `test_image.py`(37) · `test_market_scoring.py`(36) · `test_selection.py`(31) · `test_market_extract.py`(30) · `test_market_routes.py`(27) · `test_market_evidence.py`(26) · `test_news.py`(23) · `test_market_prd.py`(23)。
+  - 这两个数字每几个 commit 就漂一次。拿 `pytest tests --collect-only -q` 重新数，别直接引用这里。
   - 市场系统的测试跑在**真实厂商响应**上：`tests/fixtures/sellersprite/` 是 25 份实测回包（一次性探针抓取后裁剪脱敏），所以字段映射、比例口径、日期格式都对着真实契约断言，而不是对着猜测。
 - **前端**：`tsc --noEmit` 类型检查 + 生产 `next build`。
 - **运行**：
