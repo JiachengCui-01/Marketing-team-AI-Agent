@@ -34,6 +34,27 @@ class LookupTests(unittest.TestCase):
         self.assertIn("Buffets & Sideboards", text)
         self.assertIn("category board", text)
 
+    def test_a_thin_board_does_not_claim_a_full_answer(self) -> None:
+        """The overview is the one query type with no snapshot behind it, so it
+        has no stored ``missing`` list to declare — and used to answer "none"
+        over a board of dashes, telling the model not to buy what it lacked."""
+        db.reset_for_tests()
+        taxonomy.ensure_nodes()
+        store.upsert_node_snapshot("US", BUFFETS, PERIOD, {"avg_price": 186.91})
+
+        text = lookup.run({"query_type": "category_overview", "period": PERIOD})
+
+        self.assertNotIn("GAPS: none", text)
+        gaps = next(l for l in text.splitlines() if l.startswith("GAPS"))
+        tracked = len(taxonomy.tracked_nodes())
+        # Every tracked node the sweep never reached, bar the one seeded here.
+        self.assertIn(f"{tracked - 1} of {tracked} tracked categories", gaps)
+        # Plus the columns that came back blank on the row it did render.
+        self.assertIn("revenue for Buffets & Sideboards", gaps)
+        self.assertIn("top5_brand_share for Buffets & Sideboards", gaps)
+        # avg_price is stored, so re-buying it is exactly what GAPS must not ask for.
+        self.assertNotIn("avg_price", gaps)
+
     def test_a_category_can_be_addressed_by_label_or_node_id(self) -> None:
         by_id = lookup.run({"query_type": "category_detail", "category": BUFFETS,
                             "period": PERIOD})

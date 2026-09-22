@@ -139,7 +139,7 @@ def run(payload: dict, *, marketplace: str = "US") -> str:
                 if node_path else None)
 
     if query_type == "category_overview" or not node_path:
-        body = _overview_body(marketplace, period, limit)
+        body = _overview_body(marketplace, period, limit, extra_gaps)
     elif query_type == "category_detail":
         body = _snapshot_lines(snapshot or {})
         if not snapshot:
@@ -175,7 +175,26 @@ def _latest_period(marketplace: str, node_path: str | None) -> str | None:
     return None
 
 
-def _overview_body(marketplace: str, period: str, limit: int) -> list[str]:
+# The board's data columns, as (header label, snapshot column). A GAPS entry
+# names the label, so it has to read as the column the model watched come back
+# blank.
+_BOARD_METRICS = (
+    ("revenue", "total_revenue"),
+    ("avg_price", "avg_price"),
+    ("top5_brand_share", "top5_brand_crn"),
+    ("return_rate", "return_ratio"),
+)
+
+
+def _name_some(labels: list[str], cap: int = 4) -> str:
+    """Name a few categories and count the rest, so GAPS stays one readable line."""
+    if len(labels) <= cap:
+        return ", ".join(labels)
+    return ", ".join(labels[:cap]) + f", +{len(labels) - cap} more"
+
+
+def _overview_body(marketplace: str, period: str, limit: int,
+                   gaps: list[str]) -> list[str]:
     rows = store.list_node_snapshots(marketplace, period)
     lines = ["-- category board (score is server-computed, 0-100) --",
              "category | score | revenue(EST) | avg_price | top5_brand_share | return_rate"]
@@ -188,12 +207,37 @@ def _overview_body(marketplace: str, period: str, limit: int) -> list[str]:
         score = scoring.score_category(row, history=history, keywords=keywords)
         scored.append((score["score"], row))
     scored.sort(key=lambda pair: pair[0], reverse=True)
-    for score, row in scored[:limit]:
+    top = scored[:limit]
+    for score, row in top:
         lines.append(
             f"{taxonomy.short_label(row['node_label_path'])} | {score} | "
             f"{_fmt(row.get('total_revenue'), 'USD')} | {_fmt(row.get('avg_price'), 'USD')} | "
             f"{_fmt(row.get('top5_brand_crn'))} | {_fmt(row.get('return_ratio'))}")
+    _overview_gaps(marketplace, rows, [row for _score, row in top], gaps)
     return lines
+
+
+def _overview_gaps(marketplace: str, rows: list[dict], shown: list[dict],
+                   gaps: list[str]) -> None:
+    """Declare what the board could not fill: un-swept nodes, then blank cells.
+
+    The overview is the one query type with no single snapshot behind it, so
+    :func:`_gaps` has no stored ``missing`` list to read and used to claim a full
+    answer however thin the board was — a cold warehouse printed one row of
+    dashes and still told the model that no vendor call was warranted.
+    """
+    swept = {row["node_id_path"] for row in rows}
+    tracked = taxonomy.tracked_nodes(marketplace)
+    unswept = [taxonomy.short_label(node["node_label_path"]) for node in tracked
+               if node["node_id_path"] not in swept]
+    if unswept:
+        gaps.append(f"monthly snapshot for {len(unswept)} of {len(tracked)} tracked "
+                    f"categories ({_name_some(unswept)})")
+    for label, column in _BOARD_METRICS:
+        blank = [taxonomy.short_label(row["node_label_path"])
+                 for row in shown if row.get(column) is None]
+        if blank:
+            gaps.append(f"{label} for {_name_some(blank)}")
 
 
 def _product_body(marketplace: str, node_path: str, period: str, limit: int,
