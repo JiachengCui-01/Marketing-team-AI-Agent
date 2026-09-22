@@ -54,11 +54,18 @@ BUCKET_CHAT = "chat"
 BUCKET_MANUAL = "manual"
 
 # The sweep cap governs how fast a month fills, not how much a month costs —
-# total spend is set by the job catalog (~355 calls a month, ~12 a day steady
-# state; the keyword miner is ~24 of those, two pages per tracked node, and is
-# the one line item tuned by an env var rather than by the catalog). At 45 the
-# month-opening burst took five days to drain, and the board was thin and
-# unrankable for most of that. At 150 it drains in about two.
+# total spend is set by the job catalog. Counted off the catalog against twelve
+# tracked leaves: ~520 calls in a steady month, ~655 on a cold start, plus ~52
+# for the weekly pulse. The two line items that dominate are `product_pack`
+# (24 pages × 12 nodes = 288, and the one tuned by an env var) and
+# `category_history` (144 the first time, ~12 after, because it only fetches the
+# months it is missing). At 45 the month-opening burst took five days to drain
+# and the board was thin and unrankable for most of that; at 150 it drains in
+# about three and a half.
+#
+# These numbers drift every time the catalog grows — the previous version of this
+# comment said 355 calls and two days, and was out by nearly half. Recount from
+# CATALOG rather than trusting it.
 DAILY_LIMITS = {
     BUCKET_SWEEP: int(os.environ.get("MARKETING_AGENT_MARKET_DAILY_CALLS", "150")),
     BUCKET_DEEPDIVE: int(os.environ.get("MARKETING_AGENT_MARKET_DEEPDIVE_DAILY", "120")),

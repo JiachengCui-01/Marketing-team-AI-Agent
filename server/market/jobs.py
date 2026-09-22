@@ -117,7 +117,6 @@ class JobSpec:
     subject_kind: str
     priority: int
     est_calls: int
-    cadence: str                # month | week
     handler: Callable[..., JobResult]
     tier: int | None = None     # None = every tracked node; 1 = flagships only
     scope: str = "node"         # node | department
@@ -722,45 +721,58 @@ def _offamazon_trend(*, marketplace: str, period: str, subject_id: str,
 CATALOG: tuple[JobSpec, ...] = (
     # The pulse runs first: it is one cheap call and it is the only thing on the
     # board that can describe today rather than last month.
-    JobSpec("category_pulse", "node", 15, 1, "week", _category_pulse,
+    JobSpec("category_pulse", "node", 15, 1, _category_pulse,
             targets_open_month=True),
     # Two per root in the worst case: the gateway retries an empty reply once
     # without returnFields, and a department can legitimately answer empty.
-    JobSpec("department_roll", "department", 20, len(taxonomy.AREA_ROOTS) * 2, "month",
+    JobSpec("department_roll", "department", 20, len(taxonomy.AREA_ROOTS) * 2,
             _department_roll, scope="department"),
-    JobSpec("category_structure", "node", 30, 2, "month", _category_structure),
-    JobSpec("category_demand", "node", 30, 1, "month", _category_demand),
-    JobSpec("category_price_bands", "node", 35, 1, "month",
+    JobSpec("category_structure", "node", 30, 2, _category_structure),
+    JobSpec("category_demand", "node", 30, 1, _category_demand),
+    JobSpec("category_price_bands", "node", 35, 1,
             _distribution_job("market_price_distribution", "price")),
-    JobSpec("category_newcomers", "node", 35, 1, "month",
+    JobSpec("category_newcomers", "node", 35, 1,
             _distribution_job("market_listing_date_distribution", "listing_date")),
-    JobSpec("category_brands", "node", 40, 1, "month",
+    JobSpec("category_brands", "node", 40, 1,
             _concentration_job("market_brand_concentration", "brand")),
-    JobSpec("product_pack", "node", 25, PRODUCT_PAGES, "week", _product_pack),
-    JobSpec("product_newcomers", "node", 45, 1, "month", _product_newcomers),
-    JobSpec("keyword_aba", "department", 50, 1, "month", _keyword_aba, scope="department"),
-    JobSpec("keyword_demand", "node", 55, 1, "month", _keyword_demand),
-    JobSpec("keyword_mine", "node", 56, KEYWORD_MINER_PAGES, "month", _keyword_mine),
-    *(JobSpec(f"category_dist_{kind}", "node", 60, 1, "month",
+    JobSpec("product_pack", "node", 25, PRODUCT_PAGES, _product_pack),
+    JobSpec("product_newcomers", "node", 45, 1, _product_newcomers),
+    JobSpec("keyword_aba", "department", 50, 1, _keyword_aba, scope="department"),
+    JobSpec("keyword_demand", "node", 55, 1, _keyword_demand),
+    JobSpec("keyword_mine", "node", 56, KEYWORD_MINER_PAGES, _keyword_mine),
+    *(JobSpec(f"category_dist_{kind}", "node", 60, 1,
               _distribution_job(tool, kind))
       for tool, kind in _STRUCTURE_DISTRIBUTIONS),
-    *(JobSpec(f"category_conc_{kind}", "node", 62, 1, "month",
+    *(JobSpec(f"category_conc_{kind}", "node", 62, 1,
               _concentration_job(tool, kind))
       for tool, kind in _STRUCTURE_CONCENTRATIONS),
-    JobSpec("offamazon_trend", "node", 70, 1, "month", _offamazon_trend),
+    JobSpec("offamazon_trend", "node", 70, 1, _offamazon_trend),
     # Last in the queue by design: a month of history is worth less than any part
-    # of the month we are actually reporting, and this is the only job that can
-    # ask for a dozen calls at once.
-    JobSpec("category_history", "node", 95, HISTORY_MONTHS, "month", _category_history),
+    # of the month we are actually reporting. It is also the only job that can ask
+    # for a dozen calls at once — and the only one that can be cut off partway
+    # without harm, because it commits each month before requesting the next.
+    #
+    # Hence a reservation of one rather than `HISTORY_MONTHS`. `est_calls` buys
+    # exactly one thing: a job that would leave the warehouse half-ingested never
+    # starts without room to finish. This job cannot be half-ingested, so
+    # reserving twelve only stopped the sweep with eleven calls unspent — on a job
+    # that in steady state needs exactly one, every other month already being in
+    # the warehouse.
+    JobSpec("category_history", "node", 95, 1, _category_history),
     # Per-ASIN, enqueued by product_pack once the ASINs are known.
-    JobSpec("flagship_history", "asin", 65, 1, "month", _flagship_history),
-    JobSpec("flagship_traffic", "asin", 75, 1, "month", _flagship_traffic),
-    JobSpec("flagship_keywords", "asin", 80, 1, "month", _flagship_keywords),
-    JobSpec("flagship_reviews", "asin", 85, 1, "month", _flagship_reviews),
+    JobSpec("flagship_history", "asin", 65, 1, _flagship_history),
+    JobSpec("flagship_traffic", "asin", 75, 1, _flagship_traffic),
+    JobSpec("flagship_keywords", "asin", 80, 1, _flagship_keywords),
+    JobSpec("flagship_reviews", "asin", 85, 1, _flagship_reviews),
 )
 
 BY_KIND: dict[str, JobSpec] = {spec.kind: spec for spec in CATALOG}
 
+# Which planner owns a job is what sets its rhythm: these go to `plan_pulse`
+# weekly and everything else to `plan_period` monthly. `JobSpec` used to carry a
+# `cadence` field saying the same thing, except nothing read it and it had
+# drifted — `product_pack` declared "week" and was enqueued monthly. A field that
+# documents a behaviour it does not control is worse than no field.
 PULSE_KINDS: tuple[str, ...] = tuple(
     spec.kind for spec in CATALOG if spec.targets_open_month)
 
