@@ -11,6 +11,8 @@ import openpyxl
 
 from fastapi.testclient import TestClient
 
+from marketing_agent.agents import research_agent
+from marketing_agent.tools import sellersprite
 from server import db, memory, sessions, uploads
 from server.main import app
 
@@ -654,6 +656,13 @@ class RouteTests(unittest.TestCase):
         self.assertIn("web_search", cfg)
         self.assertIn("product_browser", cfg)
         self.assertIn("local_code_execution", cfg)
+        # The research budget too: these come from env vars set in render.yaml, and
+        # a Blueprint that did not re-sync is invisible from outside without them.
+        research = body["research"]
+        self.assertEqual(research["vendor_calls_per_request"], sellersprite.MAX_CALLS_PER_RUN)
+        self.assertEqual(research["reasoning_rounds"], research_agent.RESEARCH_MAX_ROUNDS)
+        self.assertEqual(research["vendor_wait_seconds"],
+                         research_agent.VENDOR_TIME_BUDGET_SECONDS)
 
     def test_health_flags_missing_model_key(self) -> None:
         saved = os.environ.get("DEEPSEEK_API_KEY", "")

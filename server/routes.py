@@ -87,7 +87,16 @@ def health() -> dict:
     Always 200 so a misconfigured deploy still comes up and stays reachable —
     a rolled-back deploy would hide the reason it failed. ``config`` reports
     booleans only, never key material, so this stays safe to expose.
+
+    ``research`` reports the three numbers that decide how much market data one
+    chat question may fetch. They are here because they are the ones a deploy
+    silently gets wrong: they come from env vars declared in ``render.yaml``, and
+    a Blueprint that did not re-sync leaves the service running the old values
+    with nothing in the logs to say so — which is indistinguishable, from
+    outside, from the code not having deployed at all. Integers, not key
+    material, so the same contract holds.
     """
+    from marketing_agent.agents import research_agent
     from marketing_agent.tools import code_exec, product_browser, sellersprite, web_search
 
     search = web_search.active_provider()
@@ -104,6 +113,13 @@ def health() -> dict:
             "web_search": search[0] if search else None,
             "product_browser": product_browser.enabled(),
             "local_code_execution": code_exec.enabled(),
+        },
+        "research": {
+            "vendor_calls_per_request": sellersprite.MAX_CALLS_PER_RUN,
+            "reasoning_rounds": research_agent.RESEARCH_MAX_ROUNDS,
+            # Seconds spent *waiting on the vendor*, not elapsed run time. See
+            # ``CallBudget`` — as an elapsed deadline this starved collection.
+            "vendor_wait_seconds": research_agent.VENDOR_TIME_BUDGET_SECONDS,
         },
     }
 
